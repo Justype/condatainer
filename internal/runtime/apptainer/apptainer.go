@@ -190,7 +190,15 @@ func CheckZstdSupport(currentVersion string) bool {
 // procEnv: extra KEY=VALUE settings for apptainer's own environment, on top of
 // the parent's. This is how APPTAINERENV_* vars reach the container.
 func runApptainerWithOutput(ctx context.Context, op string, imagePath string, capture bool, stdin io.Reader, stdout, stderr io.Writer, procEnv []string, args ...string) error {
-	cmd := exec.CommandContext(ctx, apptainerCmd, args...)
+	libPath, isLibexecBin := libexec.ApptainerPath()
+	isLibexecBin = isLibexecBin && apptainerCmd == libPath
+
+	var cmd *exec.Cmd
+	if dir, ok := libexec.Dir(); isLibexecBin && ok {
+		cmd = exec.CommandContext(ctx, "bash", append([]string{"-c", libexecActivationScript(dir), apptainerCmd}, args...)...)
+	} else {
+		cmd = exec.CommandContext(ctx, apptainerCmd, args...)
+	}
 
 	cmd.Stdin = stdin
 
@@ -211,7 +219,7 @@ func runApptainerWithOutput(ctx context.Context, op string, imagePath string, ca
 	// Apptainer needs unsquashfs/mksquashfs in PATH (e.g. to extract a .sqf
 	// into a sandbox). When apptainerCmd is the self-provisioned libexec copy,
 	// add its bin/ to PATH so it finds them there.
-	if libPath, ok := libexec.ApptainerPath(); ok && apptainerCmd == libPath {
+	if isLibexecBin {
 		env = append(env, "PATH="+filepath.Dir(apptainerCmd)+string(os.PathListSeparator)+os.Getenv("PATH"))
 	}
 
@@ -271,6 +279,18 @@ func runApptainerWithOutput(ctx context.Context, op string, imagePath string, ca
 		}
 	}
 	return nil
+}
+
+func libexecActivationScript(prefix string) string {
+	q := "'" + strings.ReplaceAll(prefix, "'", `'\''`) + "'"
+	return fmt.Sprintf(`if [ -d %[1]s/etc/conda/activate.d ]; then
+  for __cnt_f in %[1]s/etc/conda/activate.d/*.sh; do
+    [ -e "$__cnt_f" ] || continue
+    CONDA_PREFIX=%[1]s . "$__cnt_f"
+  done
+fi
+exec "$0" "$@"
+`, q)
 }
 
 func captureOutput(stdoutBuf, stderrBuf *bytes.Buffer) string {

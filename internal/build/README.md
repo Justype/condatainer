@@ -75,37 +75,6 @@ local path, or `#INPUT:` answer can reach either.
 
 **ScriptSpecs** - Build resource requirements (alias to `scheduler.ScriptSpecs`)
 
-## Usage
-
-```go
-// Auto-resolve from name/version
-obj, err := build.NewBuildObject(ctx, "cellranger/9.0.1", false, imagesDir, tmpDir, false)
-
-// Channel-annotated package: skips build script lookup, version required
-obj, err := build.NewBuildObject(ctx, "bioconda::star/2.7.11b", false, imagesDir, tmpDir, false)
-// → sqf: star--2.7.11b.sqf, micromamba spec: bioconda::star=2.7.11b
-
-// Conda with custom source (YAML or package list)
-obj, err := build.NewCondaObjectWithSource("myenv/1.0", "/path/env.yml", imagesDir, tmpDir, false)
-
-// From external file (script or def)
-obj, err := build.FromExternalSource(ctx, "myapp/1.0", "/path/script.sh", false, imagesDir, tmpDir)
-
-// Single build
-obj.Build(ctx, true)
-
-// Build with dependency graph
-graph, err := build.NewBuildGraph(ctx, objects, imagesDir, tmpDir, true, false)
-graph.Run(ctx)
-
-// Base image: an existing usable one, or built from its definition first
-base, err := build.ResolveBase(ctx)
-
-// Recipe lookup goes through the catalog
-cat, err := config.OpenCatalog(ctx)
-match, found, err := cat.Lookup(ctx, "cellranger/9.0.1")
-```
-
 ## Recipes
 
 Recipes support metadata headers:
@@ -403,12 +372,9 @@ still checks its sandbox for `/bin/bash` before it can be used as one: every
 path, so a sandbox carrying bash only elsewhere runs nothing a build inside
 it asks of it. This check has nothing to do with packing the `.def` build's
 own sandbox, which needs no container and so needs no `/bin/bash` of its
-own. It warns (does not refuse) when the sandbox has no `apptainer`, which is
-only needed for nested mounting. Everything else CondaTainer shells out to —
-`unsquashfs`, `debugfs`, `e2fsck`, `resize2fs`, `mke2fs` — runs on the host
-and is not checked here; freeze and unfreeze in particular never enter a
-container at all, mounting through an unprivileged namespace of their own
-instead (see [`internal/image/freeze`](../image/freeze)).
+own. `/bin/bash` is the only thing asked of the sandbox: nested mounting,
+packing, and Conda installs all run through `internal/libexec`'s
+self-provisioned toolchain, never whatever the root happens to carry.
 
 **The question is put to the container, not to the sandbox directory.**
 `command -v` inside it answers with the PATH `/bin/bash` will actually run

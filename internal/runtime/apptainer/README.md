@@ -49,7 +49,7 @@ explicit `--fakeroot`, or `container.AutoEnableFakeroot`'s auto-enable for a
 writable `.img` with root-owned files):
 
 - **Fakeroot** — `ResolveBin(true)` — always the system/module binary
-  (`config.Global.ApptainerBin`). Only its setuid starter (or a module's) can
+  (`config.Global.Build.SystemApptainer`). Only its setuid starter (or a module's) can
   escalate privilege; libexec's own apptainer is deliberately non-setuid. It
   is also version-checked: condatainer packs every artifact as zstd
   unconditionally (`config.LoadDefaults`'s `CompressArgs`), so a system

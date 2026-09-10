@@ -148,9 +148,8 @@ func Update(ctx context.Context) error {
 }
 
 // provisionAt runs the full bootstrap sequence into a not-yet-existing
-// prefix: create, clean, strip conda-meta and every conda activation
-// artifact (see the README, Bootstrap sequence), then write this
-// generation's own lock sentinel.
+// prefix: create, clean, strip conda-meta (see the README, Bootstrap
+// sequence), then write this generation's own lock sentinel.
 func provisionAt(ctx context.Context, mmBin, prefix string) error {
 	if err := createAt(ctx, mmBin, prefix); err != nil {
 		return fmt.Errorf("failed to provision the toolchain: %w", err)
@@ -160,9 +159,6 @@ func provisionAt(ctx context.Context, mmBin, prefix string) error {
 	}
 	if err := os.RemoveAll(filepath.Join(prefix, "conda-meta")); err != nil {
 		return fmt.Errorf("failed to remove conda-meta: %w", err)
-	}
-	if err := removeActivationArtifacts(prefix); err != nil {
-		return fmt.Errorf("failed to remove conda activation artifacts: %w", err)
 	}
 	// micromamba creates every file under prefix itself, bypassing this
 	// codebase's own MkdirAllShared/CreateFileWritable entirely, so nothing
@@ -180,21 +176,6 @@ func provisionAt(ctx context.Context, mmBin, prefix string) error {
 		return fmt.Errorf("failed to create the lock sentinel: %w", err)
 	}
 	lockFile.Close()
-	return nil
-}
-
-// removeActivationArtifacts strips every directory conda's own activation
-// mechanism reads from an environment (etc/conda/activate.d, deactivate.d,
-// envvars — see the README, "This toolchain is never activated"). Every
-// libexec binary is invoked directly by its resolved absolute path, never
-// through `conda activate`, so none of it is ever read regardless of which
-// packages this toolchain provisions.
-func removeActivationArtifacts(prefix string) error {
-	for _, dir := range []string{"activate.d", "deactivate.d", "envvars"} {
-		if err := os.RemoveAll(filepath.Join(prefix, "etc", "conda", dir)); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 

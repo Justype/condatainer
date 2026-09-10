@@ -117,29 +117,18 @@ func TestSynthesizedDefCarriesMetadata(t *testing.T) {
 	}
 }
 
-// The script's markers are read per line: Apptainer writes its own greetings and
-// warnings onto the same streams, so a marker never arrives alone.
+// The script's marker is read per line: Apptainer writes its own greetings and
+// warnings onto the same streams, so the marker never arrives alone.
 func TestReadBaseTools(t *testing.T) {
 	noisy := "INFO:    Converting SIF file to temporary sandbox...\n" +
-		"WARNING: group: unknown groupid 10295\n" +
+		"WARNING: group: unknown groupid 65534\n" +
 		"MISSING: mksquashfs micromamba\n"
 	report := readBaseTools(noisy)
 	if got := strings.Join(report.missing, ","); got != "mksquashfs,micromamba" {
 		t.Errorf("missing = %q, want mksquashfs,micromamba", got)
 	}
-	if report.noApptainer {
-		t.Error("apptainer reported absent when the script never said so")
-	}
 
-	report = readBaseTools("NOAPPTAINER\n")
-	if len(report.missing) > 0 {
-		t.Errorf("missing = %v, want none", report.missing)
-	}
-	if !report.noApptainer {
-		t.Error("the optional-tool marker was not read")
-	}
-
-	if report := readBaseTools("WARNING: nothing to say\n"); len(report.missing) > 0 || report.noApptainer {
+	if report := readBaseTools("WARNING: nothing to say\n"); len(report.missing) > 0 {
 		t.Errorf("a complete base was read as incomplete: %+v", report)
 	}
 }

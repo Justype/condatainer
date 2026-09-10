@@ -67,27 +67,22 @@ micromamba's own umask-derived mode. Left unfixed, `Update`'s later `os.RemoveAl
 only succeed for whoever happens to own each individual file — breaking "one copy serves the whole
 group" for every group member except the one who provisioned this generation.
 
-## This toolchain is never activated
+## Toolchain activation
 
-`removeActivationArtifacts` also strips `etc/conda/activate.d`, `deactivate.d`, and `envvars` —
-unlike `conda-meta/`, not for detection-hiding but because they are genuinely dead weight here.
 Every accessor this package exposes (`Path`, `ApptainerPath`, `MicromambaPath`, …) resolves a
-binary's absolute path for a caller to invoke directly; nothing in this codebase runs `conda
-activate` against `libexec`'s own prefix, so its own `activate.d` hooks — the mechanism
-`internal/runtime/container.ActivationScript` replays for a *mounted overlay*, see that package's
-README — never apply to libexec's own tools, regardless of what the current package list happens
-to provision.
+binary's absolute path for a caller to invoke directly rather than an environment to `conda
+activate` — but the self-provisioned `apptainer` is still run through a wrapper
+(`internal/runtime/apptainer`) that sources this prefix's own `etc/conda/activate.d/*.sh` first,
+the same environment a real `conda activate` of this prefix would produce. This is required, not
+incidental: apptainer mounting a large overlay hung indefinitely when invoked unactivated, and
+ran correctly once its own `activate.d` had run first. `CONDA_PREFIX` is set only as a per-command
+prefix on each script's own `.` (`CONDA_PREFIX=<prefix> . "$script"`), never exported for the whole
+wrapper, so it reaches that script and anything it spawns but not the containerized command
+apptainer goes on to run — see `internal/runtime/apptainer/README.md`.
 
-Confirmed, not assumed, and the chain is worth stating exactly since it explains why this toolchain
-carries the hook at all despite none of its own tools needing it: `libxml2` is the only package in
-this dependency tree that ships an `activate.d` hook, and it is three hops from anything this
-package ever runs. `ldd` on every binary this package actually invokes (`apptainer`, `mksquashfs`,
-`unsquashfs`, `squashfuse`, `squashfuse_ll`, `micromamba`) shows none of them link `libxml2`, or
-`libarchive` either. `libarchive.so` is what links `libxml2` — for its optional `xar` archive
-format, which is XML-based — and `libarchive` itself arrived only as a packaging dependency of
-`squashfs-tools`/`apptainer` (they bundle `bsdtar`/`bsdcpio` as companion utilities neither of
-which this package calls). So the hook's own package landed in the prefix, but nothing on the path
-from a `libexec` accessor to a running process ever reaches it.
+Only `conda-meta/` is stripped from a freshly provisioned prefix (see Bootstrap sequence above);
+`activate.d`, `deactivate.d`, and `envvars` are all left in place, since any of them could matter
+for the same reason `activate.d` does.
 
 ## Resolved paths, not logical ones
 

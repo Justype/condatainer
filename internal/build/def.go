@@ -259,8 +259,7 @@ var baseToolPaths = []string{"/bin/bash"}
 // checkBaseTools refuses a sandbox that cannot serve the builds that may run
 // inside it later — any .def build is a candidate root, chosen per invocation
 // rather than by a declared type, so this runs for every one of them, not
-// only the configured default. Apptainer is only needed for nested mounting,
-// so its absence is reported rather than refused.
+// only the configured default.
 //
 // The question is put to the container, with the PATH the container sets,
 // because that is the PATH the scripts using these tools will have. Looking for
@@ -283,9 +282,6 @@ func checkBaseTools(ctx context.Context, sandbox string) error {
 	if runErr != nil {
 		return fmt.Errorf("could not check the base's tools: %w: %s", runErr, strings.TrimSpace(said))
 	}
-	if report.noApptainer {
-		logging.FromContext(ctx).Warn("base provides no apptainer; builds that mount an image inside the container will fail")
-	}
 	return nil
 }
 
@@ -301,18 +297,16 @@ done
 for p in %s; do
     [ -x "$p" ] || missing="$missing $p"
 done
-command -v apptainer >/dev/null 2>&1 || command -v singularity >/dev/null 2>&1 || echo NOAPPTAINER
 [ -z "$missing" ] || { echo "MISSING:$missing"; exit 1; }
 `, strings.Join(baseTools, " "), strings.Join(baseToolPaths, " "))
 
 // baseToolsReport is what the container said about itself.
 type baseToolsReport struct {
-	missing     []string
-	noApptainer bool
+	missing []string
 }
 
 // readBaseTools reads the script's output. Apptainer writes its own greetings
-// and warnings to the same streams, so the markers are matched per line rather
+// and warnings to the same streams, so the marker is matched per line rather
 // than the output being read whole.
 func readBaseTools(said string) baseToolsReport {
 	var report baseToolsReport
@@ -320,9 +314,6 @@ func readBaseTools(said string) baseToolsReport {
 		line = strings.TrimSpace(line)
 		if names, ok := strings.CutPrefix(line, "MISSING:"); ok {
 			report.missing = strings.Fields(names)
-		}
-		if line == "NOAPPTAINER" {
-			report.noApptainer = true
 		}
 	}
 	return report

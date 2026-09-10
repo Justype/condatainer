@@ -10,33 +10,6 @@ import (
 	"github.com/Justype/condatainer/internal/utils"
 )
 
-// This toolchain is invoked by resolved absolute path, never `conda
-// activate`, so activate.d/deactivate.d/envvars are dead weight regardless of
-// which packages provisioned them (see the README, This toolchain is never
-// activated) — removeActivationArtifacts strips all three, and leaves
-// anything else under etc/conda untouched.
-func TestRemoveActivationArtifactsStripsAllThree(t *testing.T) {
-	prefix := t.TempDir()
-	for _, dir := range []string{"activate.d", "deactivate.d", "envvars", "unrelated"} {
-		if err := os.MkdirAll(filepath.Join(prefix, "etc", "conda", dir), 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	if err := removeActivationArtifacts(prefix); err != nil {
-		t.Fatalf("removeActivationArtifacts: %v", err)
-	}
-
-	for _, dir := range []string{"activate.d", "deactivate.d", "envvars"} {
-		if _, err := os.Stat(filepath.Join(prefix, "etc", "conda", dir)); !os.IsNotExist(err) {
-			t.Errorf("%s still exists: %v", dir, err)
-		}
-	}
-	if _, err := os.Stat(filepath.Join(prefix, "etc", "conda", "unrelated")); err != nil {
-		t.Errorf("unrelated etc/conda content was removed: %v", err)
-	}
-}
-
 func TestParseVersion(t *testing.T) {
 	cases := map[string]string{
 		"apptainer version 1.5.3":        "1.5.3",
