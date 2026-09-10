@@ -176,6 +176,8 @@ func (s *SlurmScheduler) parseRuntimeConfig(directives []string) (RuntimeConfig,
 			rc.Stderr, _ = flagValue(flag, "--error", "-e")
 		case flagMatches(flag, "--partition", "-p"):
 			rc.Partition, _ = flagValue(flag, "--partition", "-p")
+		case flagMatches(flag, "--account", "-A"):
+			rc.Account, _ = flagValue(flag, "--account", "-A")
 		case flagMatches(flag, "--mail-user"):
 			rc.MailUser, _ = flagValue(flag, "--mail-user")
 		case flagMatches(flag, "--mail-type"):
@@ -583,6 +585,9 @@ func (s *SlurmScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string
 	}
 	if ctrl.Partition != "" {
 		fmt.Fprintf(writer, "#SBATCH --partition=%s\n", ctrl.Partition)
+	}
+	if ctrl.Account != "" {
+		fmt.Fprintf(writer, "#SBATCH --account=%s\n", ctrl.Account)
 	}
 
 	// Write ResourceSpec directives (only if not in passthrough mode)

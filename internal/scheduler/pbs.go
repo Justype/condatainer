@@ -216,6 +216,8 @@ func (p *PbsScheduler) parseRuntimeConfig(directives []string) (RuntimeConfig, [
 			rc.Stderr, _ = flagValue(flag, "-e")
 		case flagMatches(flag, "-q"):
 			rc.Partition, _ = flagValue(flag, "-q")
+		case flagMatches(flag, "-A"):
+			rc.Account, _ = flagValue(flag, "-A")
 		case flagMatches(flag, "-M"):
 			rc.MailUser, _ = flagValue(flag, "-M")
 		case flagMatches(flag, "-m"):
@@ -520,6 +522,9 @@ func (p *PbsScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	}
 	if ctrl.Partition != "" {
 		fmt.Fprintf(writer, "#PBS -q %s\n", ctrl.Partition)
+	}
+	if ctrl.Account != "" {
+		fmt.Fprintf(writer, "#PBS -A %s\n", ctrl.Account)
 	}
 
 	// Write ResourceSpec directives (only if not in passthrough mode)

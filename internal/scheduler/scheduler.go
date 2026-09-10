@@ -178,6 +178,7 @@ type RuntimeConfig struct {
 	EmailOnFail  bool   // Notification on job failure/abort
 	MailUser     string // Target email/user for notifications (empty = submitting user)
 	Partition    string // Partition/queue to submit to (cleared on cross-scheduler translation)
+	Account      string // Billing/allocation account to submit under (cleared on cross-scheduler translation)
 }
 
 // ClusterInfo holds cluster configuration information
@@ -779,6 +780,9 @@ func ReadScriptSpecsFromPath(scriptPath string) (*ScriptSpecs, error) {
 		// Clear Partition: the original partition name is scheduler-specific
 		// and cannot be translated to the host scheduler's partition names.
 		parsed.Specs.Control.Partition = ""
+		// Clear Account: the original account name is scheduler-specific
+		// and cannot be translated to the host scheduler's account names.
+		parsed.Specs.Control.Account = ""
 	}
 
 	return parsed.Specs, nil

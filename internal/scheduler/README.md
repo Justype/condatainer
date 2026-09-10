@@ -48,7 +48,7 @@ type Scheduler interface {
 - `ScriptPath string` — absolute path of the parsed script (for HTCondor `.sub`: the executable)
 - `HasDirectives bool` — `false` when no `#SBATCH`/`#PBS`/`#BSUB` lines exist
 - `Spec *ResourceSpec` — resource geometry; `nil` in passthrough mode
-- `Control RuntimeConfig` — job name, stdout/stderr, email, partition
+- `Control RuntimeConfig` — job name, stdout/stderr, email, partition, account
 - `RawFlags []string` — immutable audit log of all original directives
 - `RemainingFlags []string` — directives not absorbed by `Spec` or `Control`
 - `ScriptType SchedulerType` — scheduler type detected from script directives
@@ -240,6 +240,26 @@ PBS Pro/OpenPBS only; Torque not supported.
 - Parses native `.sub` files; `executable` → `ScriptSpecs.ScriptPath`
 - Resource keys: `request_cpus`, `request_memory`, `request_gpus`, `+MaxRuntime` (seconds)
 - Always single-task; no dependency support
+
+## Partition and Account
+
+Both are routing/billing strings, not resource geometry — `RuntimeConfig` fields, not
+`ResourceSpec` ones. Parsed from and rendered to each backend's own directive with no translation
+of the value itself (a name valid on one cluster is not validated against another):
+
+| Scheduler | Partition | Account |
+|-----------|-----------|---------|
+| SLURM | `--partition`/`-p` | `--account`/`-A` |
+| PBS | `-q` | `-A` |
+| LSF | `-q` | `-P` |
+| HTCondor | `accounting_group` (fairshare group, not a queue) | not supported |
+
+HTCondor has no account concept: it has no per-job allocation/billing gate the way the other three
+do, only a fairshare `accounting_group`, which already fills `Partition`. `RuntimeConfig.Account`
+is simply left unset for HTCondor — not mapped anywhere.
+
+Both are cleared on cross-scheduler translation (`ReadScriptSpecsFromPath`): a partition or account
+name is only meaningful on the scheduler it was written for.
 
 ## Array Jobs
 

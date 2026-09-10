@@ -170,6 +170,8 @@ func (l *LsfScheduler) parseRuntimeConfig(directives []string) (RuntimeConfig, [
 			rc.MailUser, _ = flagValue(flag, "-u")
 		case flagMatches(flag, "-q"):
 			rc.Partition, _ = flagValue(flag, "-q")
+		case flagMatches(flag, "-P"):
+			rc.Account, _ = flagValue(flag, "-P")
 		default:
 			recognized = false
 		}
@@ -555,6 +557,9 @@ func (l *LsfScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string) 
 	}
 	if specs.Control.Partition != "" {
 		fmt.Fprintf(writer, "#BSUB -q %s\n", specs.Control.Partition)
+	}
+	if specs.Control.Account != "" {
+		fmt.Fprintf(writer, "#BSUB -P %s\n", specs.Control.Account)
 	}
 
 	// Resource directives — only when Spec is available
