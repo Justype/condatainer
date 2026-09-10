@@ -221,8 +221,9 @@ condatainer o -- pytorch torchvision torchaudio pytorch-cuda=12.4 -c pytorch -c 
 When neither packages nor `--file` are supplied, overlay creation skips conda initialization. The
 first `mm install` inside the writable container creates the project conda environment.
 
-Inside the writable container, use `mm` to install, update, and remove conda packages. It forwards
-to the container-bound `condatainer env` command.
+Inside the writable container, use `mm` to install, update, and remove conda packages. `mm` is a
+bash shell function available in a bash session; in every other shell, run `condatainer env`
+directly instead — same subcommands, same arguments.
 
 ```bash
 # install more packages (uses channels saved during creation)
@@ -258,6 +259,23 @@ mm clean -ay
 # export the env
 mm export --no-builds > my_env.yaml
 ```
+
+`mm install`/`update`/`remove` automatically re-run any `activate.d`/`deactivate.d` scripts a
+package sets up (e.g. `JAVA_HOME`), so a bash session picks up the change without exiting and
+re-entering the container. Run this manually after a plain `condatainer env install`/`update`/
+`remove`, or after a `mm` call that failed partway through:
+
+```bash
+eval "$(mm reactivate)"               # bash
+eval "$(condatainer env reactivate)"  # zsh
+condatainer env reactivate --shell fish | source  # fish
+```
+
+`--shell` defaults to auto-detecting the shell you're running in; pass it explicitly if that's
+wrong for your session. Fish only re-runs a hook shipped as `*_activate.fish`/
+`*_deactivate.fish` — same as real conda's own fish support — so a package whose hook is
+`*_activate.sh` (the common case) sets nothing under fish either way; exit and re-enter the
+container to pick that up.
 
 ### Overlay Info
 
@@ -982,6 +1000,10 @@ condatainer exec [flags] [command...]
 * `--env [KEY=VALUE]`: Set environment variable inside the container (repeatable).
 * `--bind [HOST:CONTAINER]`: Bind mount path into the container (repeatable).
 * `--gpu`: Force GPU flags (`--nv`/`--rocm`) even if `autoload_gpu` is disabled.
+* `--activation [all|env|none]`: Which activate.d scripts to source before the
+  command (default `all`). `all` sources every mounted app overlay's own plus the
+  mounted conda environment's; `env` sources only the conda environment's; `none`
+  sources neither.
 * `--project [DIR]`: Act as if standing in `DIR` instead of the current directory —
   every relative argument, and project lookup, resolves against it.
 * `--no-project`: Ignore any project found above the current directory, even one
@@ -1088,6 +1110,7 @@ condatainer e [flags] [overlays...] [--] [command...]
 * `-f`, `--fakeroot`: Run container with fakeroot privileges.
 * `--env [KEY=VALUE]`: Set environment variable inside the container (repeatable).
 * `--bind [HOST:CONTAINER]`: Bind mount path into the container (repeatable).
+* `--activation [all|env|none]`: same as [`exec`](#exec).
 * `--project [DIR]`, `--no-project`: same as [`exec`](#exec).
 
 **Key Differences from `exec`:**

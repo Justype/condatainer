@@ -36,6 +36,14 @@ type Contribution struct {
 	Notes       map[string]string
 }
 
+// ContributesBin reports whether this contribution puts <Prefix>/bin on PATH
+// and gets its own etc/conda/activate.d sourced. Both an app and a conda
+// environment (a writable .img, via imgContribution, or an honestly
+// TypeEnv-tagged .sqf) do; TypeOS/TypeData never do, regardless of Prefix.
+func (c Contribution) ContributesBin() bool {
+	return (c.Type == catalog.TypeApp || c.Type == catalog.TypeEnv) && c.Prefix != ""
+}
+
 // resolveImage reads what one image contributes, plus a diagnostic when it
 // contributes nothing or contributes under a name its filename disagrees with.
 //
@@ -151,10 +159,13 @@ func degradeDiagnostic(path string, err error) *Diagnostic {
 // imgContribution reads a writable .img's sidecar.
 //
 // An .img is mutable working state, so its environment lives beside it rather
-// than inside it and can be edited without a rebuild.
+// than inside it and can be edited without a rebuild. Its Type is honestly
+// TypeEnv — the same type an env-typed .sqf snapshot reports from its own
+// runtime.json — so both mount forms of "a conda environment" reach PATH and
+// activation through the one ContributesBin() check rather than a mislabel.
 func imgContribution(imgPath string) (Contribution, *Diagnostic) {
 	c := Contribution{
-		Type:    catalog.TypeApp,
+		Type:    catalog.TypeEnv,
 		Prefix:  EnvPrefix,
 		Configs: map[string]string{},
 		Notes:   map[string]string{},

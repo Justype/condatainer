@@ -18,6 +18,7 @@ type execCommand struct {
 
 var execFlags CommonFlags
 var execGpuRequested bool
+var execActivation string
 var execProjectDir string
 
 var execCmd = &execCommand{
@@ -52,6 +53,7 @@ func init() {
 	// Register common flags
 	RegisterCommonFlags(&execCmd.Command, &execFlags)
 	execCmd.Flags().BoolVar(&execGpuRequested, "gpu", false, "Force GPU flags (--nv/--rocm) even if autoload_gpu is disabled")
+	execCmd.Flags().StringVar(&execActivation, "activation", "all", "Which activate.d scripts to source before the command: all, env, or none")
 	RegisterProjectFlags(&execCmd.Command, &execProjectDir)
 
 	// For 'exec': use default file completion for positional args
@@ -93,6 +95,11 @@ func runExec(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	activation, err := parseActivation(execActivation)
+	if err != nil {
+		return err
+	}
+
 	options := exec.Options{
 		Overlays:       resolvedOverlays,
 		Command:        commandFinal,
@@ -104,6 +111,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 		BaseImage:      baseImageResolved,
 		HidePrompt:     hidePrompt,
 		GpuRequested:   execGpuRequested,
+		Activation:     activation,
 	}
 
 	plan, err := exec.Prepare(cmd.Context(), options)

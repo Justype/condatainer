@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 
+	"fmt"
+
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/build"
@@ -286,10 +288,24 @@ func KnownFlags() map[string]bool {
 		"--env":      true,
 		"--bind":     true,
 		"--fakeroot": true, "-f": true,
-		"--debug":     true,
-		"--no-submit": true,
-		"--quiet":     true, "-q": true,
+		"--gpu":        true,
+		"--activation": true,
+		"--debug":      true,
+		"--no-submit":  true,
+		"--quiet":      true, "-q": true,
 		"--yes": true, "-y": true,
+	}
+}
+
+// parseActivation validates a raw --activation value against
+// container.ActivationAll/Env/None.
+func parseActivation(raw string) (container.ActivationMode, error) {
+	v := container.ActivationMode(strings.ToLower(strings.TrimSpace(raw)))
+	switch v {
+	case container.ActivationAll, container.ActivationEnv, container.ActivationNone:
+		return v, nil
+	default:
+		return "", fmt.Errorf("invalid activation %q: want all, env, or none", raw)
 	}
 }
 
@@ -385,6 +401,7 @@ func needsValue(flag string) bool {
 	valueFlags := map[string]bool{
 		"-o": true, "--overlay": true,
 		"--env": true, "--bind": true,
+		"--activation": true,
 	}
 	return valueFlags[flag]
 }

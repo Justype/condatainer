@@ -17,7 +17,7 @@ func TestBuildEnvironmentCondaMarkers(t *testing.T) {
 	config.Global.Build.Channels = []string{"internal", "conda-forge"}
 	t.Cleanup(func() { config.Global.Build.Channels = previousChannels })
 
-	readOnly, _, _ := buildEnvironment(nil, "env.img", SetupConfig{})
+	readOnly, _, _ := buildEnvironment(nil, "env.img", true, SetupConfig{})
 	if !slices.Contains(readOnly, "CNT_CONDA_ROOT=/cnt_env") {
 		t.Fatal("read-only environment is missing CNT_CONDA_ROOT")
 	}
@@ -28,7 +28,7 @@ func TestBuildEnvironmentCondaMarkers(t *testing.T) {
 		t.Fatal("environment is missing the configured channels")
 	}
 
-	writable, _, _ := buildEnvironment(nil, "env.img", SetupConfig{
+	writable, _, _ := buildEnvironment(nil, "env.img", true, SetupConfig{
 		WritableImg: true,
 		EnvSettings: []string{
 			"CNT_CONDA_ROOT=/wrong", "CNT_CONDA_WRITABLE=0",
@@ -49,6 +49,24 @@ func TestBuildEnvironmentCondaMarkers(t *testing.T) {
 	}
 	if got := writable[len(writable)-4:]; !slices.Equal(got, wantTail) {
 		t.Fatalf("runtime markers must override user settings; tail = %v", got)
+	}
+}
+
+// A bare env-typed .sqf with no paired .img (envMounted true, lastImg "")
+// still gets the conda markers, but never a writable one — there is no .img
+// to write to, regardless of cfg.WritableImg.
+func TestBuildEnvironmentSqfOnlyEnvMountIsNeverWritable(t *testing.T) {
+	env, _, _ := buildEnvironment(nil, "", true, SetupConfig{WritableImg: true})
+	if !slices.Contains(env, "CNT_CONDA_ROOT=/cnt_env") {
+		t.Fatal("sqf-only environment is missing CNT_CONDA_ROOT")
+	}
+	if !slices.Contains(env, "CNT_CONDA_WRITABLE=0") {
+		t.Fatal("sqf-only environment must report CNT_CONDA_WRITABLE=0 even with WritableImg set")
+	}
+
+	notMounted, _, _ := buildEnvironment(nil, "", false, SetupConfig{})
+	if slices.ContainsFunc(notMounted, func(v string) bool { return strings.HasPrefix(v, "CNT_CONDA_ROOT=") }) {
+		t.Fatal("no conda environment mounted must not set CNT_CONDA_ROOT")
 	}
 }
 

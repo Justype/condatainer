@@ -8,6 +8,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// reactivateShell is the --shell override for `condatainer env reactivate`;
+// empty means detect from $SHELL.
+var reactivateShell string
+
 var envCmd = &cobra.Command{
 	Use:   "env",
 	Short: "Manage the Conda environment of the mounted overlay",
@@ -49,6 +53,13 @@ func init() {
 		envStructuredCommand("remove <package>", "Unpin a package", cobra.ExactArgs(1), runEnvPinRemove),
 	)
 	envCmd.AddCommand(pinCmd)
+
+	reactivateCmd := envStructuredCommand("reactivate",
+		"Print a shell snippet re-running activate.d/deactivate.d after install/update/remove",
+		cobra.NoArgs, runEnvReactivate)
+	reactivateCmd.Flags().StringVar(&reactivateShell, "shell", "",
+		"bash, zsh, or fish; default: detected from $SHELL")
+	envCmd.AddCommand(reactivateCmd)
 }
 
 func envStructuredCommand(use, short string, args cobra.PositionalArgs, run envRunFunc) *cobra.Command {
@@ -201,4 +212,47 @@ func runEnvPinRemove(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "Unpinned: %s\n", args[0])
 	return nil
+}
+
+func runEnvReactivate(cmd *cobra.Command, _ []string) error {
+	env, err := condapkg.ResolveEnvironment(false)
+	if err != nil {
+		return err
+	}
+	shell, err := resolveReactivateShell()
+	if err != nil {
+		return err
+	}
+	fmt.Fprint(cmd.OutOrStdout(), condapkg.ReactivateScript(env.Root, shell))
+	return nil
+}
+
+// resolveReactivateShell honors an explicit --shell, else detects the
+// calling shell the same way completionCmd does: detectCompletionShell
+// reads the parent process via /proc, falling back to $SHELL only when
+// /proc is unreadable — accurate here too, since what matters is which
+// shell is actually running the eval, not the user's login shell (which
+// $SHELL alone would report even after they've since launched a different
+// interactive shell). Defaults to bash, not an error, when even that
+// fails: unlike completion's generated script, one wrong reactivate line
+// is a shell no-op for zsh (same POSIX syntax as bash) and only a real
+// problem for fish, the rarer case.
+func resolveReactivateShell() (condapkg.Shell, error) {
+	if reactivateShell != "" {
+		return parseReactivateShell(reactivateShell)
+	}
+	if detected, err := detectCompletionShell(); err == nil {
+		return condapkg.Shell(detected), nil
+	}
+	return condapkg.ShellBash, nil
+}
+
+// parseReactivateShell validates an explicit --shell value.
+func parseReactivateShell(raw string) (condapkg.Shell, error) {
+	switch condapkg.Shell(raw) {
+	case condapkg.ShellBash, condapkg.ShellZsh, condapkg.ShellFish:
+		return condapkg.Shell(raw), nil
+	default:
+		return "", fmt.Errorf("unsupported --shell %q: use bash, zsh, or fish", raw)
+	}
 }

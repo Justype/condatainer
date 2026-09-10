@@ -50,7 +50,8 @@ type SetupResult struct {
 	BindPaths      []string          // Deduplicated bind paths
 	Fakeroot       bool              // Final fakeroot setting (may be auto-enabled)
 	ApptainerFlags []string          // Apptainer flags including GPU flags
-	LastImg        string            // Path to .img overlay if present
+	LastImg        string            // Path to the writable .img overlay if present
+	EnvMounted     bool              // A conda environment is mounted at /cnt_env, in any form: LastImg's .img or a read-only env-typed .sqf
 }
 
 // Diagnostic is a non-fatal setup message returned to presentation layers.
@@ -99,10 +100,12 @@ func Setup(cfg SetupConfig) (*SetupResult, error) {
 	// Process overlays and check availability
 	overlayArgs := make([]string, 0, len(mountOverlays))
 	var lastImg string
+	var envMounted bool
 	for _, ol := range mountOverlays {
 		isImg := utils.IsImg(ol)
 		if isImg {
 			lastImg = ol
+			envMounted = true
 
 			// Only lock .img files as requested
 			if utils.FileExists(ol) && !utils.DirExists(ol) {
@@ -115,13 +118,15 @@ func Setup(cfg SetupConfig) (*SetupResult, error) {
 					return nil, err
 				}
 			}
+		} else if isEnvSnapshotSqf(cleanOverlayPath(ol)) {
+			envMounted = true
 		}
 
 		overlayArgs = append(overlayArgs, FormatOverlayMount(ol, cfg.WritableImg))
 	}
 
 	// Build environment variables
-	envList, envNotes, diagnostics := buildEnvironment(overlays, lastImg, cfg)
+	envList, envNotes, diagnostics := buildEnvironment(overlays, lastImg, envMounted, cfg)
 	diagnostics = append(snapshotDiagnostics, diagnostics...)
 
 	// Build bind paths
@@ -132,8 +137,8 @@ func Setup(cfg SetupConfig) (*SetupResult, error) {
 	// A mounted conda env needs micromamba reachable in-container (mm/env
 	// commands resolve it via toolpath.Resolve, internal/conda/environment.go)
 	// — bound only when one is actually mounted, matching buildEnvironment's
-	// own lastImg-gated CNT_CONDA_ROOT block below.
-	if lastImg != "" {
+	// own envMounted-gated CNT_CONDA_ROOT block below.
+	if envMounted {
 		if dir, ok := libexec.Dir(); ok {
 			bindPaths = append(bindPaths, dir)
 		}
@@ -155,11 +160,12 @@ func Setup(cfg SetupConfig) (*SetupResult, error) {
 		Fakeroot:       cfg.Fakeroot,
 		ApptainerFlags: apptainerFlags,
 		LastImg:        lastImg,
+		EnvMounted:     envMounted,
 	}, nil
 }
 
 // buildEnvironment constructs the complete environment variable list
-func buildEnvironment(overlays []string, lastImg string, cfg SetupConfig) ([]string, map[string]string, []Diagnostic) {
+func buildEnvironment(overlays []string, lastImg string, envMounted bool, cfg SetupConfig) ([]string, map[string]string, []Diagnostic) {
 	// Collect overlay environment variables (from .env files)
 	configs, notes, diagnostics := CollectOverlayEnv(overlays)
 	envKeys := make([]string, 0, len(configs))
@@ -198,12 +204,12 @@ func buildEnvironment(overlays []string, lastImg string, cfg SetupConfig) ([]str
 	)
 	envList = append(envList, commonEnvVars...)
 
-	// Add .img-specific environment variables
-	if lastImg != "" {
+	// Add conda-env-specific environment variables
+	if envMounted {
 		if os.Getenv("IN_CONDATAINER") != "" {
 			diagnostics = append(diagnostics, Diagnostic{
 				Level:   "warn",
-				Message: "You are trying to mount an .img overlay inside an existing CondaTainer environment. This may lead to unexpected behavior.",
+				Message: "You are trying to mount a environment overlay inside an existing CondaTainer environment. This may lead to unexpected behavior.",
 			})
 		}
 
@@ -232,9 +238,12 @@ func buildEnvironment(overlays []string, lastImg string, cfg SetupConfig) ([]str
 
 	// Runtime-owned markers go last so user-provided environment settings
 	// cannot redirect management commands away from the mounted image.
-	if lastImg != "" {
+	if envMounted {
+		// A read-only env-typed .sqf with no paired .img has nothing to write
+		// to, regardless of cfg.WritableImg — only the writable .img itself
+		// can make CNT_CONDA_WRITABLE true.
 		writable := "0"
-		if cfg.WritableImg {
+		if lastImg != "" && cfg.WritableImg {
 			writable = "1"
 		}
 		if len(config.Global.Build.Channels) > 0 {
@@ -257,9 +266,9 @@ func buildEnvironment(overlays []string, lastImg string, cfg SetupConfig) ([]str
 		}
 		envNotes[key] = note
 	}
-	if lastImg != "" {
+	if envMounted {
 		envNotes["CNT_CONDA_ROOT"] = "/cnt_env"
-		if cfg.WritableImg {
+		if lastImg != "" && cfg.WritableImg {
 			envNotes["CNT_CONDA_WRITABLE"] = "1"
 		} else {
 			envNotes["CNT_CONDA_WRITABLE"] = "0"

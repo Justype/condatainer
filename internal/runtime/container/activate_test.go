@@ -12,8 +12,46 @@ import (
 )
 
 func TestActivationScriptEmptyWithNothingToActivate(t *testing.T) {
-	if got := ActivationScript(nil, ""); got != "" {
-		t.Errorf("ActivationScript(nil, \"\") = %q, want empty", got)
+	if got := ActivationScript(nil, false, ActivationAll); got != "" {
+		t.Errorf("ActivationScript(nil, false, ActivationAll) = %q, want empty", got)
+	}
+}
+
+func TestActivationScriptNoneSourcesNothing(t *testing.T) {
+	requireSquashfsTools(t)
+	dir := t.TempDir()
+	appSqf := filepath.Join(dir, "myapp.sqf")
+	packRuntimeSqf(t, appSqf, meta.Runtime{
+		SchemaVersion: meta.SchemaVersion,
+		Name:          "myapp/1.0",
+		Type:          catalog.TypeApp,
+		Platform:      meta.NativePlatform(),
+		Prefix:        "/cnt/myapp",
+	})
+
+	if got := ActivationScript([]string{appSqf}, true, ActivationNone); got != "" {
+		t.Errorf("ActivationScript(..., ActivationNone) = %q, want empty", got)
+	}
+}
+
+func TestActivationScriptEnvSourcesOnlyCntEnv(t *testing.T) {
+	requireSquashfsTools(t)
+	dir := t.TempDir()
+	appSqf := filepath.Join(dir, "myapp.sqf")
+	packRuntimeSqf(t, appSqf, meta.Runtime{
+		SchemaVersion: meta.SchemaVersion,
+		Name:          "myapp/1.0",
+		Type:          catalog.TypeApp,
+		Platform:      meta.NativePlatform(),
+		Prefix:        "/cnt/myapp",
+	})
+
+	got := ActivationScript([]string{appSqf}, true, ActivationEnv)
+	if strings.Contains(got, "'/cnt/myapp'/etc/conda/activate.d") {
+		t.Errorf("ActivationEnv sourced an app block, want only /cnt_env:\n%s", got)
+	}
+	if !strings.Contains(got, "'/cnt_env'/etc/conda/activate.d") {
+		t.Errorf("script missing /cnt_env block:\n%s", got)
 	}
 }
 
@@ -28,14 +66,52 @@ func TestActivationScriptIncludesAppPrefixAndEnv(t *testing.T) {
 		Platform:      meta.NativePlatform(),
 		Prefix:        "/cnt/myapp",
 	})
+	envSqf := filepath.Join(dir, "env.sqf")
+	packRuntimeSqf(t, envSqf, envRuntime())
 
-	got := ActivationScript([]string{appSqf}, "/some/writable.img")
+	got := ActivationScript([]string{appSqf, envSqf}, true, ActivationAll)
 
 	if !strings.Contains(got, "'/cnt/myapp'/etc/conda/activate.d") {
 		t.Errorf("script missing app prefix block:\n%s", got)
 	}
 	if !strings.Contains(got, "'/cnt_env'/etc/conda/activate.d") {
-		t.Errorf("script missing /cnt_env block for a mounted .img:\n%s", got)
+		t.Errorf("script missing /cnt_env block for a mounted conda environment:\n%s", got)
+	}
+}
+
+// A writable .img and its paired env.sqf snapshot both claim EnvPrefix, but
+// Apptainer merges them into the one physical /cnt_env directory at mount
+// time — the generated script must source that directory's activate.d only
+// once, not once per overlay that claims the prefix.
+func TestActivationScriptDedupesPairedImgAndSnapshot(t *testing.T) {
+	requireSquashfsTools(t)
+	dir := t.TempDir()
+	envSqf := filepath.Join(dir, "env.sqf")
+	packRuntimeSqf(t, envSqf, envRuntime())
+	// imgContribution only reads an optional <path>.env sidecar, so a bare
+	// path ending in .img exercises it without a real ext3 image.
+	img := filepath.Join(dir, "env.img")
+
+	got := ActivationScript([]string{envSqf, img}, true, ActivationAll)
+
+	if n := strings.Count(got, "if [ -d '/cnt_env'/etc/conda/activate.d"); n != 1 {
+		t.Errorf("want exactly one /cnt_env activate.d block, got %d:\n%s", n, got)
+	}
+}
+
+func TestMMHelperScriptEmptyWithoutEnvMounted(t *testing.T) {
+	if got := MMHelperScript(false); got != "" {
+		t.Errorf("MMHelperScript(false) = %q, want empty", got)
+	}
+}
+
+func TestMMHelperScriptDefinesAndExportsMM(t *testing.T) {
+	got := MMHelperScript(true)
+	if !strings.Contains(got, "export -f mm") {
+		t.Errorf("MMHelperScript(true) = %q, want it to export the mm function", got)
+	}
+	if !strings.Contains(got, "reactivate --shell bash") {
+		t.Errorf("MMHelperScript(true) = %q, want it to force bash reactivate syntax", got)
 	}
 }
 
@@ -76,7 +152,7 @@ func TestActivationScriptRunsWithScopedPrefix(t *testing.T) {
 		Platform: meta.NativePlatform(), Prefix: appBPrefix,
 	})
 
-	script := ActivationScript([]string{appASqf, appBSqf}, "")
+	script := ActivationScript([]string{appASqf, appBSqf}, false, ActivationAll)
 	script += "echo \"A=$CNT_TEST_A B=$CNT_TEST_B\"\n"
 
 	out, err := exec.Command("bash", "-c", script).CombinedOutput()

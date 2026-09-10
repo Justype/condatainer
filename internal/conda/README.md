@@ -20,6 +20,25 @@ Isolated, in-container management of the Conda environment mounted at `/cnt_env`
 - Without `.condarc`, Micromamba runs with `--no-rc` during env creation.
 - The first install uses explicit project channels, then saves them to `.condarc` after success.
 - User Micromamba arguments are forwarded unchanged. Micromamba owns transaction locking.
+- `ReactivateScript` (`reactivate.go`) only ever returns text for a caller to `eval`. Neither this
+  process nor condatainer itself can mutate the shell that invoked it — a subprocess can never
+  reach back into its parent's environment — so re-running `activate.d`/`deactivate.d` after a
+  mutation has to be the caller's own act, not something this package does for them. It mirrors
+  what real conda's own reactivate computes (`conda/activate.py`'s `build_reactivate`): deactivate
+  scripts in reverse filename order, then activate scripts in forward order. `internal/conda`
+  cannot import `internal/runtime/container` (see *Package layout* below for the import-cycle
+  reason), so this is its own small, unshared implementation rather than a call into that
+  package's `writeActivateBlock`.
+- `ReactivateScript(root, shell)` takes a `Shell` (`ShellBash`/`ShellZsh`/`ShellFish`) because fish
+  needs different syntax, not just different words: it has no `VAR=val cmd` prefix-assignment
+  form, so `CONDA_PREFIX` scoping uses a `begin; set -lx ...; end` block instead of bash/zsh's
+  single line. It also changes which hooks even get considered — matching real conda's own
+  `activate.py`, where `FishActivator.script_extension` is `.fish` while every other shell's is
+  `.sh` — so a bash/zsh-only `*_activate.sh` (every hook actually shipped by a real package,
+  checked directly) is silently skipped under `ShellFish` rather than fed to fish's parser as
+  invalid syntax; a package that ships its own `*_activate.fish` is sourced correctly. `cmd/env.go`
+  detects `shell` the same way `cmd/completion.go` does (parent process via `/proc`, `$SHELL` as
+  fallback) and exposes `--shell` to override it.
 
 The default first-install channels come from CondaTainer's `channels` configuration. Explicit CLI
 channels are preserved ahead of those defaults; an environment file owns its channel list.

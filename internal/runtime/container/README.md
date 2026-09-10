@@ -32,7 +32,9 @@ path.go      Container path utilities
 - `BindPaths` - Deduplicated bind paths
 - `Fakeroot` - Final fakeroot setting
 - `ApptainerFlags` - Flags including GPU detection
-- `LastImg` - Path to .img overlay (if present)
+- `LastImg` - Path to the writable `.img` overlay (if present)
+- `EnvMounted` - A conda environment is mounted at `/cnt_env`, in any form:
+  `LastImg`'s `.img` or a read-only env-typed `.sqf` mounted alone
 
 ## What Setup refuses
 
@@ -223,6 +225,16 @@ GOROOT=/cnt_env/go   ## Go Installation path
 PATH={prefix}/bin:$PATH
 ```
 
+A writable `.img`'s `Contribution.Type` (`imgContribution`, `env.go`) is honestly `catalog.TypeEnv`
+— the same type an env-typed `.sqf` snapshot reports from its own `runtime.json` — not a `TypeApp`
+mislabel. `Contribution.ContributesBin()` is the one predicate `BuildPathEnv` and `ActivationScript`
+both call instead of each duplicating a `Type != catalog.TypeApp` check: true for `TypeApp` or
+`TypeEnv` with a non-empty `Prefix`, false for everything else (`TypeOS`/`TypeData`, or a degraded
+zero-value `Contribution`). Both callers additionally deduplicate by `Prefix` — a writable `.img`
+and its paired env-typed `.sqf` snapshot both claim `EnvPrefix`, but Apptainer merges them into the
+one physical `/cnt_env` directory at mount time, so each needs exactly one `PATH` entry and one
+`activate.d` block, not one per overlay that claims the prefix.
+
 `CollectOverlayEnv` merges every overlay's resolved env into the final list;
 `ResolveOverlayEnv` returns a single overlay's description/env/notes for `info`.
 When the same variable is set by more than one overlay the later one wins and a
@@ -238,11 +250,11 @@ already produces for the ordinary multi-overlay case. Without this, `info` on a
 `.img` would show none of the variables its paired snapshot silently
 contributes at real mount time.
 
-`BuildPathEnv` is silent for the same reason. Only an `app` contributes, and it
-contributes `<prefix>/bin` unconditionally — `data` and `os` put nothing
-on `PATH`, and an image with no readable metadata contributes nothing at all.
-There is no check that the directory exists: a nonexistent `PATH` entry is
-harmless, while the check would cost one archive read per image per invocation.
+`BuildPathEnv` is silent for the same reason. Anything `ContributesBin()` (an `app`, or a mounted
+conda environment — writable `.img` or bare env-typed `.sqf` alike) contributes `<prefix>/bin`
+unconditionally — `data` and `os` put nothing on `PATH`, and an image with no readable metadata
+contributes nothing at all. There is no check that the directory exists: a nonexistent `PATH` entry
+is harmless, while the check would cost one archive read per image per invocation.
 
 **Common Environment:**
 - `LC_ALL=C.UTF-8`, `LANG=C.UTF-8`
@@ -257,23 +269,52 @@ itself computes ahead of time. A conda-forge package's own
 and real `conda activate` sources it, not condatainer. `ActivationScript`
 replays that one piece — nothing else `conda activate` does, see below.
 
-`ActivationScript(overlays, lastImg)` builds a bash preamble, one block per
-overlay that contributes a prefix (every `app`, plus `/cnt_env` when a
-conda env/`.img` is mounted), each scoping `CONDA_PREFIX` to that overlay's
-own prefix before sourcing its `activate.d/*.sh` — a script commonly reads
-`CONDA_PREFIX` to build its own export (conda-forge's own `libxml2` hook
-computes `XML_CATALOG_FILES` from it), so sourcing it under some other
-overlay's `CONDA_PREFIX` would compute the wrong value. Blocks run in overlay
-order, the same order `BuildPathEnv` iterates before its own prepend reverses
-it, so the last-listed overlay's hook still runs last and still wins a name
-collision — one ordering rule, not two.
+`ActivationScript(overlays, envMounted, mode)` builds a bash preamble, gated
+by `mode` (`ActivationAll`/`ActivationEnv`/`ActivationNone`,
+`exec.Options.Activation`, CLI `--activation`): `ActivationAll` sources one
+block per overlay that `ContributesBin()` (every `app`, plus the mounted
+conda environment's own), deduplicated by `Prefix`; `ActivationEnv` sources
+only the `/cnt_env` block, reading `envMounted` directly rather than walking
+`overlays` at all, since it deliberately looks at nothing else; `ActivationNone`
+sources neither, so a hung or misbehaving activation script can be ruled out.
+`envMounted` is true for a conda environment mounted in any form — `Setup`'s
+`LastImg` (a writable `.img`) or a read-only env-typed `.sqf` mounted alone
+(see Environment Snapshots) — not just `LastImg` specifically;
+`AutoEnableFakeroot` is the one place that stays keyed on `LastImg` alone,
+since fakeroot is about a writable overlay's UID mismatch, meaningless for a
+read-only `.sqf`. Each script sources as
+`CONDA_PREFIX=<prefix> . "$script"` — scoped to that one call, not exported,
+so a script reading `CONDA_PREFIX` (conda-forge's `libxml2` hook does, for
+`XML_CATALOG_FILES`) sees its own overlay's prefix and nothing lingers into
+the command this preamble `exec`s. `/cnt_env`'s `CONDA_PREFIX` for that
+command comes from `container.Setup`'s env list instead. App blocks run in
+overlay order, the same order `BuildPathEnv` iterates before its own prepend
+reverses it, so the last-listed overlay's hook still wins a name collision —
+one ordering rule, not two.
 
 `exec.Prepare` rewraps `Options.Command` into one `bash -c` invocation running
 the activation script then `exec "$@"` into the original command, since this
 is shell script sourced into the running shell — apptainer's own `--env` is a
 static list and cannot express it. Skipped when `ActivationScript` returns
-`""`, which it does whenever nothing mounted could contribute an
-`activate.d` directory — the common case for an `os`/`base`-only container.
+`""`, which it does for `ActivationNone`, and otherwise whenever nothing
+mounted could contribute an `activate.d` directory — the common case for an
+`os`/`base`-only container under `ActivationAll`.
+
+`MMHelperScript(envMounted)` appends one more bash function to the same preamble: `mm`, wrapping
+`condatainer env "$@"` and, for `install`/`update`/`remove`, chaining `eval "$(condatainer env
+reactivate --shell bash)"` — `--shell bash` is hardcoded rather than left to `reactivate`'s own
+`$SHELL` detection, since `mm` only ever runs inside bash regardless of what `$SHELL` says — so a
+package's `activate.d`/`deactivate.d` side effects (an env var like
+`JAVA_HOME`) refresh in the same shell instead of staying stale until the user exits and
+re-enters. It is gated on `envMounted` directly, not on `Activation` mode — `mm` is condatainer's
+own script, not a third-party conda-forge hook, so `ActivationNone` (for ruling out a misbehaving
+*conda-forge* activate.d script) has no reason to remove it too. `export -f` is what lets the
+function survive the subsequent `exec` into an interactive bash session; it does not survive
+`exec` into zsh or fish (confirmed empirically), so `mm` only ever helps a bash session — zsh and
+fish both keep working via the plain `condatainer env ...` command, they just don't get the `mm`
+name or the automatic reactivate chaining. No file is ever materialized for this: the function
+definition is just more text in the same Go string `exec.Prepare` already builds, so there is
+nothing to clean up if the process is killed mid-command.
 
 **Only the first-activation branch, once, no restore.** Real `conda
 activate`/`deactivate` (`activate.py`'s `build_activate`/`build_deactivate`)
@@ -308,13 +349,13 @@ After collection, `DeduplicateBindPaths()` removes conflicting bind paths:
 - Removes parent paths when child is bound
 - Example: `/home/user/data` removes `/home/user`
 
-**One more bind, added by `Setup` itself rather than `BindPaths()`:** when a `.img` conda environment
-is actually mounted (`lastImg != ""`), `Setup` also binds `libexec.Dir()` — the resolved
-self-provisioned toolchain directory, same host-path-equals-container-path convention as everywhere
-else `libexec` is bound. This is what lets `internal/conda`'s in-container `mm`/`env` commands
-resolve `micromamba` via `toolpath.Resolve` once running (see `internal/conda/README.md`) instead of
-assuming the base image carries one. Gated on `lastImg`, not unconditional, because nothing else in
-an ordinary exec/run needs it.
+**One more bind, added by `Setup` itself rather than `BindPaths()`:** when a conda environment
+is actually mounted (`EnvMounted`, `.img` or a bare read-only env-typed `.sqf` alike), `Setup` also
+binds `libexec.Dir()` — the resolved self-provisioned toolchain directory, same
+host-path-equals-container-path convention as everywhere else `libexec` is bound. This is what lets
+`internal/conda`'s in-container `mm`/`env` commands resolve `micromamba` via `toolpath.Resolve` once
+running (see `internal/conda/README.md`) instead of assuming the base image carries one. Gated on
+`EnvMounted`, not unconditional, because nothing else in an ordinary exec/run needs it.
 
 ## GPU Detection
 

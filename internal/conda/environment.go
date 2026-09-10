@@ -40,25 +40,25 @@ func resolveEnvironment(requireWritable, allowInitialize bool) (*Environment, er
 
 	root := filepath.Clean(os.Getenv("CNT_CONDA_ROOT"))
 	if root == "." || root == "" {
-		return nil, fmt.Errorf("no conda environment overlay is mounted (CNT_CONDA_ROOT is unset)")
+		return nil, fmt.Errorf("no environment overlay is mounted (CNT_CONDA_ROOT is unset)")
 	}
 	writable := os.Getenv("CNT_CONDA_WRITABLE") == "1"
 	if requireWritable && !writable {
-		return nil, fmt.Errorf("the conda environment is read-only")
+		return nil, fmt.Errorf("the environment is read-only")
 	}
 
 	info, err := os.Stat(root)
 	if os.IsNotExist(err) && allowInitialize {
 		if err := os.MkdirAll(root, 0o755); err != nil {
-			return nil, fmt.Errorf("initialize conda environment directory at %s: %w", root, err)
+			return nil, fmt.Errorf("initialize environment directory at %s: %w", root, err)
 		}
 		info, err = os.Stat(root)
 	}
 	if os.IsNotExist(err) {
-		return nil, fmt.Errorf("the conda environment is not initialized; initialize it in a writable container with: mm install <package>")
+		return nil, fmt.Errorf("the environment is not initialized; initialize it in a writable container with: mm install <package>")
 	}
 	if err != nil {
-		return nil, fmt.Errorf("cannot access conda environment at %s: %w", root, err)
+		return nil, fmt.Errorf("cannot access environment at %s: %w", root, err)
 	}
 	if !info.IsDir() {
 		return nil, fmt.Errorf("conda environment path is not a directory: %s", root)
@@ -80,13 +80,13 @@ func resolveEnvironment(requireWritable, allowInitialize bool) (*Environment, er
 	if !allowInitialize {
 		state, err := env.State()
 		if err != nil {
-			return nil, fmt.Errorf("inspect conda environment at %s: %w", root, err)
+			return nil, fmt.Errorf("inspect environment at %s: %w", root, err)
 		}
 		switch state {
 		case PrefixFresh:
-			return nil, fmt.Errorf("the conda environment is not initialized; initialize it in a writable container with: mm install <package>")
+			return nil, fmt.Errorf("the environment is not initialized; initialize it in a writable container with: mm install <package>")
 		case PrefixPartial:
-			return nil, fmt.Errorf("the conda environment is only partially initialized; recreate the overlay or remove %s and run mm install again", root)
+			return nil, fmt.Errorf("the environment is only partially initialized; recreate the overlay or remove %s and run mm install again", root)
 		}
 	}
 	return env, nil

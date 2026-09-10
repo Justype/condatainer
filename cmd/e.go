@@ -22,6 +22,7 @@ var (
 	eReadOnly    bool
 	eNoAutoload  bool
 	eFakeroot    bool
+	eActivation  string
 	eEnvSettings []string
 	eBindPaths   []string
 	eProjectDir  string
@@ -54,6 +55,7 @@ func init() {
 	eCmd.Flags().BoolVarP(&eReadOnly, "read-only", "r", false, "Mount .img overlays as read-only (default: writable)")
 	eCmd.Flags().BoolVarP(&eNoAutoload, "no-autoload", "n", false, "Disable auto-loading env.img from current directory")
 	eCmd.Flags().BoolVarP(&eFakeroot, "fakeroot", "f", false, "Run container with fakeroot privileges")
+	eCmd.Flags().StringVar(&eActivation, "activation", "all", "Which activate.d scripts to source before the command: all, env, or none")
 	eCmd.Flags().StringSliceVar(&eEnvSettings, "env", nil, "Set environment variable 'KEY=VALUE' (repeatable)")
 	eCmd.Flags().StringSliceVar(&eBindPaths, "bind", nil, "Bind path 'HOST:CONTAINER' (repeatable)")
 	RegisterProjectFlags(eCmd, &eProjectDir)
@@ -139,6 +141,11 @@ func runE(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	activation, err := parseActivation(eActivation)
+	if err != nil {
+		return err
+	}
+
 	// Build options
 	options := exec.Options{
 		Overlays:       resolvedOverlays,
@@ -150,6 +157,7 @@ func runE(cmd *cobra.Command, args []string) error {
 		Fakeroot:       eFakeroot,
 		BaseImage:      baseImageResolved,
 		HidePrompt:     hidePrompt,
+		Activation:     activation,
 	}
 
 	plan, err := exec.Prepare(cmd.Context(), options)
@@ -188,8 +196,9 @@ func parseEArgs(args []string) (overlays, commands, apptainerFlags []string, err
 		"--env":      true,
 		"--bind":     true,
 		"--fakeroot": true, "-f": true,
-		"--debug": true,
-		"--quiet": true, "-q": true,
+		"--activation": true,
+		"--debug":      true,
+		"--quiet":      true, "-q": true,
 		"--yes": true, "-y": true,
 	}
 
@@ -230,7 +239,7 @@ func parseEArgs(args []string) (overlays, commands, apptainerFlags []string, err
 		// Skip known flags (already handled by cobra)
 		if knownFlags[arg] || isKnownFlagWithEquals(knownFlags, arg) {
 			// Check if flag needs value
-			if (arg == "--env" || arg == "--bind") && i+1 < len(os.Args) {
+			if (arg == "--env" || arg == "--bind" || arg == "--activation") && i+1 < len(os.Args) {
 				i++ // Skip value
 			}
 			continue

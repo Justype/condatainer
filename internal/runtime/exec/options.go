@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/runtime/container"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -19,6 +20,11 @@ type Options struct {
 	Fakeroot       bool
 	WritableImg    bool
 	HidePrompt     bool
+	// Activation selects which activate.d scripts container.ActivationScript
+	// sources before the command — container.ActivationAll (default when
+	// left ""), container.ActivationEnv, or container.ActivationNone, e.g. so
+	// a hung or misbehaving activation script can be ruled out.
+	Activation container.ActivationMode
 	// GpuRequested forces GPU flag detection even when autoload_gpu is disabled,
 	// for a command that explicitly declared a GPU requirement.
 	GpuRequested bool
@@ -65,6 +71,9 @@ func (ioStreams IO) IsZero() bool {
 func (o Options) ensureDefaults() (Options, error) {
 	if len(o.Command) == 0 {
 		o.Command = []string{"bash"}
+	}
+	if o.Activation == "" {
+		o.Activation = container.ActivationAll
 	}
 	return o, nil
 }

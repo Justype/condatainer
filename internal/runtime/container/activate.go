@@ -3,51 +3,78 @@ package container
 import (
 	"fmt"
 	"strings"
-
-	"github.com/Justype/condatainer/catalog"
 )
 
-// ActivationScript returns a bash preamble that sources every mounted app
-// overlay's own etc/conda/activate.d/*.sh, and /cnt_env's when a conda
-// env/.img is mounted (lastImg != ""), in overlay order — the same order
-// BuildPathEnv iterates before its own prepend reverses it, so the
-// last-listed overlay's hook still runs last and so still wins a name
-// collision, consistent with how PATH already resolves one. Each block scopes
-// CONDA_PREFIX to that overlay's own prefix while its scripts run: an
-// activate.d script reads CONDA_PREFIX to build its own exports (e.g.
-// libxml2's own XML_CATALOG_FILES), so sourcing it under some other overlay's
-// CONDA_PREFIX would compute the wrong value.
-//
-// This replays only conda's own "first activation" branch (activate.py's
-// build_activate): a container run mounts, executes once, and exits — never
-// nested activate/deactivate within one invocation — so there is no
-// CONDA_SHLVL stack, no deactivate.d, and nothing to restore.
-//
-// Returns "" when no mounted overlay could contribute an activate.d
-// directory, so a caller can skip wrapping the command at all in that case.
-func ActivationScript(overlays []string, lastImg string) string {
+// ActivationMode selects which activate.d scripts ActivationScript sources.
+type ActivationMode string
+
+const (
+	// ActivationAll sources every mounted app overlay's own activate.d plus
+	// the mounted conda environment's.
+	ActivationAll ActivationMode = "all"
+	// ActivationEnv sources only the mounted conda environment's activate.d,
+	// skipping every app overlay's own.
+	ActivationEnv ActivationMode = "env"
+	// ActivationNone sources neither.
+	ActivationNone ActivationMode = "none"
+)
+
+// ActivationScript returns a bash preamble sourcing activate.d scripts for
+// mode: ActivationAll sources every ContributesBin() overlay (each app,
+// plus the mounted conda environment's own) deduplicated by Prefix, so a
+// writable .img and its paired env.sqf snapshot are sourced once, not
+// twice; ActivationEnv sources only /cnt_env; ActivationNone sources
+// nothing. Returns "" when there is nothing to source, so a caller can
+// skip wrapping the command at all.
+func ActivationScript(overlays []string, envMounted bool, mode ActivationMode) string {
 	var b strings.Builder
-	for _, ov := range overlays {
-		contribution, _ := resolveImage(cleanOverlayPath(ov))
-		if contribution.Type != catalog.TypeApp || contribution.Prefix == "" {
-			continue
+	switch mode {
+	case ActivationAll:
+		seen := map[string]bool{}
+		for _, ov := range overlays {
+			contribution, _ := resolveImage(cleanOverlayPath(ov))
+			if !contribution.ContributesBin() || seen[contribution.Prefix] {
+				continue
+			}
+			seen[contribution.Prefix] = true
+			writeActivateBlock(&b, contribution.Prefix)
 		}
-		writeActivateBlock(&b, contribution.Prefix)
-	}
-	if lastImg != "" {
-		writeActivateBlock(&b, "/cnt_env")
+	case ActivationEnv:
+		if envMounted {
+			writeActivateBlock(&b, EnvPrefix)
+		}
 	}
 	return b.String()
+}
+
+// MMHelperScript returns a bash snippet defining and exporting an mm shell
+// function that runs `condatainer env "$@"` and, after install/update/
+// remove, re-sources activate.d/deactivate.d via `condatainer env
+// reactivate --shell bash` (hardcoded, not detected: mm only ever runs
+// inside bash, regardless of the ambient $SHELL reactivate would otherwise
+// detect). export -f is what lets the function survive the subsequent
+// exec into an interactive bash shell; it does not survive exec into zsh
+// or fish. Returns "" when no environment is mounted.
+func MMHelperScript(envMounted bool) string {
+	if !envMounted {
+		return ""
+	}
+	return `mm() {
+    condatainer env "$@" || return
+    case "$1" in
+        install|update|remove) eval "$(condatainer env reactivate --shell bash)" ;;
+    esac
+}
+export -f mm
+`
 }
 
 func writeActivateBlock(b *strings.Builder, prefix string) {
 	q := shellQuote(prefix)
 	fmt.Fprintf(b, "if [ -d %s/etc/conda/activate.d ]; then\n", q)
-	fmt.Fprintf(b, "  CONDA_PREFIX=%s\n", q)
-	b.WriteString("  export CONDA_PREFIX\n")
 	fmt.Fprintf(b, "  for __cnt_f in %s/etc/conda/activate.d/*.sh; do\n", q)
 	b.WriteString("    [ -e \"$__cnt_f\" ] || continue\n")
-	b.WriteString("    . \"$__cnt_f\"\n")
+	fmt.Fprintf(b, "    CONDA_PREFIX=%s . \"$__cnt_f\"\n", q)
 	b.WriteString("  done\n")
 	b.WriteString("fi\n")
 }

@@ -147,12 +147,14 @@ func Prepare(ctx context.Context, options Options) (*Plan, error) {
 		envList = append(proxy.ProxyEnvList(proxyURL), envList...)
 	}
 
-	// A mounted overlay's own etc/conda/activate.d is shell script, not a
-	// static list, so apptainer's own --env can't express it — the command
-	// itself is rewrapped to source it first. Skipped entirely when nothing
-	// could contribute one.
-	if activation := container.ActivationScript(setupResult.Overlays, setupResult.LastImg); activation != "" {
-		options.Command = wrapWithActivation(activation, options.Command)
+	// A mounted overlay's activate.d is shell script, not a static list, so
+	// apptainer's own --env can't express it: the command is rewrapped to
+	// source it (and define the mm helper) first. Skipped when neither
+	// contributes anything for this mount.
+	preamble := container.ActivationScript(setupResult.Overlays, setupResult.EnvMounted, options.Activation)
+	preamble += container.MMHelperScript(setupResult.EnvMounted)
+	if preamble != "" {
+		options.Command = wrapWithActivation(preamble, options.Command)
 	}
 
 	opts := &apptainer.ExecOptions{
