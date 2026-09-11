@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/Justype/condatainer/internal/image/tool"
@@ -167,6 +169,67 @@ func TestPrimarySystemPartitionNotASIF(t *testing.T) {
 
 	// A file that is not there at all is the wrapper's answer, not the parser's.
 	if _, err := PrimarySystemPartition("/nonexistent/absent.sif"); !errors.Is(err, tool.ErrUnreadable) {
+		t.Error("a missing file should be ErrUnreadable")
+	}
+}
+
+// writeSIF writes image to a temp file, for Arch's tests — unlike
+// PrimarySystemPartition, Arch takes a path rather than an io.ReaderAt.
+func writeSIF(t *testing.T, image []byte) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "image.sif")
+	if err := os.WriteFile(path, image, 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	return path
+}
+
+// Codes confirmed against github.com/apptainer/sif's pkg/sif/arch.go.
+func TestArch(t *testing.T) {
+	for code, want := range map[string]string{"02": "amd64", "04": "arm64"} {
+		t.Run(want, func(t *testing.T) {
+			image := sifBytes(t, []partitionSpec{primarySquashfs})
+			copy(image[archOffset:], []byte(code+"\x00"))
+
+			got, err := Arch(writeSIF(t, image))
+			if err != nil {
+				t.Fatalf("Arch: %v", err)
+			}
+			if got != want {
+				t.Errorf("Arch = %q, want %s", got, want)
+			}
+		})
+	}
+}
+
+// A code this package's table does not name is returned as-is rather than
+// refused — still comparable and displayable, just not translated to a GOARCH
+// name.
+func TestArchUnknownCode(t *testing.T) {
+	image := sifBytes(t, []partitionSpec{primarySquashfs})
+	copy(image[archOffset:], []byte("99\x00"))
+
+	got, err := Arch(writeSIF(t, image))
+	if err != nil {
+		t.Fatalf("Arch: %v", err)
+	}
+	if got != "99" {
+		t.Errorf("Arch = %q, want the raw code 99", got)
+	}
+}
+
+func TestArchNotASIF(t *testing.T) {
+	if _, err := Arch(writeSIF(t, make([]byte, headerSize*2))); !errors.Is(err, tool.ErrCorrupt) {
+		t.Fatalf("err = %v, want ErrCorrupt", err)
+	}
+
+	wrongVersion := sifBytes(t, []partitionSpec{primarySquashfs})
+	copy(wrongVersion[versionOffset:], []byte("99\x00"))
+	if _, err := Arch(writeSIF(t, wrongVersion)); !errors.Is(err, tool.ErrCorrupt) {
+		t.Fatalf("err = %v, want ErrCorrupt", err)
+	}
+
+	if _, err := Arch("/nonexistent/absent.sif"); !errors.Is(err, tool.ErrUnreadable) {
 		t.Error("a missing file should be ErrUnreadable")
 	}
 }

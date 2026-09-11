@@ -117,28 +117,28 @@ func TestSynthesizedDefCarriesMetadata(t *testing.T) {
 	}
 }
 
-// The script's marker is read per line: Apptainer writes its own greetings and
-// warnings onto the same streams, so the marker never arrives alone.
-func TestReadBaseTools(t *testing.T) {
-	noisy := "INFO:    Converting SIF file to temporary sandbox...\n" +
-		"WARNING: group: unknown groupid 65534\n" +
-		"MISSING: mksquashfs micromamba\n"
-	report := readBaseTools(noisy)
-	if got := strings.Join(report.missing, ","); got != "mksquashfs,micromamba" {
-		t.Errorf("missing = %q, want mksquashfs,micromamba", got)
+func TestCheckBash(t *testing.T) {
+	sandbox := t.TempDir()
+	if err := checkBash(sandbox); err == nil {
+		t.Error("no /bin/bash: want an error")
 	}
 
-	if report := readBaseTools("WARNING: nothing to say\n"); len(report.missing) > 0 {
-		t.Errorf("a complete base was read as incomplete: %+v", report)
+	binDir := filepath.Join(sandbox, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
 	}
-}
+	bashFile := filepath.Join(binDir, "bash")
+	if err := os.WriteFile(bashFile, nil, 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := checkBash(sandbox); err == nil {
+		t.Error("/bin/bash not executable: want an error")
+	}
 
-// Every requirement has to reach the script, or the check silently stops
-// covering one.
-func TestBaseToolsScriptNamesEveryTool(t *testing.T) {
-	for _, name := range append(append([]string{}, baseTools...), baseToolPaths...) {
-		if !strings.Contains(baseToolsScript, name) {
-			t.Errorf("the check never asks for %s", name)
-		}
+	if err := os.Chmod(bashFile, 0o755); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	if err := checkBash(sandbox); err != nil {
+		t.Errorf("executable /bin/bash: got %v, want nil", err)
 	}
 }

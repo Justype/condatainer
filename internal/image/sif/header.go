@@ -29,6 +29,9 @@ const (
 	versionOffset = 42 // 3 bytes, "01\0"
 	versionLen    = 3
 
+	archOffset = 45 // 3 bytes, "02\0" for amd64 — see archNames
+	archLen    = 3
+
 	descrOffsetField = 96  // int64: byte offset of the descriptor table
 	descrTotalField  = 88  // int64: number of descriptor slots
 	descrSizeField   = 104 // int64: byte length of the descriptor table
@@ -172,4 +175,42 @@ func parsePrimarySystemPartition(r io.ReaderAt, size int64, path string) (Partit
 // trimNUL renders a NUL-padded fixed-width header field for a message.
 func trimNUL(b []byte) string {
 	return string(bytes.TrimRight(b, "\x00"))
+}
+
+// archNames maps a SIF header's two-digit architecture code to a GOARCH
+// string, values confirmed against github.com/apptainer/sif's pkg/sif/arch.go.
+// Only the architectures a CondaTainer host runs on are listed; Arch returns
+// any other code as-is.
+var archNames = map[string]string{
+	"02": "amd64",
+	"04": "arm64",
+}
+
+// Arch returns the architecture recorded in a SIF's global header, as a
+// GOARCH string ("amd64", "arm64") or the raw code if archNames does not
+// name it.
+func Arch(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("%w: %s: %w", tool.ErrUnreadable, path, err)
+	}
+	defer f.Close()
+
+	header := make([]byte, headerSize)
+	if _, err := f.ReadAt(header, 0); err != nil {
+		return "", fmt.Errorf("%w: %s: short header: %w", tool.ErrCorrupt, path, err)
+	}
+	if string(header[magicOffset:magicOffset+magicLen]) != string(magic) {
+		return "", fmt.Errorf("%w: %s is not a SIF", tool.ErrCorrupt, path)
+	}
+	if got := header[versionOffset : versionOffset+versionLen]; string(got) != string(version) {
+		return "", fmt.Errorf("%w: %s is SIF version %q, this build reads %q",
+			tool.ErrCorrupt, path, trimNUL(got), trimNUL(version))
+	}
+
+	code := trimNUL(header[archOffset : archOffset+archLen])
+	if name, ok := archNames[code]; ok {
+		return name, nil
+	}
+	return code, nil
 }

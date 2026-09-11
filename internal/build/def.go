@@ -1,7 +1,6 @@
 package build
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -13,7 +12,6 @@ import (
 	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/runtime/apptainer"
-	execpkg "github.com/Justype/condatainer/internal/runtime/exec"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -127,7 +125,7 @@ func (b *BuildObject) buildDef(ctx context.Context) error {
 	// any os build can end up chosen as the exec root at runtime (root
 	// selection is per-invocation, not a declared type), so any of them may
 	// need to run a script/conda build inside it later.
-	if err := checkBaseTools(ctx, b.ws.Sandbox); err != nil {
+	if err := checkBash(b.ws.Sandbox); err != nil {
 		b.Cleanup(true) //nolint:errcheck
 		return err
 	}
@@ -243,78 +241,16 @@ func copyMetaIntoSandbox(metaDir, sandbox string) error {
 	return nil
 }
 
-// baseTools are executables a .def build's sandbox must provide on PATH beyond
-// baseToolPaths. Empty: packing (mksquashfs) and conda builds (micromamba)
-// both run through internal/libexec's self-provisioned toolchain now, not
-// whatever the sandbox happens to carry, so nothing about those needs
-// checking here.
-var baseTools = []string{}
+// bashPath is where bash must exist inside a chosen root.
+const bashPath = "bin/bash"
 
-// baseToolPaths are wanted at an exact path rather than on PATH. Everything
-// CondaTainer runs inside a chosen root launches as /bin/bash — a recipe as
-// `bash -euo pipefail`, every pack and unfreeze script the same way — so a
-// sandbox carrying bash only at /usr/bin/bash cannot run any of them.
-var baseToolPaths = []string{"/bin/bash"}
-
-// checkBaseTools refuses a sandbox that cannot serve the builds that may run
-// inside it later — any .def build is a candidate root, chosen per invocation
-// rather than by a declared type, so this runs for every one of them, not
-// only the configured default.
-//
-// The question is put to the container, with the PATH the container sets,
-// because that is the PATH the scripts using these tools will have. Looking for
-// files in the sandbox would answer a different question: Apptainer ships its
-// own mksquashfs under /usr/libexec, which is present and not on PATH.
-func checkBaseTools(ctx context.Context, sandbox string) error {
-	var out bytes.Buffer
-	runErr := execpkg.Run(ctx, execpkg.Options{
-		BaseImage:  sandbox,
-		Command:    []string{"/bin/sh", "-c", baseToolsScript},
-		HidePrompt: true,
-	}, execpkg.IO{Stdout: &out, Stderr: &out})
-
-	said := out.String()
-	report := readBaseTools(said)
-	if len(report.missing) > 0 {
-		return fmt.Errorf("this base provides no %s; every build runs inside the base and needs them",
-			strings.Join(report.missing, ", "))
-	}
-	if runErr != nil {
-		return fmt.Errorf("could not check the base's tools: %w: %s", runErr, strings.TrimSpace(said))
+// checkBash refuses a sandbox with no bash — any .def build is a candidate
+// root at runtime, not only the configured default, so this runs for every
+// one of them.
+func checkBash(sandbox string) error {
+	info, err := os.Stat(filepath.Join(sandbox, bashPath))
+	if err != nil || info.Mode()&0o111 == 0 {
+		return fmt.Errorf("this base provides no /%s; every build runs inside the base and needs it", bashPath)
 	}
 	return nil
-}
-
-// baseToolsScript reports what the container cannot find, on its own PATH.
-//
-// It runs under /bin/sh, not bash: a base with no bash is one of the things it
-// exists to report, and a checker that cannot start on it reports nothing.
-var baseToolsScript = fmt.Sprintf(`
-missing=
-for t in %s; do
-    command -v "$t" >/dev/null 2>&1 || missing="$missing $t"
-done
-for p in %s; do
-    [ -x "$p" ] || missing="$missing $p"
-done
-[ -z "$missing" ] || { echo "MISSING:$missing"; exit 1; }
-`, strings.Join(baseTools, " "), strings.Join(baseToolPaths, " "))
-
-// baseToolsReport is what the container said about itself.
-type baseToolsReport struct {
-	missing []string
-}
-
-// readBaseTools reads the script's output. Apptainer writes its own greetings
-// and warnings to the same streams, so the marker is matched per line rather
-// than the output being read whole.
-func readBaseTools(said string) baseToolsReport {
-	var report baseToolsReport
-	for line := range strings.SplitSeq(said, "\n") {
-		line = strings.TrimSpace(line)
-		if names, ok := strings.CutPrefix(line, "MISSING:"); ok {
-			report.missing = strings.Fields(names)
-		}
-	}
-	return report
 }
