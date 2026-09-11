@@ -418,10 +418,12 @@ function openHelperConfigModal() {
 
   const rph = _rdPh(rd);
   const resRows = [
-    { key: 'cpus', label: 'CPUs',          ph: rph.cpus },
-    { key: 'mem',  label: 'Memory',        ph: rph.mem  },
-    { key: 'time', label: 'Walltime',      ph: rph.time },
-    { key: 'gpu',  label: 'GPU (optional)', ph: rph.gpu },
+    { key: 'cpus',      label: 'CPUs',          ph: rph.cpus },
+    { key: 'mem',       label: 'Memory',        ph: rph.mem  },
+    { key: 'time',      label: 'Walltime',      ph: rph.time },
+    { key: 'gpu',       label: 'GPU (optional)', ph: rph.gpu },
+    { key: 'account',   label: 'Account',       ph: rph.account },
+    { key: 'partition', label: 'Partition',     ph: rph.partition },
   ];
 
   const paramComputed = _computeParams(params, pv);
@@ -481,7 +483,7 @@ function openHelperConfigModal() {
 async function saveHelperConfigModal() {
   if (!selectedHelper) return;
   const data = {};
-  ['cpus', 'mem', 'time', 'gpu'].forEach(k => {
+  ['cpus', 'mem', 'time', 'gpu', 'account', 'partition'].forEach(k => {
     const el = gid('hcfg-' + k);
     if (el) data[k] = el.value.trim();
   });

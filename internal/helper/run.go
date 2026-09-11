@@ -130,7 +130,7 @@ func ResolveHelperSpec(scriptPath string) *scheduler.ResourceSpec {
 // resolveSpec merges resources with priority: scheduler defaults < script headers < overrides.
 // Recognised script headers: #NCPUS:, #MEM:, #TIME:, #GPU:.
 func resolveSpec(scriptPath string, overrides *scheduler.ResourceSpec) *scheduler.ResourceSpec {
-	base := scheduler.GetSpecDefaults()
+	base := config.Global.Scheduler.Defaults
 
 	// Script headers (#NCPUS:/#MEM:/#TIME:/#GPU:) override config defaults.
 	meta, err := ParseHelperScriptMeta(scriptPath)

@@ -270,6 +270,12 @@ func PromptSettings(ctx context.Context,
 			walltime = spec.Time
 		}
 	}
+	if opts.Resources == nil {
+		opts.Resources = &scheduler.ResourceSpec{}
+	}
+	opts.Resources.CpusPerTask = cpus
+	opts.Resources.MemPerNodeMB = memMB
+	opts.Resources.Time = walltime
 	cpuDisp := fmt.Sprintf("%d", cpus)
 	if cpus == 0 {
 		cpuDisp = "(none)"
@@ -285,9 +291,6 @@ func PromptSettings(ctx context.Context,
 	gpuDisp := helper.FormatGpuSpec(opts.Resources)
 	if gpuDisp == "" {
 		if v, ok := saved["gpu"]; ok && v != "" && v != "(none)" {
-			if opts.Resources == nil {
-				opts.Resources = &scheduler.ResourceSpec{}
-			}
 			opts.Resources.Gpu = helper.ParseGPUSpec(v)
 			gpuDisp = v
 		}
@@ -314,6 +317,8 @@ func PromptSettings(ctx context.Context,
 	if partition == "" {
 		partition = config.Global.Scheduler.Partition
 	}
+	opts.Account = account
+	opts.Partition = partition
 	accountDisp := account
 	if accountDisp == "" {
 		accountDisp = "(scheduler default)"

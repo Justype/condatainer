@@ -57,7 +57,7 @@ var helperCmd = &cobra.Command{
 A helper script submits a job, starts the app, and opens an SSH tunnel to your browser.
   - With no arguments, shows the apps you have running.
   - Every helper has its own flags: condatainer helper <name> -h
-  - Resources (cpus, mem, time, gpu) can be set per run or saved as defaults.
+  - Scheduler options (cpus, mem, time, gpu, account, partition) can be set per run or saved as defaults.
 
 Note: not available inside a container or a scheduler job.`,
 	Example: `  condatainer helper                          # Show running apps
@@ -772,7 +772,7 @@ func runHelperConfig(name, scriptPath string, args []string) error {
 
 	switch sub {
 	case "-h", "--help", "":
-		keys := []string{"cpus", "mem", "time", "gpu"}
+		keys := []string{"cpus", "mem", "time", "gpu", "account", "partition"}
 		for _, p := range params {
 			keys = append(keys, p.Key)
 		}
@@ -852,6 +852,8 @@ func runHelperConfig(name, scriptPath string, args []string) error {
 			configRow{"mem", resDefault(memDef)},
 			configRow{"time", resDefault(timeDef)},
 			configRow{"gpu", "(none)"},
+			configRow{"account", resDefault(config.Global.Scheduler.Account)},
+			configRow{"partition", resDefault(config.Global.Scheduler.Partition)},
 		)
 		for _, pp := range params {
 			rows = append(rows, configRow{strings.ToLower(pp.Key), pp.Default})
