@@ -1266,6 +1266,8 @@ These override the script's scheduler directives (`#SBATCH`, `#PBS`, `#BSUB`) fo
 * `-n`, `--name NAME`: Override the job name shown in the scheduler queue (e.g. `squeue`). Takes priority over `#SBATCH --job-name` and similar directives.
 * `-o`, `--output PATH`: Override the job stdout path (creates parent directory if needed). Takes priority over scheduler stdout settings.
 * `-e`, `--error PATH`: Override the job stderr path. Takes priority over scheduler stderr settings.
+* `-A`, `--account STRING`: Override the billing/allocation account. Falls back to the script's own directive, then `scheduler.account` in config, when unset.
+* `-p`, `--partition STRING`: Override the partition/queue. Falls back to the script's own directive, then `scheduler.partition` in config, when unset.
 * `--afterok IDS`: Submit job that runs only if all listed jobs **succeed**. Colon-separated IDs: `123:456:789`.
 * `--afternotok IDS`: Submit job that runs only if any listed job **fails**. Colon-separated IDs.
 * `--afterany IDS`: Submit job that runs after all listed jobs finish **regardless of outcome**. Colon-separated IDs.

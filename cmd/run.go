@@ -42,6 +42,8 @@ var (
 	runMem         string
 	runTime        string
 	runGPU         string
+	runAccount     string
+	runPartition   string
 	runDryRun      bool
 	runArray       string
 	runArrayLimit  int
@@ -56,7 +58,7 @@ var errRunAborted = errors.New("run aborted")
 var runJobFlagNames = map[string]bool{
 	"output": true, "error": true,
 	"afterok": true, "afternotok": true, "afterany": true,
-	"cpu": true, "mem": true, "time": true, "gpu": true,
+	"cpu": true, "mem": true, "time": true, "gpu": true, "account": true, "partition": true,
 	"dry-run": true, "name": true, "array": true, "array-limit": true,
 	"no-submit": true,
 }
@@ -104,6 +106,8 @@ func init() {
 	runCmd.Flags().StringVarP(&runMem, "mem", "m", "", "Override memory per task (e.g. 4G, 8192M)")
 	runCmd.Flags().StringVarP(&runTime, "time", "t", "", "Override walltime (e.g. 4d12h, 2h30m, 01:30:00)")
 	runCmd.Flags().StringVarP(&runGPU, "gpu", "g", "", "Override GPUs per node (e.g. 1, a100:2, a100)")
+	runCmd.Flags().StringVarP(&runAccount, "account", "A", "", "Override billing/allocation account")
+	runCmd.Flags().StringVarP(&runPartition, "partition", "p", "", "Override partition/queue")
 	runCmd.Flags().BoolVar(&runDryRun, "dry-run", false, "Preview what would happen without executing")
 	runCmd.Flags().BoolVar(&noSubmitMode, "no-submit", false, "Disable job submission (run locally)")
 	runCmd.Flags().StringVarP(&runName, "name", "n", "", "Override job name")
@@ -196,6 +200,17 @@ func runScript(cmd *cobra.Command, args []string) error {
 		}
 		if runStderr != "" {
 			scriptSpecs.Control.Stderr = runStderr
+		}
+		// CLI -A/-p > script directive > config.Global.Scheduler default.
+		if runAccount != "" {
+			scriptSpecs.Control.Account = runAccount
+		} else if scriptSpecs.Control.Account == "" {
+			scriptSpecs.Control.Account = config.Global.Scheduler.Account
+		}
+		if runPartition != "" {
+			scriptSpecs.Control.Partition = runPartition
+		} else if scriptSpecs.Control.Partition == "" {
+			scriptSpecs.Control.Partition = config.Global.Scheduler.Partition
 		}
 	}
 
@@ -339,8 +354,8 @@ func runScript(cmd *cobra.Command, args []string) error {
 	} else if !scheduler.HasSchedulerSpecs(scriptSpecs) {
 		utils.PrintNote("No scheduler specs found in script. Running locally.")
 	}
-	if runStdout != "" || runStderr != "" || runMem != "" || runTime != "" || runGPU != "" {
-		utils.PrintNote("-o/-e/-m/-t/-g are only used for submitted jobs and will be ignored when running locally.")
+	if runStdout != "" || runStderr != "" || runMem != "" || runTime != "" || runGPU != "" || runAccount != "" || runPartition != "" {
+		utils.PrintNote("-o/-e/-m/-t/-g/-A/-p are only used for submitted jobs and will be ignored when running locally.")
 	}
 	return runLocally(cmd.Context(), contentScript, overlays, scriptSpecs, scriptArgs)
 }
@@ -778,6 +793,9 @@ func printDryRunSummary(contentScript, originScript string, specs *scheduler.Scr
 			fmt.Printf("  WorkDir:    %s\n", specs.Control.WorkDir)
 		} else {
 			fmt.Printf("  WorkDir:    . (default)\n")
+		}
+		if specs.Control.Account != "" {
+			fmt.Printf("  Account:    %s\n", specs.Control.Account)
 		}
 		if specs.Control.Partition != "" {
 			fmt.Printf("  Partition:  %s\n", specs.Control.Partition)
