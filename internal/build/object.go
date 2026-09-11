@@ -112,6 +112,10 @@ type BuildObject struct {
 	depImagePaths      map[string]string
 	provenanceComplete *bool
 	buildTools         meta.BuildTools
+
+	// foreignRoot is set only by FromForeignRoot: a .sif or sandbox directory
+	// condatainer did not build, packed by buildForeign instead of buildDef.
+	foreignRoot *foreignRoot
 }
 
 // embeddedFile is one rebuild source staged into /.cnt and named by
@@ -203,6 +207,9 @@ func (b *BuildObject) Build(ctx context.Context, buildDeps bool) error {
 	case BuildTypeConda:
 		return b.buildConda(ctx)
 	case BuildTypeDef:
+		if b.foreignRoot != nil {
+			return b.buildForeign(ctx)
+		}
 		return b.buildDef(ctx)
 	default: // BuildTypeScript
 		return b.buildScript(ctx, buildDeps)

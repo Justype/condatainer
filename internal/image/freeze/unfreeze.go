@@ -219,7 +219,7 @@ func archiveSize(ctx context.Context, sqf string) (sizeMB, entries int, err erro
 // root, and ChownRecursively repairs it afterward on the plain host, where no
 // such mapping limit applies.
 func buildImage(ctx context.Context, opts UnfreezeOptions, artifact, target, stage string, sizeMB, entries int) error {
-	squashfuse, err := findSquashfuse()
+	squashfuse, err := FindSquashfuse()
 	if err != nil {
 		return err
 	}

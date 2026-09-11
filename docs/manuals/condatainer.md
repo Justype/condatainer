@@ -519,7 +519,7 @@ Check the layer if it matters who can see the result — `(app-root)` or `(extra
 
 * `-n`, `--name [NAME]`: Custom name for the resulting overlay file. If used, all specified packages are bundled into one overlay.
 * `-p`, `--prefix [PATH]`: Custom prefix path for the overlay file. When `-f` is used, this can be omitted — the prefix is inferred from the file name.
-* `-f`, `--file [FILE]`: Path to definition file (.yaml, .sh, .def).
+* `-f`, `--file [FILE]`: Path to definition file (.yaml, .sh, .def), an already-built `.sif`, or an Apptainer sandbox directory.
 * `--from [URI]`: Build from an external image URI (e.g., `docker://ubuntu:22.04`).
 * `-c`, `--channel [CHANNEL]`: Conda channel to use, overriding config channels. Repeatable: `-c conda-forge -c bioconda`.
 * `-u`, `--update`: Rebuild overlays even if they already exist (atomic `.new` swap). Useful for refreshing a package to the latest version.
@@ -568,6 +568,10 @@ authentication, compatibility, and integrity failures are reported.
 * **`--file` only:** Create `.sqf` from external source file; prefix inferred from file name (e.g. `condatainer create -f r-collect.sh` → `r-collect.sqf`). The name is inferred only when neither `--name` nor `--prefix` is given.
 * **`--prefix` + `--file`:** Create `.sqf` from external source file at a custom path.
 * **`--from`:** Create `.sqf` from an external container image URI.
+* **`--file` with a `.sif` or sandbox directory:** Import an already-built Apptainer/Singularity
+  root into a real `.sqf` — no rebuild. Only a root originally built from `docker://`, `oras://`, or
+  `library://` can be imported; anything else is refused with a clear message. A `.sif` built for a
+  different architecture than this host is refused rather than packed unusable.
 
 ### System level Examples
 
@@ -660,6 +664,14 @@ Create a read-only overlay using a shell script that installs packages. See [Cus
 
 ```bash
 condatainer create -f install_packages.sh
+```
+
+Import an already-built `.sif` or Apptainer sandbox directory into a real `.sqf`, instead of
+rebuilding it from source:
+
+```bash
+condatainer create -f alpine.sif -p alpine
+condatainer create -f ./my-sandbox-dir -p my_base
 ```
 
 ### Exit Codes (script and job-submission behavior)

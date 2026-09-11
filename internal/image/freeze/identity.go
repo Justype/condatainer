@@ -41,7 +41,7 @@ find . -mindepth 1 \( -type c -o -type b \) -print0 |
 // and reading a .sqf through squashfuse costs a fraction of reading the .img
 // through fuse2fs — 2.4x the cost of a local read against 45x *(measured)*.
 func TreeIdentity(ctx context.Context, artifact string) (meta.KeyRef, error) {
-	squashfuse, err := findSquashfuse()
+	squashfuse, err := FindSquashfuse()
 	if err != nil {
 		return meta.KeyRef{}, err
 	}

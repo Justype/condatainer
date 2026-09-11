@@ -316,6 +316,67 @@ so a default root supplied by a shared install is not rebuilt into the user's
 own directory. Every other `.def` build's `IsInstalled` checks its own target
 path only.
 
+## Importing a foreign root
+
+`FromForeignRoot` (`foreign.go`) is `-f`'s third source shape, beside a recipe
+file and a URI: a `.sif` or an Apptainer sandbox directory someone already
+built, with no Apptainer invocation in this path at all. It is a separate
+constructor and a separate `buildForeign`, not a third case bolted onto
+`FromExternalSource`/`buildDef` — the two share every generic stage (the lock,
+the prebuilt check, key derivation, metadata staging, publish) but a def build
+resolves its upstream and *then* asks Apptainer to fetch and build, where an
+import has nothing left to fetch: the root already exists, and the identity
+question is what it was built from, read after the fact rather than resolved
+before.
+
+**Identity comes from the root's own record, never a fresh resolve.** A
+foreign root's `/.singularity.d/Singularity` carries the same `Bootstrap:`/
+`From:` lines Apptainer synthesizes for a live `scheme://` build (see *The
+upstream digest*), so `readForeignBootstrap` parses it with the same
+`parseBootstrap` and the recipe hash matches a fresh build from the same URI.
+The digest is `labels.json`'s `org.opencontainers.image.base.digest`, when
+present, exactly the reasoning `resolveUpstream` already applies to a locked
+rebuild: resolving the reference again would follow a tag that has moved since
+this root was built. The label is genuinely optional — an older
+Apptainer/Singularity build carries only the legacy `org.label-schema.*` set,
+sometimes with no base-digest label at all — so its absence records
+`meta.Unrecorded` rather than failing the import.
+
+**Only `docker://`, `oras://`, and `library://` roots import.**
+`allowedForeignBootstrap` refuses everything else (`shub`, `yum`, `zypper`,
+`debootstrap`, `localimage`, `scratch`, and anything unrecognized) before any
+key is derived. This is not a degraded identity tier for the rest — it is a
+refusal, because none of them can be rebuilt from a fresh machine: `shub` is
+dead, `localimage` names a path on the *original* builder's machine,
+`scratch` has no upstream a `.sif` preserves, and `yum`/`zypper`/`debootstrap`
+use a mirror-plus-version shape the identity model's single `From` string was
+never built to represent. A live `--from shub://...` build fails at
+Apptainer's own fetch before anything is published, so it needs no equivalent
+guard; an import reads a root that already built successfully, so it has no
+such safety net and must refuse explicitly instead.
+
+**Extraction never copies the tree out first.** A sandbox source packs
+directly, the same as a `.def` build's own sandbox does, since it is already a
+plain host directory. A `.sif` mounts its primary SquashFS partition read-only
+with `squashfuse -o offset=N` (`packFromSIF`), inside `freeze.MountedRun`'s
+unprivileged namespace — the partition's own byte offset stands in for the
+whole-file offset a `.sqf` mount uses, so this is the same primitive
+`internal/image/freeze` already uses to read a frozen artifact, not a new one.
+Either way, the final `mksquashfs -all-root -no-xattrs` repacks everything: a
+`.sif` extracted by dumping the partition and appending the staged metadata
+would be cheaper, but would leave every file's original ownership untouched,
+and a real service image (not a bare OS base) can carry non-root ownership
+that `unfreeze`'s single-identity namespace mapping cannot handle later (see
+*Unfreeze can't get correct ownership from the mount — only after it* in
+`internal/image/freeze/README.md`). A full repack is what actually
+renormalizes it.
+
+**Arch is checked against the SIF's own header, not a label.** `sif.Arch`
+reads the binary architecture field every SIF carries, always present unlike
+the self-reported `org.label-schema.build-arch` label. A mismatch against
+`runtime.GOARCH` refuses the import outright rather than packing an artifact
+that would report itself as native and never run.
+
 ## The container root
 
 Script and Conda builds run their *install* step inside a container, so each

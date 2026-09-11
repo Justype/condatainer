@@ -73,7 +73,7 @@ func buildTestSqf(t *testing.T) (sqf, mnt string) {
 // process behind: the sentinel joins bash/FUSE into its own process group
 // specifically so Cancel can kill all of it, not just the sentinel itself.
 func TestMountedRunCancelKillsFuseProcess(t *testing.T) {
-	squashfuse, err := findSquashfuse()
+	squashfuse, err := FindSquashfuse()
 	if err != nil {
 		t.Skip("no squashfuse available")
 	}
@@ -115,7 +115,7 @@ func TestMountedRunCancelKillsFuseProcess(t *testing.T) {
 // user namespace clears it) -- RunSentinel exists to close it one process
 // out instead. See sentinel.go's doc comment.
 func TestMountedRunSurvivesAbruptDeath(t *testing.T) {
-	if _, err := findSquashfuse(); err != nil {
+	if _, err := FindSquashfuse(); err != nil {
 		t.Skip("no squashfuse available")
 	}
 	if testHarnessPath == "" {

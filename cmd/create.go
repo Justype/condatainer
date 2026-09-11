@@ -225,7 +225,7 @@ func init() {
 	f := createCmd.Flags()
 	f.StringVarP(&createName, "name", "n", "", "Custom name for the overlay")
 	f.StringVarP(&createPrefix, "prefix", "p", "", "Custom prefix path for the overlay")
-	f.StringVarP(&createFile, "file", "f", "", "Path to definition file (.yaml, .txt, .sh, .def)")
+	f.StringVarP(&createFile, "file", "f", "", "Path to definition file (.yaml, .txt, .sh, .def, .sif, or a sandbox dir)")
 	f.StringVar(&createFrom, "from", "", "Build from an external image URI (e.g., docker://ubuntu:22.04)")
 	f.StringVar(&createBlockSize, "block-size", "", "SquashFS block size of app/external overlays (e.g. 256k)")
 	f.StringVar(&createDataBlockSize, "data-block-size", "", "SquashFS block size of data overlays (e.g. 512k, 1m)")
@@ -616,6 +616,33 @@ func isExternalBuildFile(path string) bool {
 		strings.HasSuffix(path, ".def")
 }
 
+// isForeignRoot reports whether path is an already-built container root — a
+// .sif or an Apptainer sandbox directory — that FromForeignRoot packs
+// directly rather than handing to Apptainer's own build.
+func isForeignRoot(path string) bool {
+	return utils.IsSif(path) || utils.IsSandboxDir(path)
+}
+
+// buildForeignSource imports a .sif or sandbox directory into targetPrefix,
+// exiting on failure. outputDir holds the image and its scratch space.
+func buildForeignSource(ctx context.Context, targetPrefix, source, outputDir string) {
+	bo, err := build.FromForeignRoot(ctx, targetPrefix, source, outputDir, createUpdate)
+	if err != nil {
+		ExitWithError("Failed to import %s: %v", source, err)
+	}
+	applyStoreOverflow(bo)
+
+	graph, err := build.NewBuildGraph(ctx, []*build.BuildObject{bo}, outputDir,
+		config.Global.SubmitJob, createUpdate)
+	if err != nil {
+		ExitWithError("Failed to create build graph: %v", err)
+	}
+	if err := graph.Run(ctx); err != nil {
+		exitOnBuildError(err)
+	}
+	ExitIfJobsSubmitted(graph)
+}
+
 // applyStoreOverflow marks a build to be filed under its identity when --store
 // was given.
 func applyStoreOverflow(bo *build.BuildObject) {
@@ -674,12 +701,16 @@ func runCreateWithName(ctx context.Context, packages []string) {
 	// A script or definition is not a conda input. It builds the same way --prefix
 	// builds one, targeting the managed images dir instead of a path the user typed.
 	if createFile != "" && !utils.IsCondaFile(createFile) {
-		if !isExternalBuildFile(createFile) {
-			ExitWithError("File must be .yml, .yaml, .txt, .sh, .bash, or .def")
+		if !isForeignRoot(createFile) && !isExternalBuildFile(createFile) {
+			ExitWithError("File must be .yml, .yaml, .txt, .sh, .bash, .def, .sif, or a sandbox directory")
 		}
 		absFile, _ := filepath.Abs(createFile)
 		targetPrefix := filepath.Join(imagesDir, strings.ReplaceAll(normalizedName, "/", "--"))
-		buildExternalSource(ctx, targetPrefix, absFile, strings.HasSuffix(createFile, ".def"), imagesDir)
+		if isForeignRoot(createFile) {
+			buildForeignSource(ctx, targetPrefix, absFile, imagesDir)
+		} else {
+			buildExternalSource(ctx, targetPrefix, absFile, strings.HasSuffix(createFile, ".def"), imagesDir)
+		}
 		return
 	}
 
@@ -715,7 +746,7 @@ func runCreateWithPrefix(ctx context.Context) {
 	// Use the directory from prefix path as output directory
 	outputDir := filepath.Dir(absPrefix)
 
-	if !utils.FileExists(createFile) {
+	if !utils.FileExists(createFile) && !utils.IsSandboxDir(createFile) {
 		ExitWithError("File %s not found", utils.StylePath(createFile))
 	}
 
@@ -732,12 +763,16 @@ func runCreateWithPrefix(ctx context.Context) {
 		if err := bo.Build(ctx, false); err != nil {
 			ExitWithError("Build failed: %v", err)
 		}
+	} else if isForeignRoot(createFile) {
+		// Already-built .sif or sandbox directory
+		absFile, _ := filepath.Abs(createFile)
+		buildForeignSource(ctx, absPrefix, absFile, outputDir)
 	} else if isExternalBuildFile(createFile) {
 		// Shell script or apptainer def file
 		absFile, _ := filepath.Abs(createFile)
 		buildExternalSource(ctx, absPrefix, absFile, strings.HasSuffix(createFile, ".def"), outputDir)
 	} else {
-		ExitWithError("File must be .yml, .yaml, .txt, .sh, .bash, or .def")
+		ExitWithError("File must be .yml, .yaml, .txt, .sh, .bash, .def, .sif, or a sandbox directory")
 	}
 }
 
@@ -779,8 +814,11 @@ func runCreateFromSource(ctx context.Context) {
 	isRemote := strings.Contains(source, "://")
 	if !isRemote {
 		source, _ = filepath.Abs(source)
-		if !utils.FileExists(source) {
+		if !utils.FileExists(source) && !utils.IsSandboxDir(source) {
 			ExitWithError("Source %s not found", utils.StylePath(source))
+		}
+		if isForeignRoot(source) {
+			ExitWithError("--from does not import an already-built .sif or sandbox; use -f %s instead", utils.StylePath(source))
 		}
 	}
 
