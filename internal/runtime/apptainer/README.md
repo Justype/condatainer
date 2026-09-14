@@ -64,10 +64,10 @@ writable `.img` with root-owned files):
   (`condatainer update --libexec`), rather than silently reaching for
   whatever `apptainer` happens to be on `PATH`.
 
-A `.def` (`os`/`base`) build's own `apptainer build --fakeroot` does not go
+A `.def` (`os`) build's own `apptainer build --fakeroot` does not go
 through `ResolveBin` at all — `internal/build/def.go` resolves the system
 binary directly (`EnsureApptainer`) with no zstd check, because its output is
-a sandbox: an `os`/`base` build never mounts a zstd-compressed artifact
+a sandbox: an `os` build never mounts a zstd-compressed artifact
 during the build itself (`#DEP:` is data-only). Packing that sandbox
 afterward never runs in a container at all any more —
 `internal/build/squashfs.go`'s `createSquashfs` runs `mksquashfs` directly on

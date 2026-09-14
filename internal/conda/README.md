@@ -6,13 +6,13 @@ Isolated, in-container management of the Conda environment mounted at `/cnt_env`
 
 - `CNT_CONDA_ROOT` identifies the mounted environment; mutations also require
   `CNT_CONDA_WRITABLE=1`.
-- Micromamba itself is `toolpath.Resolve("micromamba")`, not a fixed path: a base image is no
-  longer required to carry one (`internal/build`'s retired base-type plan), so `resolveEnvironment`
-  finds it the same way every other tool does — libexec's self-provisioned copy first. That only
-  works because `internal/runtime/container.Setup` binds `libexec.Dir()` into the container
-  whenever a conda env is actually mounted (`lastImg != ""`, `setup.go`) — this package cannot
-  construct that bind itself, since by the time this code runs it is already executing inside the
-  container Setup produced.
+- Micromamba itself is `toolpath.Resolve("micromamba")`, not a fixed path: a base image is not
+  required to carry one, so `resolveEnvironment` finds it the same way every other tool does —
+  libexec's self-provisioned copy first. That only works because
+  `internal/runtime/container.Setup` binds `libexec.Dir()` into the container whenever a conda env
+  is actually mounted (`lastImg != ""`, `setup.go`) — this package cannot construct that bind
+  itself, since by the time this code runs it is already executing inside the container Setup
+  produced.
 - `CNT_CONDA_CHANNELS` carries CondaTainer's configured first-install channels.
 - `CONDA_PREFIX` and `MAMBA_ROOT_PREFIX` are reset to the mounted environment for every command.
 - Ambient Conda and Micromamba prefix and rc variables are removed.

@@ -63,9 +63,7 @@ whatever is left (see Overlay ordering below). A `.sif` wins unconditionally
 when present — `ensureAtMostOneSif` already guarantees there is at most one,
 and root is its only valid use, so it wins regardless of where it falls among
 the requested overlays. Otherwise the first `os`-typed entry, in the order
-requested, wins. A manifest still recording the retired `catalog.TypeBase`
-(`catalog.DeriveType` no longer produces it) is not eligible — rebuild it to
-pick up type `os`. `TypeEnv` is excluded even though it merges at root the
+requested, wins. `TypeEnv` is excluded even though it merges at root the
 same way, since an environment's identity presupposes a chosen root and so
 can never supply one.
 
@@ -299,7 +297,7 @@ is shell script sourced into the running shell — apptainer's own `--env` is a
 static list and cannot express it. Skipped when `ActivationScript` returns
 `""`, which it does for `ActivationNone`, and otherwise whenever nothing
 mounted could contribute an `activate.d` directory — the common case for an
-`os`/`base`-only container under `ActivationAll`.
+`os`-only container under `ActivationAll`.
 
 `MMHelperScript(envMounted)` appends one more bash function to the same preamble: `mm`, wrapping
 `condatainer env "$@"` and, for `install`/`update`/`remove`, chaining `eval "$(condatainer env

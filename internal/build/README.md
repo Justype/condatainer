@@ -387,10 +387,10 @@ once before any node runs, and records it on every dependent as `Spec.Base`;
 resolving it through the exact same catalog/build path — `NewBuildObject` +
 `NewBuildGraph` + `Run` — every other name takes. There is no dedicated build
 path for it: it is an ordinary `.def` recipe, `catalog.TypeOS` like any other
-— `catalog.DeriveType` no longer derives a distinct type from a `.../base`
-name (`catalog.TypeBase` is retired). A project may still name its default
-root `.../base` for readability; that name carries no special meaning to the
-type system, only to `config.BaseRecipeName`.
+— `catalog.DeriveType` never derives a distinct type from a `.../base` name.
+A project may still name its default root `.../base` for readability; that
+name carries no special meaning to the type system, only to
+`config.BaseRecipeName`.
 
 A locked rebuild (below) is the second caller of the same convention, and the
 one that actually matters inside a project: `internal/project/restore` sets

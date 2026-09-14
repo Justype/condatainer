@@ -75,7 +75,7 @@ which is the cost the cache exists to avoid.
 Degradation is deliberate, because most images in the wild predate the format:
 a missing or unreadable runtime document never blocks a mount, it only means
 this image contributes no PATH/env entries — a manifest's `type` is never
-consulted before accepting something as a container root either, base or not.
+consulted before accepting something as a container root either.
 
 ### manifest.json
 
@@ -84,7 +84,7 @@ and platform. It carries **no runtime block at all** — that lives in
 `runtime.json` and nowhere else.
 
 `type` and `build_type` are both enumerations validated here, and neither derives
-from the other: `catalog.Type` says what the payload *is* (`base`, `os`, `app`,
+from the other: `catalog.Type` says what the payload *is* (`os`, `app`,
 `data`, `env`) and `meta.BuildType` says how it was produced (`conda`, `script`,
 `def`, `snapshot`). One recipe language produces both an app and a data image.
 `internal/build` aliases `meta.BuildType` rather than keeping a second list of

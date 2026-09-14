@@ -105,8 +105,7 @@ The catalog scheme needs no equivalent. A versioned tag there is immutable —
 `registry push` refuses to replace one without `--force` — so it never orphans
 the manifest it named, and adding an architecture republishes an index that still
 references the existing per-platform child. Only a same-day rebuild of a
-version-less `base` or `os` replaces a date tag, and those are replaceable by
-design.
+version-less `os` replaces a date tag, and those are replaceable by design.
 
 ## When `--all` is worth its bytes
 

@@ -1605,7 +1605,7 @@ condatainer info ./ubuntu--22.04.sqf
 CondaTainer builds every image as a `.sqf`, the base included. A `.sif` from
 elsewhere reads the same way: its payload is a SquashFS partition starting
 partway into the file, so the archive reads take that offset. The `Type` line is
-the type from the image's embedded metadata — `app`, `base`, `os`, `data`, or
+the type from the image's embedded metadata — `app`, `os`, `data`, or
 `environment` for one produced by `overlay freeze`. An image built before that
 metadata existed reports `unknown`.
 
@@ -1613,7 +1613,7 @@ metadata existed reports `unknown`.
 
 | Section | Fields |
 |---------|--------|
-| **File** | Name, Path, file Size, Type (`app` / `base` / `os` / `data` / `environment` / `unknown`, Read-Only), and Created timestamp |
+| **File** | Name, Path, file Size, Type (`app` / `os` / `data` / `environment` / `unknown`, Read-Only), and Created timestamp |
 | **SquashFS** | Compression algorithm (with level if set), Block Size, Inode count, Fragment count, Deduplication flag |
 | **Payload** | `Prefix` (`/cnt/<name>/<version>`, for `app` and `data`); `Deletions` for a frozen environment. Read from the image's metadata, never from its filename |
 | **Environment** | Variables from the image's embedded metadata, with their notes |
@@ -2626,7 +2626,7 @@ A `restricted` endpoint takes anything. At a `public` one:
 |---|---|
 | `#REDISTRIBUTE: no` | **never**, whatever the type, and no flag overrides it |
 | `#REDISTRIBUTE: yes` | yes, whatever the type |
-| nothing, and it is `base` or `os` | yes — a container root, and packages from a public distribution |
+| nothing, and it is `os` | yes — a container root, and packages from a public distribution |
 | nothing, and it is `data` | yes — the type asserts public reference data and the indexes built from it |
 | nothing, and it is an `app` | **no** — someone else's software with unstated terms |
 | nothing, and it is a Conda build | yes — it embeds no recipe, so it could never carry the declaration |
