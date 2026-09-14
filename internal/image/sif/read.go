@@ -25,6 +25,14 @@ func ReadFile(path, innerPath string) ([]byte, error) {
 	return squashfs.CatFile(path, innerPath, part.Offset)
 }
 
+// RequireBash checks that a SIF's own root has /bin/bash.
+func RequireBash(path string) error {
+	if _, err := ReadFile(path, utils.BashPath); err != nil {
+		return fmt.Errorf("this base provides no /%s; every build runs inside the base and needs it: %w", utils.BashPath, err)
+	}
+	return nil
+}
+
 // ExtractPartition copies a SIF's primary SquashFS partition out to a standalone
 // .sqf. The partition is already a complete SquashFS archive, so this is a byte
 // copy of one range — no repacking, no recompression.

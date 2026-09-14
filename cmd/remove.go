@@ -87,7 +87,7 @@ func runRemove(cmd *cobra.Command, args []string) error {
 	var externalPaths []string
 	var searchArgs []string
 	for _, arg := range args {
-		if utils.IsOverlay(arg) {
+		if utils.IsOverlay(arg) || utils.IsSif(arg) {
 			externalPaths = append(externalPaths, arg)
 		} else {
 			searchArgs = append(searchArgs, arg)

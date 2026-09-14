@@ -477,7 +477,7 @@ func (b *BuildObject) GetMissingDependencies() ([]string, error) {
 		// An overlay path is satisfied by the file being there. The installed map
 		// is keyed by name, so a path would never match it and would look
 		// permanently missing.
-		if utils.IsOverlay(dep) {
+		if utils.IsOverlay(dep) || utils.IsSif(dep) {
 			if !utils.FileExists(dep) {
 				missing = append(missing, dep)
 			}

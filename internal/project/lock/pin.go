@@ -211,10 +211,10 @@ func resolveByName(request string, opts PinOptions) (store.Candidate, []store.Ca
 // looksLikePath reports whether a target addresses a file rather than an
 // identity. An identity never contains a separator — `scheme@sha256:<hex>` and a
 // bare digest are both flat — so anything that does is a path, as is anything
-// carrying an image extension. Routing those here means a .img is refused for
-// being a .img rather than for failing to parse as a digest.
+// carrying an image extension. Routing those here means a .img or .sif is
+// refused for being one rather than for failing to parse as a digest.
 func looksLikePath(target string) bool {
-	return strings.ContainsRune(target, filepath.Separator) || utils.IsOverlay(target)
+	return strings.ContainsRune(target, filepath.Separator) || utils.IsOverlay(target) || utils.IsSif(target)
 }
 
 // candidateFromPath verifies the .sqf a path request names. A writable .img has

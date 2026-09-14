@@ -82,6 +82,21 @@ func TestResolveBaseImageRejectsAMissingBase(t *testing.T) {
 	}
 }
 
+// A .sif root is checked for /bin/bash; unlike the .sqf cases above, this
+// exercises a real bash lookup, so a file that isn't a real SIF at all still
+// has to fail resolveBaseImage rather than being waved through.
+func TestResolveBaseImageChecksBashInASif(t *testing.T) {
+	dir := withImageDir(t)
+	root := filepath.Join(dir, "myos.sif")
+	if err := os.WriteFile(root, []byte("not a real sif"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := (Options{}).resolveBaseImage(root); err == nil {
+		t.Fatal("resolveBaseImage: want an error for a .sif with no readable bash")
+	}
+}
+
 // ensureDefaults no longer touches BaseImage at all — that is
 // resolveBaseImage's job, run separately after overlay setup.
 func TestEnsureDefaultsFillsCommandOnly(t *testing.T) {

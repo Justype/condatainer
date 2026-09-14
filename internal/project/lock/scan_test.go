@@ -126,7 +126,7 @@ func TestScanReadsHeredocDeclarations(t *testing.T) {
 
 func TestScanClassifiesPathDeclarations(t *testing.T) {
 	root := t.TempDir()
-	write(t, root, "run.sh", "#DEP: ./overlays/tool.sqf\n#DEP: env.img\nrun\n")
+	write(t, root, "run.sh", "#DEP: ./overlays/tool.sqf\n#DEP: env.img\n#DEP: base.sif\nrun\n")
 
 	result := scan(t, root)
 	sqf := find(t, result, PathPrefix+"overlays/tool.sqf")
@@ -139,6 +139,13 @@ func TestScanClassifiesPathDeclarations(t *testing.T) {
 	img := find(t, result, PathPrefix+"env.img")
 	if img.Kind != KindWritable || img.Kind.Pinnable() {
 		t.Errorf("img request = %#v, want an unpinnable writable", img)
+	}
+	// A .sif is root-only, not writable, so it classifies like a .sqf here —
+	// candidateFromPath is what actually refuses it, with the clearer
+	// "only .sqf can be pinned" message.
+	sif := find(t, result, PathPrefix+"base.sif")
+	if sif.Kind != KindPath || !sif.Kind.Pinnable() {
+		t.Errorf("sif request = %#v", sif)
 	}
 }
 

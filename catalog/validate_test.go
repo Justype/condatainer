@@ -201,10 +201,10 @@ func TestValidateDeps(t *testing.T) {
 }
 
 // IsPathDep decides which grammar a declaration is read with, so its extension
-// set has to be utils.IsOverlay's — a running script's `#DEP: env.ext3` is a
-// path there and must stay one here.
+// set has to be utils.IsOverlay's plus .sif — a running script's `#DEP: env.ext3`
+// or `#DEP: base.sif` is a path there and must stay one here.
 func TestIsPathDepCoversEveryOverlayExtension(t *testing.T) {
-	for _, value := range []string{"env.img", "env.ext3", "x.sqf", "x.sqsh", "x.squashfs", "./a/b.SQF"} {
+	for _, value := range []string{"env.img", "env.ext3", "x.sqf", "x.sqsh", "x.squashfs", "./a/b.SQF", "base.sif"} {
 		if !IsPathDep(value) {
 			t.Errorf("IsPathDep(%q) = false, want true", value)
 		}

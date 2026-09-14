@@ -135,6 +135,7 @@ overlays, err := container.ResolveOverlayPaths([]string{
     "cellranger/9.0.1",        // → /path/cellranger--9.0.1.sqf
     "/abs/path/custom.sqf",    // → /abs/path/custom.sqf
     "myenv.img",               // → /path/myenv.img
+    "./tmp/alpine.sif",        // → /abs/tmp/alpine.sif
 })
 ```
 

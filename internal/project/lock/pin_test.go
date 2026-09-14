@@ -296,7 +296,7 @@ func TestReconcileDropsAnInvalidPin(t *testing.T) {
 func TestPinRefusesAFileAsTheIdentity(t *testing.T) {
 	root := projectRoot(t)
 	for _, target := range []string{
-		"/shared/overlays/star.sqf", "./star.sqf", "/tmp/env.img", "/tmp/base.sif",
+		"/shared/overlays/star.sqf", "./star.sqf", "/tmp/env.img", "/tmp/base.sif", "base.sif",
 	} {
 		_, err := Pin(root, "star/2.7.11b", target, PinOptions{})
 		if !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "names an identity") {

@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/image/sif"
 	"github.com/Justype/condatainer/internal/runtime/container"
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -86,7 +87,9 @@ func (o Options) ensureDefaults() (Options, error) {
 //
 // There is no overlay-only execution, so a container with no root cannot be
 // started at all — this is checked here rather than letting Apptainer report
-// a missing file.
+// a missing file. A .sif root is also checked for /bin/bash here, since
+// nothing else on this path guarantees it the way a build does for its own
+// output.
 func (o Options) resolveBaseImage(root string) (Options, error) {
 	switch {
 	case root != "":
@@ -102,6 +105,11 @@ func (o Options) resolveBaseImage(root string) (Options, error) {
 	// definition build packs its own sandbox by running it.
 	if !utils.FileExists(o.BaseImage) && !utils.IsSandboxDir(o.BaseImage) {
 		return o, fmt.Errorf("base image not found: %s", o.BaseImage)
+	}
+	if utils.IsSif(o.BaseImage) {
+		if err := sif.RequireBash(o.BaseImage); err != nil {
+			return o, err
+		}
 	}
 	return o, nil
 }

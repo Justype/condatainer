@@ -159,7 +159,10 @@ in an analysis script and is rejected in a recipe.
 
 `IsPathDep` is the single answer to "is this dep a path", because this package
 owns the `Normalize`/`ParseDep` grammar that applies only to names. Its extension
-set must stay `utils.IsOverlay`'s, `.ext3` included.
+set must stay `utils.IsOverlay`'s, `.ext3` included, plus `.sif` — a root-only,
+literal-path reference, never an overlay: it never stacks and carries no build
+identity, so `ValidateDeps` refuses it in a recipe the same as any other path,
+and it is only ever useful in a running script's own `#DEP:`.
 
 ## `#TARGET:` names the artifact
 

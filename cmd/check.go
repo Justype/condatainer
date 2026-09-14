@@ -106,7 +106,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	hasUnresolvable := false
 	var packageDeps []string
 	for _, dep := range missingDeps {
-		if utils.IsOverlay(dep) {
+		if utils.IsOverlay(dep) || utils.IsSif(dep) {
 			if !autoCreateExternalOverlay(cmd.Context(), dep) {
 				hasUnresolvable = true
 			}
@@ -163,7 +163,7 @@ func collectDeps(scriptPaths []string, preSeededDeps []string) ([]string, error)
 
 		for _, dep := range scriptDeps {
 			key := dep
-			if utils.IsOverlay(dep) {
+			if utils.IsOverlay(dep) || utils.IsSif(dep) {
 				if !filepath.IsAbs(dep) {
 					dep = filepath.Join(workDir, dep)
 				}
@@ -196,7 +196,7 @@ func checkDeps(deps []string, installedOverlays map[string]string) []string {
 
 	var overlays, packages []string
 	for _, dep := range deps {
-		if utils.IsOverlay(dep) {
+		if utils.IsOverlay(dep) || utils.IsSif(dep) {
 			overlays = append(overlays, dep)
 		} else {
 			packages = append(packages, dep)

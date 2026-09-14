@@ -17,11 +17,12 @@ var ErrInvalidRecipe = errors.New("catalog: invalid recipe")
 // Exported because it decides which grammar a dependency is read with, and this
 // package owns that grammar: Normalize and ParseDep apply to a name/version and
 // to nothing else. A second answer elsewhere would let one string be a name in
-// one place and a path in another. The extensions are utils.IsOverlay's set,
-// which is what a running script's declaration is already read with.
+// one place and a path in another. The extensions are utils.IsOverlay's set
+// plus .sif — this package can't import utils, so the set is kept in sync by
+// hand.
 func IsPathDep(value string) bool {
 	switch strings.ToLower(filepath.Ext(strings.TrimSpace(value))) {
-	case ".sqf", ".sqsh", ".squashfs", ".img", ".ext3":
+	case ".sqf", ".sqsh", ".squashfs", ".img", ".ext3", ".sif":
 		return true
 	}
 	return false

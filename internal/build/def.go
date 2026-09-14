@@ -241,16 +241,13 @@ func copyMetaIntoSandbox(metaDir, sandbox string) error {
 	return nil
 }
 
-// bashPath is where bash must exist inside a chosen root.
-const bashPath = "bin/bash"
-
 // checkBash refuses a sandbox with no bash — any .def build is a candidate
 // root at runtime, not only the configured default, so this runs for every
 // one of them.
 func checkBash(sandbox string) error {
-	info, err := os.Stat(filepath.Join(sandbox, bashPath))
+	info, err := os.Stat(filepath.Join(sandbox, utils.BashPath))
 	if err != nil || info.Mode()&0o111 == 0 {
-		return fmt.Errorf("this base provides no /%s; every build runs inside the base and needs it", bashPath)
+		return fmt.Errorf("this base provides no /%s; every build runs inside the base and needs it", utils.BashPath)
 	}
 	return nil
 }

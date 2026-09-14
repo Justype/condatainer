@@ -15,6 +15,7 @@ import (
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/image"
+	"github.com/Justype/condatainer/internal/image/sif"
 	"github.com/Justype/condatainer/internal/runtime/apptainer"
 	execpkg "github.com/Justype/condatainer/internal/runtime/exec"
 	"github.com/Justype/condatainer/internal/scheduler"
@@ -411,7 +412,7 @@ func resolveDeps(contentScript, originScriptPath string) (overlays []string, err
 
 	missingDeps := []string{}
 	for _, dep := range deps {
-		if utils.IsOverlay(dep) {
+		if utils.IsOverlay(dep) || utils.IsSif(dep) {
 			if !utils.FileExists(dep) {
 				missingDeps = append(missingDeps, dep)
 			}
@@ -430,7 +431,7 @@ func resolveDeps(contentScript, originScriptPath string) (overlays []string, err
 		}
 		externalFiles := []string{}
 		for _, md := range missingDeps {
-			if utils.IsOverlay(md) {
+			if utils.IsOverlay(md) || utils.IsSif(md) {
 				externalFiles = append(externalFiles, md)
 			}
 		}
@@ -446,7 +447,7 @@ func resolveDeps(contentScript, originScriptPath string) (overlays []string, err
 	// Resolve overlay paths
 	overlays = make([]string, len(deps))
 	for i, dep := range deps {
-		if utils.IsOverlay(dep) {
+		if utils.IsOverlay(dep) || utils.IsSif(dep) {
 			overlays[i] = dep
 		} else {
 			normalized := catalog.Normalize(dep)
@@ -458,10 +459,18 @@ func resolveDeps(contentScript, originScriptPath string) (overlays []string, err
 		}
 	}
 
-	// Check .img availability before submitting or running locally
+	// Check .img availability, and a .sif root's own /bin/bash, before
+	// submitting or running locally — a .sif here is always the exec root
+	// (ensureAtMostOneSif refuses a second one), and failing now means before
+	// a scheduler queue wait, not after one.
 	for _, ol := range overlays {
 		if utils.IsImg(ol) && utils.FileExists(ol) {
 			if err := image.CheckAvailable(ol, runWritableImg); err != nil {
+				return nil, err
+			}
+		}
+		if utils.IsSif(ol) {
+			if err := sif.RequireBash(ol); err != nil {
 				return nil, err
 			}
 		}
@@ -630,7 +639,7 @@ func printDryRunSummary(contentScript, originScript string, specs *scheduler.Scr
 		for _, dep := range deps {
 			var entry depEntry
 			entry.dep = dep
-			if utils.IsOverlay(dep) {
+			if utils.IsOverlay(dep) || utils.IsSif(dep) {
 				p := dep
 				if !filepath.IsAbs(p) {
 					p = filepath.Join(workDir, p)
@@ -674,7 +683,7 @@ func printDryRunSummary(contentScript, originScript string, specs *scheduler.Scr
 			if !e.ok {
 				continue
 			}
-			if utils.IsOverlay(e.dep) {
+			if utils.IsOverlay(e.dep) || utils.IsSif(e.dep) {
 				externals = append(externals, e.dep)
 			} else {
 				dir := filepath.Dir(e.path)
@@ -700,7 +709,7 @@ func printDryRunSummary(contentScript, originScript string, specs *scheduler.Scr
 		for _, e := range entries {
 			if !e.ok {
 				suffix := utils.StyleWarning("(not installed)")
-				if utils.IsOverlay(e.dep) {
+				if utils.IsOverlay(e.dep) || utils.IsSif(e.dep) {
 					suffix = utils.StyleWarning("(not found)")
 				}
 				fmt.Printf("  %s %s  %s\n", cross, e.dep, suffix)

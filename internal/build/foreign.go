@@ -36,8 +36,9 @@ type foreignRoot struct {
 // FromForeignRoot creates a BuildObject that packs an already-built .sif or
 // Apptainer sandbox directory into a real .sqf, carrying identity and
 // equivalence derived from the root's own embedded build record rather than
-// left absent. See plan/sif-import-sqf.md for why this is a separate
-// constructor from FromExternalSource rather than a third case of it.
+// left absent. See this package's README, Importing a foreign root, for why
+// this is a separate constructor from FromExternalSource rather than a third
+// case of it.
 func FromForeignRoot(ctx context.Context, targetPrefix, source, imagesDir string, update bool) (*BuildObject, error) {
 	sandbox := utils.IsSandboxDir(source)
 	if !sandbox && !utils.IsSif(source) {
@@ -234,7 +235,7 @@ func (b *BuildObject) buildForeign(ctx context.Context) error {
 			return err
 		}
 	} else {
-		if err := checkBashInSIF(fr.path); err != nil {
+		if err := sif.RequireBash(fr.path); err != nil {
 			b.Cleanup(true) //nolint:errcheck
 			return err
 		}
@@ -257,16 +258,6 @@ func (b *BuildObject) buildForeign(ctx context.Context) error {
 	return nil
 }
 
-// checkBashInSIF is checkBash's counterpart for a .sif that has not been
-// mounted: one unsquashfs read of the file, proof it exists, at the
-// partition's own offset — no mount, so a SIF missing even this is refused
-// before the mount-and-repack runs.
-func checkBashInSIF(sifPath string) error {
-	if _, err := sif.ReadFile(sifPath, bashPath); err != nil {
-		return fmt.Errorf("this base provides no /%s; every build runs inside the base and needs it: %w", bashPath, err)
-	}
-	return nil
-}
 
 // packFromSIF mounts a .sif's primary SquashFS partition read-only via
 // squashfuse, at the partition's own byte offset, inside freeze.MountedRun's

@@ -571,13 +571,14 @@ func findLocalFilesWithFilter(toComplete string, maxDepth int, fileFilter func(n
 // Includes directories for navigation and recursively finds files up to 1 level deep
 func localOverlaySuggestions(toComplete string, includeImg bool) []string {
 	return findLocalFilesWithFilter(toComplete, 1, func(name string) bool {
-		// Filter based on file type
-		if !utils.IsOverlay(name) {
+		// Filter based on file type. .sif is root-only, same as .img, so it
+		// rides the same includeImg gate.
+		if !utils.IsOverlay(name) && !utils.IsSif(name) {
 			return false
 		}
 
-		if utils.IsImg(name) && !includeImg {
-			// Skip .img files when includeImg is false
+		if (utils.IsImg(name) || utils.IsSif(name)) && !includeImg {
+			// Skip .img/.sif files when includeImg is false
 			return false
 		}
 		if includeImg {

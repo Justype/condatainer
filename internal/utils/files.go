@@ -47,6 +47,10 @@ func IsSif(path string) bool {
 // root. Its presence is what makes an unpacked directory runnable as one.
 const SingularityDir = ".singularity.d"
 
+// BashPath is where bash must exist inside any chosen container root —
+// checked wherever one is built, imported, or selected at run time.
+const BashPath = "bin/bash"
+
 // IsSandboxDir reports whether path is an unpacked container root: a directory
 // carrying apptainer's own metadata directory. A bare directory is not one —
 // apptainer would take it and fail on a root with no runscript.

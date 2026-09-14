@@ -1,6 +1,7 @@
 package container
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,6 +12,28 @@ func TestMissingOverlayErrorSqf(t *testing.T) {
 	err := missingOverlayError("/proj/tool.sqf")
 	if err == nil || !strings.Contains(err.Error(), "/proj/tool.sqf") || strings.Contains(err.Error(), "snapshot") {
 		t.Fatalf("err = %v, want a plain not-found message", err)
+	}
+}
+
+// A relative .sif is a path, not a catalog name, and must resolve rather than
+// fall through to ParseDep.
+func TestResolveOverlayPathsRelativeSif(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	InvalidateInstalledOverlaysCache()
+	t.Cleanup(InvalidateInstalledOverlaysCache)
+
+	sifPath := filepath.Join(dir, "alpine.sif")
+	if err := os.WriteFile(sifPath, []byte("not a real sif, just a stat target"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	resolved, err := ResolveOverlayPaths([]string{"alpine.sif"})
+	if err != nil {
+		t.Fatalf("ResolveOverlayPaths: %v", err)
+	}
+	if len(resolved) != 1 || resolved[0] != sifPath {
+		t.Errorf("resolved = %v, want [%s]", resolved, sifPath)
 	}
 }
 

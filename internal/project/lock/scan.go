@@ -388,7 +388,7 @@ func isBuildRecipe(text []byte) bool {
 // classify the same way the scanner classifies the same text in a script, or the
 // two would disagree about what the lock covers.
 func ParseDeclaration(value string) (Request, string) {
-	if utils.IsOverlay(value) {
+	if utils.IsOverlay(value) || utils.IsSif(value) {
 		clean := filepath.ToSlash(filepath.Clean(value))
 		kind := KindPath
 		switch {

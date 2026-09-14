@@ -75,7 +75,7 @@ func ResolveOverlayPaths(inputs []string) ([]string, error) {
 			continue
 		}
 
-		if utils.IsOverlay(pathToResolve) {
+		if utils.IsOverlay(pathToResolve) || utils.IsSif(pathToResolve) {
 			absPath, err := filepath.Abs(pathToResolve)
 			if err != nil {
 				return nil, fmt.Errorf("failed to normalize overlay path %s: %w", pathToResolve, err)
