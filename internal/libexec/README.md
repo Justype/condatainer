@@ -209,10 +209,19 @@ the flock acquired right after is what actually serializes access, not the file'
 `verifyToolchain` checks a staged (not yet live) generation by output content, not exit status.
 `squashfuse` always exits 254 for an argument-free invocation — version and help flags included —
 even though it prints its own name and version banner regardless; only a real archive +
-mountpoint argument gets exit 0. `apptainer`/`mksquashfs` do exit 0 for `--version`, but
-content-checking all three the same way needs no per-tool special case.
+mountpoint argument gets exit 0. `apptainer`/`mksquashfs`/`unsquashfs` do exit 0 for their own
+version flag, but content-checking all four the same way needs no per-tool special case.
 
-The apptainer floor is `>= 1.4`: below that, it cannot mount a zstd-compressed SquashFS. This
-package's own threshold is independent of `internal/runtime/apptainer.CheckZstdSupport` (same
-number) because verifying a *staged* binary must never touch that package's global, live-apptainer
-state.
+`versionFlag` is the one place that flag differs per tool: `mksquashfs`/`unsquashfs`
+(squashfs-tools) predate GNU-style long options and only recognize `-version`; everything else
+provisioned here takes `--version`.
+
+Two floors, both checked by `verifyFloor` against `meetsFloor`:
+
+- apptainer `>= 1.4` — below that, it cannot mount a zstd-compressed SquashFS. This package's own
+  threshold is independent of `internal/runtime/apptainer.CheckZstdSupport` (same number) because
+  verifying a *staged* binary must never touch that package's global, live-apptainer state.
+- squashfs-tools (checked via `mksquashfs`, since `unsquashfs` always ships the same version)
+  `>= 4.4` — below that, `mksquashfs` cannot produce zstd-compressed archives, and `unsquashfs`
+  has no `-offset`, which `internal/image/squashfs` relies on to read a SquashFS partition inside
+  a SIF in place.

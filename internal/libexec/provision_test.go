@@ -25,7 +25,7 @@ func TestParseVersion(t *testing.T) {
 	}
 }
 
-func TestMeetsZstdFloor(t *testing.T) {
+func TestMeetsFloor(t *testing.T) {
 	cases := map[string]bool{
 		"1.5.3": true,
 		"1.4.0": true,
@@ -36,8 +36,25 @@ func TestMeetsZstdFloor(t *testing.T) {
 		"1":     false, // no minor component to compare
 	}
 	for version, want := range cases {
-		if got := meetsZstdFloor(version); got != want {
-			t.Errorf("meetsZstdFloor(%q) = %v, want %v", version, got, want)
+		if got := meetsFloor(version, apptainerZstdFloorMajor, apptainerZstdFloorMinor); got != want {
+			t.Errorf("meetsFloor(%q, %d, %d) = %v, want %v", version, apptainerZstdFloorMajor, apptainerZstdFloorMinor, got, want)
+		}
+	}
+}
+
+// mksquashfs and unsquashfs only recognize their own single-dash "-version",
+// not the GNU-style "--version" every other provisioned tool takes.
+func TestVersionFlag(t *testing.T) {
+	cases := map[string]string{
+		"mksquashfs": "-version",
+		"unsquashfs": "-version",
+		"apptainer":  "--version",
+		"squashfuse": "--version",
+		"micromamba": "--version",
+	}
+	for name, want := range cases {
+		if got := versionFlag(name); got != want {
+			t.Errorf("versionFlag(%q) = %q, want %q", name, got, want)
 		}
 	}
 }

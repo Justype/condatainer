@@ -30,10 +30,29 @@ func commandContext(ctx context.Context, name string, args ...string) *exec.Cmd 
 // package inside it, the same way the official installer manages itself.
 var packages = []string{"micromamba", "squashfs-tools", "squashfuse", "apptainer"}
 
-// zstdFloor is the minimum apptainer version this toolchain must provide. See
-// the README, Verification, for why this is independent of
+// apptainerZstdFloor is the minimum apptainer version this toolchain must
+// provide. See the README, Verification, for why this is independent of
 // internal/runtime/apptainer.CheckZstdSupport despite the same threshold.
-const zstdFloorMajor, zstdFloorMinor = 1, 4
+const apptainerZstdFloorMajor, apptainerZstdFloorMinor = 1, 4
+
+// squashfsToolsFloor is the minimum squashfs-tools version this toolchain
+// must provide: below 4.4, mksquashfs cannot produce zstd-compressed
+// archives, and unsquashfs has no -offset, which internal/image/squashfs
+// relies on to read a SquashFS partition inside a SIF in place.
+const squashfsToolsFloorMajor, squashfsToolsFloorMinor = 4, 4
+
+// versionFlag is the flag a provisioned binary prints its own version for.
+// squashfs-tools (mksquashfs, unsquashfs) predates GNU-style long options and
+// only recognizes the single-dash form; everything else this package
+// provisions takes "--version".
+func versionFlag(name string) string {
+	switch name {
+	case "mksquashfs", "unsquashfs":
+		return "-version"
+	default:
+		return "--version"
+	}
+}
 
 // writableTarget picks where a fresh libexec should be created: the first
 // writable tier, as a path that does not exist yet (see the README, Bootstrap
@@ -222,28 +241,41 @@ func runMicromamba(ctx context.Context, mmBin string, args ...string) error {
 
 // verifyToolchain sanity-checks a staged (not yet live) toolchain before it
 // is allowed to replace the running one: each tool must run (checked by
-// output content, not exit status — see the README, Verification), and the
-// staged apptainer must clear the zstd floor.
+// output content, not exit status — see the README, Verification), the
+// staged apptainer must clear the zstd floor, and the staged squashfs-tools
+// must clear its own floor.
 func verifyToolchain(ctx context.Context, prefix string) error {
-	for _, name := range []string{"apptainer", "mksquashfs", "squashfuse"} {
+	for _, name := range []string{"apptainer", "mksquashfs", "unsquashfs", "squashfuse"} {
 		path := filepath.Join(prefix, "bin", name)
-		out, _ := commandContext(ctx, path, "--version").CombinedOutput()
+		out, _ := commandContext(ctx, path, versionFlag(name)).CombinedOutput()
 		if !strings.Contains(strings.ToLower(string(out)), name) {
 			return fmt.Errorf("%s does not run: unexpected output: %s", name, strings.TrimSpace(string(out)))
 		}
 	}
 
-	out, err := commandContext(ctx, filepath.Join(prefix, "bin", "apptainer"), "--version").Output()
+	if err := verifyFloor(ctx, prefix, "apptainer", apptainerZstdFloorMajor, apptainerZstdFloorMinor, "zstd support"); err != nil {
+		return err
+	}
+	if err := verifyFloor(ctx, prefix, "mksquashfs", squashfsToolsFloorMajor, squashfsToolsFloorMinor, "zstd and -offset support"); err != nil {
+		return err
+	}
+	return nil
+}
+
+// verifyFloor reads name's own version from the staged prefix and checks it
+// against floorMajor.floorMinor, naming what that floor buys in a failure.
+func verifyFloor(ctx context.Context, prefix, name string, floorMajor, floorMinor int, need string) error {
+	out, err := commandContext(ctx, filepath.Join(prefix, "bin", name), versionFlag(name)).Output()
 	if err != nil {
-		return fmt.Errorf("could not read apptainer's version: %w", err)
+		return fmt.Errorf("could not read %s's version: %w", name, err)
 	}
 	version := parseVersion(string(out))
 	if version == "" {
-		return fmt.Errorf("could not parse apptainer's version from %q", strings.TrimSpace(string(out)))
+		return fmt.Errorf("could not parse %s's version from %q", name, strings.TrimSpace(string(out)))
 	}
-	if !meetsZstdFloor(version) {
-		return fmt.Errorf("provisioned apptainer %s is below the required %d.%d (zstd support)",
-			version, zstdFloorMajor, zstdFloorMinor)
+	if !meetsFloor(version, floorMajor, floorMinor) {
+		return fmt.Errorf("provisioned %s %s is below the required %d.%d (%s)",
+			name, version, floorMajor, floorMinor, need)
 	}
 	return nil
 }
@@ -255,7 +287,7 @@ func parseVersion(output string) string {
 }
 
 // ToolVersion is one provisioned binary's name and the version its own
-// --version reported.
+// version flag (see versionFlag) reported.
 type ToolVersion struct {
 	Name    string
 	Version string
@@ -266,9 +298,10 @@ type ToolVersion struct {
 // always shares its sibling's version.
 var versionedBins = []string{"apptainer", "mksquashfs", "squashfuse", "micromamba"}
 
-// Versions runs --version against the live toolchain's own binaries. A
-// binary that fails to run or prints nothing parseVersion recognizes reports
-// "unknown" rather than failing the rest.
+// Versions runs each binary's own version flag (see versionFlag) against the
+// live toolchain's own binaries. A binary that fails to run or prints
+// nothing parseVersion recognizes reports "unknown" rather than failing the
+// rest.
 func Versions(ctx context.Context) ([]ToolVersion, error) {
 	dir, ok := Dir()
 	if !ok {
@@ -276,7 +309,7 @@ func Versions(ctx context.Context) ([]ToolVersion, error) {
 	}
 	versions := make([]ToolVersion, 0, len(versionedBins))
 	for _, name := range versionedBins {
-		out, _ := commandContext(ctx, filepath.Join(dir, "bin", name), "--version").CombinedOutput()
+		out, _ := commandContext(ctx, filepath.Join(dir, "bin", name), versionFlag(name)).CombinedOutput()
 		version := parseVersion(string(out))
 		if version == "" {
 			version = "unknown"
@@ -286,14 +319,17 @@ func Versions(ctx context.Context) ([]ToolVersion, error) {
 	return versions, nil
 }
 
-func meetsZstdFloor(version string) bool {
+// meetsFloor reports whether version is at or above floorMajor.floorMinor,
+// shared by every version-floor check this package makes (apptainer's zstd
+// floor, squashfs-tools' -offset floor).
+func meetsFloor(version string, floorMajor, floorMinor int) bool {
 	parts := strings.Split(version, ".")
 	if len(parts) < 2 {
 		return false
 	}
 	major, _ := strconv.Atoi(parts[0])
 	minor, _ := strconv.Atoi(parts[1])
-	return major > zstdFloorMajor || (major == zstdFloorMajor && minor >= zstdFloorMinor)
+	return major > floorMajor || (major == floorMajor && minor >= floorMinor)
 }
 
 // downloadBootstrap fetches a standalone micromamba binary to a transient
