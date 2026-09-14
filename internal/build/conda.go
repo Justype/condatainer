@@ -67,12 +67,15 @@ func (b *BuildObject) buildConda(ctx context.Context) error {
 		b.Cleanup(true) //nolint:errcheck
 		return err
 	}
-	b.captureCommonBuildTools(ctx)
 
 	if err := b.installConda(ctx); err != nil {
 		b.Cleanup(true)
 		return err
 	}
+	// After the recipe's container has run, so apptainer.ResolveBin has
+	// already decided which binary that used and captureCommonBuildTools can
+	// read it back rather than resolving a possibly different one.
+	b.captureCommonBuildTools(ctx)
 	b.captureMicromambaVersion(ctx)
 
 	b.captureCondaExports(ctx)

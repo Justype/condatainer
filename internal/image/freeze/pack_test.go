@@ -67,7 +67,7 @@ func packImage(t *testing.T, img string) string {
 		t.Fatal(err)
 	}
 	target := filepath.Join(artifactDir(t), "frozen.sqf")
-	if err := Pack(ctx, PackOptions{
+	if _, err := Pack(ctx, PackOptions{
 		Image: img, Target: target, CompressArgs: "-comp zstd",
 	}, entries, tr); err != nil {
 		t.Fatalf("pack: %v", err)
@@ -121,7 +121,7 @@ mkdir opt`)
 }
 
 // A .wh. marker becomes a char 0:0 node in the archive and the marker itself is
-// not packed — the translation of §2.4a, end to end.
+// not packed — whiteout translation, end to end.
 func TestPackTranslatesWhiteouts(t *testing.T) {
 	t.Parallel()
 	img := newImage(t, `cd upper
@@ -215,7 +215,7 @@ func TestPackRefusesAnEmptyOverlay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = Pack(ctx, PackOptions{
+	_, err = Pack(ctx, PackOptions{
 		Image: img, Target: filepath.Join(artifactDir(t), "x.sqf"),
 	}, entries, Translation{})
 	if err == nil {

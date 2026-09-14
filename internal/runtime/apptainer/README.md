@@ -65,14 +65,23 @@ writable `.img` with root-owned files):
   whatever `apptainer` happens to be on `PATH`.
 
 A `.def` (`os`/`base`) build's own `apptainer build --fakeroot` does not go
-through `ResolveBin` at all — it resolves the system binary directly
-(`EnsureApptainer`, called from `internal/build`'s `captureCommonBuildTools`)
-with no zstd check, because its output is a sandbox: an `os`/`base` build
-never mounts a zstd-compressed artifact during the build itself (`#DEP:` is
-data-only). Packing that sandbox afterward never runs in a container at all
-any more — `internal/build/squashfs.go`'s `createSquashfs` runs `mksquashfs`
-directly on the host (`toolpath.Resolve`), so it does not go through
-`ResolveBin` either.
+through `ResolveBin` at all — `internal/build/def.go` resolves the system
+binary directly (`EnsureApptainer`) with no zstd check, because its output is
+a sandbox: an `os`/`base` build never mounts a zstd-compressed artifact
+during the build itself (`#DEP:` is data-only). Packing that sandbox
+afterward never runs in a container at all any more —
+`internal/build/squashfs.go`'s `createSquashfs` runs `mksquashfs` directly on
+the host (`toolpath.Resolve`), so it does not go through `ResolveBin` either.
+
+### `Current`: reading back what already ran
+
+`internal/build`'s `captureCommonBuildTools` records which binary produced a
+build, but it must never decide that itself — resolving independently could
+name a different binary than the one the build's own container step actually
+used. `Current` reports the implementation and version of whichever binary is
+already configured (`Implementation`/`GetVersion` under the hood) and errors
+if nothing has been resolved yet, rather than falling back to PATH the way
+`SetBin("")` does.
 
 ### Apptainer needs squashfs-tools in PATH
 

@@ -143,8 +143,7 @@ func digestFromLabels(raw []byte) string {
 // allowedForeignBootstrap refuses every bootstrap agent that cannot be
 // rebuilt from a fresh machine — shub is dead, localimage and scratch name
 // nothing reproducible elsewhere, and yum/zypper/debootstrap have no single
-// pinnable reference the identity model represents. See
-// plan/sif-import-sqf.md §3 for the reasoning per agent.
+// pinnable reference the identity model represents.
 func allowedForeignBootstrap(agent string) error {
 	switch agent {
 	case "docker", "oras", "library":
@@ -257,7 +256,6 @@ func (b *BuildObject) buildForeign(ctx context.Context) error {
 	b.Cleanup(false)
 	return nil
 }
-
 
 // packFromSIF mounts a .sif's primary SquashFS partition read-only via
 // squashfuse, at the partition's own byte offset, inside freeze.MountedRun's

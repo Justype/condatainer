@@ -60,6 +60,16 @@ func TestValidateManifestRejects(t *testing.T) {
 			m.BuildType = "script"
 			m.Build.Tools = validBuildTools()
 		}, ErrInvalid},
+		{"snapshot tools with Apptainer", func(m *Manifest) {
+			m.BuildType = BuildTypeSnapshot
+			m.Type = catalog.TypeEnv
+			m.Name = EnvName
+			m.Build.Tools = BuildTools{
+				Condatainer: Tool{Version: "1.4.2"},
+				Apptainer:   Tool{Name: "apptainer", Version: "1.4.2"},
+				Mksquashfs:  Tool{Version: "4.6.1"},
+			}
+		}, ErrInvalid},
 	}
 
 	for _, tt := range tests {
@@ -85,7 +95,7 @@ func TestManifestBuildToolsRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`"tools"`, `"condatainer"`, `"apptainer"`, `"micromamba"`} {
+	for _, want := range []string{`"tools"`, `"condatainer"`, `"apptainer"`, `"micromamba"`, `"mksquashfs"`, `"fuse2fs"`} {
 		if !strings.Contains(string(data), want) {
 			t.Errorf("manifest omits %s:\n%s", want, data)
 		}
@@ -157,6 +167,8 @@ func validBuildTools() BuildTools {
 		Condatainer: Tool{Version: "1.4.2"},
 		Apptainer:   Tool{Name: "apptainer", Version: "1.4.2"},
 		Micromamba:  Tool{Version: "2.3.0"},
+		Mksquashfs:  Tool{Version: "4.6.1"},
+		Fuse2fs:     Tool{Version: "1.47.0"},
 	}
 }
 

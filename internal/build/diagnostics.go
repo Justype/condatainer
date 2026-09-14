@@ -18,6 +18,12 @@ const maxRecordedToolVersion = 256
 // captureCommonBuildTools records the worker-side implementations shared by
 // every build. It is called only after the skip check, so an existing image is
 // never relabelled with tools from a later invocation.
+//
+// Apptainer is read back through apptainer.Current(), never resolved here: by
+// the time this runs, whichever binary this build's own container step needed
+// (EnsureApptainer for a def build, ResolveBin for a conda/script one) has
+// already been decided, and re-resolving independently would risk recording a
+// different binary than the one that actually ran.
 func (b *BuildObject) captureCommonBuildTools(ctx context.Context) {
 	log := logging.FromContext(ctx)
 
@@ -28,20 +34,13 @@ func (b *BuildObject) captureCommonBuildTools(ctx context.Context) {
 	}
 	b.buildTools.Condatainer = meta.Tool{Version: version}
 
-	if err := apptainer.EnsureApptainer(); err != nil {
+	implementation, rawVersion, err := apptainer.Current()
+	if err != nil {
 		b.buildTools.Apptainer = meta.Tool{Name: "apptainer", Version: meta.Unrecorded}
 		log.Warn("could not identify Apptainer version", "name", b.spec.Image.Name, "err", err)
 		return
 	}
-
-	implementation := apptainer.Implementation()
-	version, err := apptainer.GetVersion()
-	if err != nil {
-		b.buildTools.Apptainer = meta.Tool{Name: implementation, Version: meta.Unrecorded}
-		log.Warn("could not record Apptainer version", "name", b.spec.Image.Name, "err", err)
-		return
-	}
-	if version, ok = normalizedToolVersion(version); !ok {
+	if version, ok = normalizedToolVersion(rawVersion); !ok {
 		version = meta.Unrecorded
 		log.Warn("could not record Apptainer version", "name", b.spec.Image.Name)
 	}
@@ -71,6 +70,59 @@ func (b *BuildObject) captureMicromambaVersion(ctx context.Context) {
 	b.buildTools.Micromamba = meta.Tool{Version: version}
 	if err != nil {
 		log.Warn("could not record Micromamba version", "name", b.spec.Image.Name, "err", err)
+	}
+}
+
+// captureMksquashfsVersion runs mksquashfsBin's own -version and records its
+// first line. mksquashfsBin is already resolved by the caller (squashfs.go);
+// a failure here is only ever the version parse, never the build.
+func (b *BuildObject) captureMksquashfsVersion(ctx context.Context, mksquashfsBin string) {
+	log := logging.FromContext(ctx)
+	version := meta.Unrecorded
+
+	var out bytes.Buffer
+	cmd := osexec.CommandContext(ctx, mksquashfsBin, "-version")
+	cmd.Stdout = &out
+	err := cmd.Run()
+	if err == nil {
+		firstLine, _, _ := strings.Cut(out.String(), "\n")
+		if captured, ok := normalizedToolVersion(firstLine); ok {
+			version = captured
+		} else {
+			err = errEmptyToolVersion
+		}
+	}
+
+	b.buildTools.Mksquashfs = meta.Tool{Version: version}
+	if err != nil {
+		log.Warn("could not record mksquashfs version", "name", b.spec.Image.Name, "err", err)
+	}
+}
+
+// captureFuse2fsVersion runs fuse2fsBin's own -V and records the first line of
+// its stderr, where e2fsprogs tools print their version banner. fuse2fsBin is
+// already resolved by the caller (squashfs.go), same shape as
+// captureMksquashfsVersion.
+func (b *BuildObject) captureFuse2fsVersion(ctx context.Context, fuse2fsBin string) {
+	log := logging.FromContext(ctx)
+	version := meta.Unrecorded
+
+	var errOut bytes.Buffer
+	cmd := osexec.CommandContext(ctx, fuse2fsBin, "-V")
+	cmd.Stderr = &errOut
+	err := cmd.Run()
+	if err == nil {
+		firstLine, _, _ := strings.Cut(errOut.String(), "\n")
+		if captured, ok := normalizedToolVersion(firstLine); ok {
+			version = captured
+		} else {
+			err = errEmptyToolVersion
+		}
+	}
+
+	b.buildTools.Fuse2fs = meta.Tool{Version: version}
+	if err != nil {
+		log.Warn("could not record fuse2fs version", "name", b.spec.Image.Name, "err", err)
 	}
 }
 

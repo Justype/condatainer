@@ -110,14 +110,6 @@ func Freeze(ctx context.Context, opts Options) (Result, error) {
 		log.Info("carrying environment from the sidecar", "variables", len(env))
 	}
 
-	m, rt := describe(opts, tr, env, entries, buildTools(ctx))
-	if err := meta.ValidateManifest(m); err != nil {
-		return Result{}, err
-	}
-	if err := meta.ValidateRuntime(rt); err != nil {
-		return Result{}, err
-	}
-
 	scratch := utils.GetTmpDir()
 	if err := os.MkdirAll(scratch, 0o755); err != nil {
 		return Result{}, fmt.Errorf("stage metadata: %w", err)
@@ -145,12 +137,31 @@ func Freeze(ctx context.Context, opts Options) (Result, error) {
 		packTr = tr.ForCopy()
 	}
 
-	// The payload is packed first, on its own. Its identity is hashed from the
+	// The payload is packed first, on its own — before the manifest is built, so
+	// it can carry what Pack resolved to do it. Its identity is hashed from the
 	// finished archive, and only then can the manifest carrying that identity be
 	// written and appended — a manifest cannot describe the archive it is inside.
-	if err := Pack(ctx, packOpts, entries, packTr); err != nil {
+	packTools, err := Pack(ctx, packOpts, entries, packTr)
+	if err != nil {
 		return Result{}, err
 	}
+
+	tools := buildTools(ctx)
+	tools.Mksquashfs = packTools.Mksquashfs
+	tools.Fuse2fs = packTools.Fuse2fs
+
+	// Pack has already written opts.Target, so a rejected manifest must clean it
+	// up rather than leave an untracked artifact behind.
+	m, rt := describe(opts, tr, env, entries, tools)
+	if err := meta.ValidateManifest(m); err != nil {
+		os.Remove(opts.Target)
+		return Result{}, err
+	}
+	if err := meta.ValidateRuntime(rt); err != nil {
+		os.Remove(opts.Target)
+		return Result{}, err
+	}
+
 	log.Info("identifying the packed payload", "target", opts.Target)
 	m.Keys.Identity, err = TreeIdentity(ctx, opts.Target)
 	if err != nil {

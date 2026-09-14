@@ -40,7 +40,8 @@ type PackOptions struct {
 }
 
 // Pack writes the overlay's upper/ layer to a SquashFS artifact, translating
-// whiteouts on the way (§2.4a).
+// whiteouts on the way, and reports the tools it resolved to do so — captured
+// here, at the point each is resolved, rather than re-resolved by the caller.
 //
 // By default the payload is read through a fuse2fs mount, made inside a
 // private, unprivileged mount+user namespace (see mountedRun) so nothing is
@@ -49,26 +50,27 @@ type PackOptions struct {
 //
 // With StageDir it reads a copy made earlier — faster, and costs the payload twice
 // on disk. Both routes produce the same archive, given Translation.ForCopy.
-func Pack(ctx context.Context, opts PackOptions, entries []Entry, tr Translation) error {
+func Pack(ctx context.Context, opts PackOptions, entries []Entry, tr Translation) (meta.BuildTools, error) {
 	log := logging.FromContext(ctx)
 
 	mksquashfsBin, err := toolpath.Resolve("mksquashfs")
 	if err != nil {
-		return err
+		return meta.BuildTools{}, err
 	}
+	tools := meta.BuildTools{Mksquashfs: mksquashfsVersion(ctx, mksquashfsBin)}
 
 	img, err := filepath.Abs(opts.Image)
 	if err != nil {
-		return err
+		return meta.BuildTools{}, err
 	}
 	target, err := filepath.Abs(opts.Target)
 	if err != nil {
-		return err
+		return meta.BuildTools{}, err
 	}
 
 	sources := archiveSources(entries, tr)
 	if len(sources) == 0 {
-		return fmt.Errorf("%s has an empty upper/; there is nothing to freeze", opts.Image)
+		return meta.BuildTools{}, fmt.Errorf("%s has an empty upper/; there is nothing to freeze", opts.Image)
 	}
 
 	// A pack writes four small files and nothing payload-sized: the exclude list,
@@ -78,11 +80,11 @@ func Pack(ctx context.Context, opts PackOptions, entries []Entry, tr Translation
 	// .nfs* placeholders behind.
 	scratch := utils.GetTmpDir()
 	if err := os.MkdirAll(scratch, 0o755); err != nil {
-		return fmt.Errorf("stage translation: %w", err)
+		return meta.BuildTools{}, fmt.Errorf("stage translation: %w", err)
 	}
 	stage, err := os.MkdirTemp(scratch, "cnt-freeze-")
 	if err != nil {
-		return fmt.Errorf("stage translation: %w", err)
+		return meta.BuildTools{}, fmt.Errorf("stage translation: %w", err)
 	}
 	defer os.RemoveAll(stage)
 
@@ -92,17 +94,18 @@ func Pack(ctx context.Context, opts PackOptions, entries []Entry, tr Translation
 	if opts.StageDir == "" {
 		fuse2fs, err := findFuse2fs()
 		if err != nil {
-			return err
+			return meta.BuildTools{}, err
 		}
+		tools.Fuse2fs = fuse2fsVersion(ctx, fuse2fs)
 		restore, err := protect(img)
 		if err != nil {
-			return err
+			return meta.BuildTools{}, err
 		}
 		defer restore()
 
 		mnt := filepath.Join(stage, "mnt")
 		if err := os.MkdirAll(mnt, 0o755); err != nil {
-			return fmt.Errorf("stage mountpoint: %w", err)
+			return meta.BuildTools{}, fmt.Errorf("stage mountpoint: %w", err)
 		}
 		upper = mnt
 		route = "mount"
@@ -114,7 +117,7 @@ func Pack(ctx context.Context, opts PackOptions, entries []Entry, tr Translation
 
 	args, err := stageTranslation(stage, upper, tr)
 	if err != nil {
-		return err
+		return meta.BuildTools{}, err
 	}
 
 	packSources := make([]string, 0, len(sources)+1)
@@ -137,12 +140,12 @@ func Pack(ctx context.Context, opts PackOptions, entries []Entry, tr Translation
 	}
 	if err != nil {
 		os.Remove(target)
-		return fmt.Errorf("pack %s: %w", opts.Target, err)
+		return meta.BuildTools{}, fmt.Errorf("pack %s: %w", opts.Target, err)
 	}
 	if _, err := os.Stat(target); err != nil {
-		return fmt.Errorf("pack produced no artifact at %s: %w", opts.Target, err)
+		return meta.BuildTools{}, fmt.Errorf("pack produced no artifact at %s: %w", opts.Target, err)
 	}
-	return nil
+	return tools, nil
 }
 
 // AppendMeta adds the staged .cnt directory to a finished archive. An archive

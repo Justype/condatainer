@@ -90,7 +90,6 @@ func (b *BuildObject) buildScript(ctx context.Context, buildDeps bool) error {
 		b.Cleanup(true) //nolint:errcheck
 		return err
 	}
-	b.captureCommonBuildTools(ctx)
 
 	log.Info("populating overlay", "overlay", filepath.Base(targetPath), "source", b.buildSource)
 
@@ -98,6 +97,10 @@ func (b *BuildObject) buildScript(ctx context.Context, buildDeps bool) error {
 		b.Cleanup(true)
 		return err
 	}
+	// After the recipe's container has run, so apptainer.ResolveBin has
+	// already decided which binary that used and captureCommonBuildTools can
+	// read it back rather than resolving a possibly different one.
+	b.captureCommonBuildTools(ctx)
 
 	// After the build, so every dependency it needed is installed and can be
 	// read for the identity its records pin.

@@ -17,7 +17,7 @@ mount.go      MountedRun: the one FUSE-mount primitive every mount site uses
 sentinel.go   RunSentinel: the process MountedRun re-execs into to survive its own death
 fuse2fs.go    Resolve fuse2fs/squashfuse on PATH
 tools.go      Build-tool provenance recorded in the manifest
-whiteout.go   §2.4a whiteout translation
+whiteout.go   Whiteout translation
 ```
 
 ## No Apptainer, no base image
@@ -39,6 +39,22 @@ own SquashFS packer (`squashfs.go`'s `packFromScratchImage`) reuses it
 directly to read a build's scratch `.img`, the same apptainer-free way, so
 mksquashfs's package-time reads never need a container any more than this
 package's own do.
+
+## `Build.Tools` records only what actually ran
+
+A frozen artifact's manifest never carries an `Apptainer` entry: freeze never
+runs it, on either pack route, so there is nothing to record — not even an
+empty `Tool{}` standing in for "didn't run" (`ValidateManifest` rejects a
+snapshot manifest that sets one). Micromamba is absent for the same reason
+`tools.go`'s own doc comment gives: a freeze packs an environment that
+already exists rather than solving one.
+
+`Mksquashfs` and, on the mount route only, `Fuse2fs` come from `Pack` itself
+(`pack.go`), captured at the point each binary is resolved rather than
+re-resolved by the caller. `Pack` returns them, and `Freeze` (`freeze.go`)
+merges them with `buildTools`'s own `Condatainer` field to build the
+manifest — which is why `Pack` runs *before* the manifest is built, not
+after: the manifest cannot record a tool `Pack` hasn't resolved yet.
 
 ## `MountedRun`: the mount, without Apptainer
 
@@ -133,7 +149,7 @@ synthetic one.
 
 ## `BaseDirLister` reads the base directly
 
-Opaque-directory translation (§2.4a) needs to know what a directory held in
+Opaque-directory translation needs to know what a directory held in
 the base to turn "this directory was replaced wholesale" into one whiteout per
 entry that base had. The base is a plain `.sqf`, so this is answered with
 `unsquashfs -l -d "" <base> <dirs...>` — one call, however many directories are

@@ -311,6 +311,12 @@ func displayBuildTools(imagePath string) {
 	if !tools.Micromamba.Empty() {
 		fmt.Printf("  %-14s %s\n", "Micromamba:", utils.StyleInfo(tools.Micromamba.Version))
 	}
+	if !tools.Mksquashfs.Empty() {
+		fmt.Printf("  %-14s %s\n", "Mksquashfs:", utils.StyleInfo(tools.Mksquashfs.Version))
+	}
+	if !tools.Fuse2fs.Empty() {
+		fmt.Printf("  %-14s %s\n", "Fuse2fs:", utils.StyleInfo(tools.Fuse2fs.Version))
+	}
 }
 
 // displayImgInfo prints rich info for an ext3 overlay image,

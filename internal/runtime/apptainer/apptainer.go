@@ -103,6 +103,22 @@ func ResolveBin(fakeroot bool) error {
 	return nil
 }
 
+// ErrNotResolved reports that no apptainer binary has been resolved yet, so
+// Current has nothing to read back.
+var ErrNotResolved = errors.New("no apptainer binary has been resolved yet")
+
+// Current reports the implementation and version of whichever binary is
+// already resolved (by SetBin, EnsureApptainer, or ResolveBin), performing no
+// resolution of its own. A caller that already ran one of those to launch a
+// container reads the result back through this rather than deciding it again.
+func Current() (implementation, version string, err error) {
+	if apptainerCmd == "" {
+		return "", "", ErrNotResolved
+	}
+	version, err = GetVersion()
+	return Implementation(), version, err
+}
+
 // IsSingularity returns true if the configured binary is Singularity (not Apptainer).
 // Singularity defaults to gzip compression for SquashFS images.
 func IsSingularity() bool {

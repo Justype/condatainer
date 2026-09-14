@@ -151,16 +151,21 @@ type Build struct {
 
 // BuildTools are the tools Condatainer directly used for a build. Apptainer
 // names the compatible tool family; Tool.Name distinguishes an actual
-// Apptainer binary from the supported Singularity fallback.
+// Apptainer binary from the supported Singularity fallback. Mksquashfs and
+// Fuse2fs carry no Name: unlike Apptainer/Singularity, there is only one
+// implementation of each.
 type BuildTools struct {
 	Condatainer Tool `json:"condatainer,omitzero"`
 	Apptainer   Tool `json:"apptainer,omitzero"`
 	Micromamba  Tool `json:"micromamba,omitzero"`
+	Mksquashfs  Tool `json:"mksquashfs,omitzero"`
+	Fuse2fs     Tool `json:"fuse2fs,omitzero"`
 }
 
 // Empty reports whether no build tool was recorded.
 func (t BuildTools) Empty() bool {
-	return t.Condatainer.Empty() && t.Apptainer.Empty() && t.Micromamba.Empty()
+	return t.Condatainer.Empty() && t.Apptainer.Empty() && t.Micromamba.Empty() &&
+		t.Mksquashfs.Empty() && t.Fuse2fs.Empty()
 }
 
 // Tool is one directly used build implementation. Name is omitted when the
@@ -341,7 +346,12 @@ func validateBuildTools(buildType BuildType, tools BuildTools) error {
 	if tools.Condatainer.Version == "" {
 		return fmt.Errorf("%w: build tools have no Condatainer version", ErrInvalid)
 	}
-	if tools.Apptainer.Name == "" || tools.Apptainer.Version == "" {
+	if buildType == BuildTypeSnapshot {
+		// A freeze never runs Apptainer, so it must never claim one.
+		if !tools.Apptainer.Empty() {
+			return fmt.Errorf("%w: %s build records Apptainer, which it never runs", ErrInvalid, buildType)
+		}
+	} else if tools.Apptainer.Name == "" || tools.Apptainer.Version == "" {
 		return fmt.Errorf("%w: build tools have incomplete Apptainer information", ErrInvalid)
 	}
 

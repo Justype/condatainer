@@ -74,6 +74,15 @@ func (b *BuildObject) buildDef(ctx context.Context) error {
 		return fmt.Errorf("failed to read definition %s: %w", defSource, err)
 	}
 
+	// Resolved directly, not via captureCommonBuildTools: a def build must run
+	// apptainer build regardless, always against the system/module binary
+	// (never libexec's), so this is a hard prerequisite rather than a
+	// best-effort diagnostic.
+	if err := apptainer.EnsureApptainer(); err != nil {
+		b.Cleanup(true) //nolint:errcheck
+		return err
+	}
+
 	// A synthesized definition is the only record of what a scheme:// build was.
 	b.captureSynthesizedRecipe(defSource, defData)
 	b.captureCommonBuildTools(ctx)

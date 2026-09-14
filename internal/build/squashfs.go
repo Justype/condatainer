@@ -34,6 +34,7 @@ func createSquashfs(ctx context.Context, b *BuildObject, isData bool, sourceDir,
 	if err != nil {
 		return err
 	}
+	b.captureMksquashfsVersion(ctx, mksquashfsBin)
 
 	ncpus := b.effectiveNcpus()
 	compressArgs := config.Global.Build.CompressArgs
@@ -105,6 +106,7 @@ func packFromScratchImage(ctx context.Context, b *BuildObject, metaDir, targetPa
 	if err != nil {
 		return err
 	}
+	b.captureFuse2fsVersion(ctx, fuse2fsBin)
 	mnt := filepath.Join(b.ws.TmpDir, "pack-mnt")
 	if err := os.MkdirAll(mnt, 0o755); err != nil {
 		return fmt.Errorf("create pack mountpoint: %w", err)

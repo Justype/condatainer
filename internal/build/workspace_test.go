@@ -13,8 +13,8 @@ import (
 
 // Every constructor sites the workspace itself, and they have disagreed before —
 // a definition build once got .img from one and .sif from another. These pin the
-// full path set each one produces, so plan/build-object.md §3 can route them all
-// through one derivation and prove nothing moved.
+// full path set each one produces, so a build routes them all through one
+// derivation and nothing moves independently.
 //
 // tmppath_test.go covers the helpers; this covers the constructors' use of them.
 
@@ -60,8 +60,8 @@ func checkPaths(t *testing.T, b *BuildObject, want wantPaths) {
 	}
 }
 
-// expect builds the path set the helpers derive, which is what §3.1 claims
-// workspaceFor reproduces.
+// expect builds the path set the helpers derive, which is what workspaceFor
+// must reproduce.
 func expect(name, root, ext, target string, isDef bool) wantPaths {
 	ws := workspaceFor(name, root, ext, isDef)
 	return wantPaths{
