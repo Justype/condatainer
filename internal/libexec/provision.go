@@ -54,16 +54,94 @@ func versionFlag(name string) string {
 	}
 }
 
-// writableTarget picks where a fresh libexec should be created: the first
-// writable tier, as a path that does not exist yet (see the README, Bootstrap
-// sequence, for why create requires that).
-func writableTarget() (string, error) {
-	dir, err := config.GetWritableLibexecDir()
-	if err != nil {
-		return "", fmt.Errorf("no writable location for the toolchain: %w", err)
+// stagingName is the fixed, hidden name a fresh generation is built under
+// before activation — a permanent, target-adjacent name rather than today's
+// former rename-in-place suffix, because micromamba's own prefix
+// substitution bakes this exact path into some of what it installs (e.g.
+// libfuse3's fusermount3 helper path). Renaming that directory away breaks
+// any such baked path; recreating this name as a symlink to the live
+// generation after activation keeps it resolving. See the README, Baked-in
+// absolute paths.
+const stagingName = ".libexec"
+
+// staleName is where the outgoing generation is moved aside during
+// activation, and what a crashed Update leaves for the next one to recover
+// from (see recoverStale).
+const staleName = ".libexec.old"
+
+// tierDir returns the path of a moved-around name (stagingName or staleName)
+// alongside target, e.g. tierDir(target, stagingName).
+func tierDir(target, name string) string {
+	return filepath.Join(filepath.Dir(target), name)
+}
+
+// isProvisioned reports whether dir holds a real (non-symlink) generation —
+// the same marker check Dir() makes, for one path rather than every tier.
+func isProvisioned(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, "bin", binMarker))
+	return err == nil
+}
+
+// ensureCompatSymlink (re)creates the compatibility symlink at staging,
+// pointing at target, unless it already correctly does. See stagingName's
+// own doc comment for why this needs to exist at all.
+func ensureCompatSymlink(target, staging string) error {
+	if link, err := os.Readlink(staging); err == nil && link == target {
+		return nil
 	}
-	os.Remove(dir) //nolint:errcheck // best-effort; create fails loudly below if this didn't clear it
-	return dir, nil
+	os.Remove(staging) // clear whatever (if anything) is there, symlink or not
+	return os.Symlink(target, staging)
+}
+
+// recoverStale resolves any staging/stale leftovers at target's tier from a
+// previous Update that never finished, before this one proceeds. A crash
+// (including SIGKILL, which cannot be caught) can only have interrupted
+// Update at one of a few points, and each leaves a distinct, recognizable
+// shape — see the README, Locking / Crash recovery.
+func recoverStale(ctx context.Context, target string) {
+	staging := tierDir(target, stagingName)
+	old := tierDir(target, staleName)
+
+	stagingInfo, err := os.Lstat(staging)
+	stagingIsDir := err == nil && stagingInfo.Mode()&os.ModeSymlink == 0 && stagingInfo.IsDir()
+	oldExists := utils.DirExists(old)
+
+	switch {
+	case isProvisioned(target):
+		// The live generation is intact regardless of what else is lying
+		// around — anything else is build or cleanup debris.
+		if stagingIsDir {
+			os.RemoveAll(staging)
+		}
+		if oldExists {
+			os.RemoveAll(old)
+		}
+	case stagingIsDir && verifyToolchain(ctx, staging) == nil:
+		// Crashed after staging passed verification but before (or during)
+		// activation: finish it rather than redo the work.
+		if err := os.Rename(staging, target); err != nil {
+			return
+		}
+		if oldExists {
+			os.RemoveAll(old)
+		}
+	case oldExists:
+		// Staging either never finished or failed re-verification; the
+		// previously-live generation is the one to trust.
+		if stagingIsDir {
+			os.RemoveAll(staging)
+		}
+		if err := os.Rename(old, target); err != nil {
+			return
+		}
+	default:
+		return // nothing usable anywhere; Update proceeds as a fresh install
+	}
+
+	if err := ensureCompatSymlink(target, staging); err != nil {
+		logging.FromContext(ctx).Warn("could not restore the toolchain's compatibility symlink",
+			"path", staging, "err", err)
+	}
 }
 
 // Update refreshes the toolchain: create a fresh generation at a staging
@@ -72,11 +150,28 @@ func writableTarget() (string, error) {
 // exclusive lock (see the README, Locking).
 func Update(ctx context.Context) error {
 	live, hadLive := Dir()
+	target := live
+	if !hadLive {
+		dir, err := config.GetWritableLibexecDir()
+		if err != nil {
+			return fmt.Errorf("no writable location for the toolchain: %w", err)
+		}
+		target = dir
+	}
 
-	var target string
+	if !hadLive {
+		// Nothing live to protect yet — safe to resolve any leftovers from a
+		// previous Update that crashed before finishing. When a generation is
+		// already live, its own lock (acquired below) is what protects it;
+		// the normal flow further down already clears stray staging/old
+		// leftovers as it goes, so recovery has nothing to add there.
+		recoverStale(ctx, target)
+		hadLive = isProvisioned(target)
+	}
+
 	var liveLock *utils.FlockHandle
 	if hadLive {
-		lockPath := filepath.Join(live, lockFileName)
+		lockPath := filepath.Join(target, lockFileName)
 		if !utils.FileExists(lockPath) {
 			// Self-heal a generation that predates this mechanism (see README).
 			if f, err := utils.CreateFileWritable(lockPath); err == nil {
@@ -88,13 +183,6 @@ func Update(ctx context.Context) error {
 			return fmt.Errorf("condatainer is currently running (toolchain is locked); stop all running condatainer sessions before updating: %w", err)
 		}
 		liveLock = lock
-		target = live
-	} else {
-		var err error
-		target, err = writableTarget()
-		if err != nil {
-			return err
-		}
 	}
 	defer func() {
 		if liveLock != nil {
@@ -102,8 +190,8 @@ func Update(ctx context.Context) error {
 		}
 	}()
 
-	staging := target + ".new"
-	os.RemoveAll(staging) // leftover from a previously-failed attempt
+	staging := tierDir(target, stagingName)
+	os.RemoveAll(staging) // clears the compat symlink, or a leftover from a previously-failed attempt
 
 	// Reuse the live toolchain's own micromamba when there is one — it is a
 	// separate binary from the staging path being created, so this is the
@@ -112,7 +200,7 @@ func Update(ctx context.Context) error {
 	// borrow from.
 	var mmBin string
 	if hadLive {
-		if p := filepath.Join(live, "bin", "micromamba"); utils.FileExists(p) {
+		if p := filepath.Join(target, "bin", "micromamba"); utils.FileExists(p) {
 			mmBin = p
 		}
 	}
@@ -141,9 +229,8 @@ func Update(ctx context.Context) error {
 	// old is where the outgoing generation is moved aside: a rename succeeds
 	// unconditionally even while a file inside is open or executing, unlike
 	// removal, so it never blocks activation on anything being in use.
-	old := ""
+	old := tierDir(target, staleName)
 	if hadLive {
-		old = target + ".old"
 		os.RemoveAll(old) // leftover from a previous Update that couldn't remove it
 		if err := os.Rename(target, old); err != nil {
 			return fmt.Errorf("failed to move the outgoing toolchain aside: %w", err)
@@ -153,11 +240,17 @@ func Update(ctx context.Context) error {
 		// file this same process still has open.
 		liveLock.Close()
 		liveLock = nil
+	} else {
+		os.Remove(target) //nolint:errcheck // best-effort; activation fails loudly below if this didn't clear it
 	}
 	if err := os.Rename(staging, target); err != nil {
 		return fmt.Errorf("failed to activate the new toolchain: %w", err)
 	}
-	if old != "" {
+	if err := ensureCompatSymlink(target, staging); err != nil {
+		logging.FromContext(ctx).Warn("could not create the toolchain's compatibility symlink",
+			"path", staging, "err", err)
+	}
+	if hadLive {
 		if err := os.RemoveAll(old); err != nil {
 			logging.FromContext(ctx).Warn("could not remove the outgoing toolchain generation; left on disk",
 				"path", old, "err", err)
@@ -172,6 +265,9 @@ func Update(ctx context.Context) error {
 func provisionAt(ctx context.Context, mmBin, prefix string) error {
 	if err := createAt(ctx, mmBin, prefix); err != nil {
 		return fmt.Errorf("failed to provision the toolchain: %w", err)
+	}
+	if err := ensureFusermount3InBin(prefix); err != nil {
+		return fmt.Errorf("failed to link fusermount3: %w", err)
 	}
 	if err := cleanAt(ctx, mmBin, prefix); err != nil {
 		return fmt.Errorf("failed to clean the toolchain cache: %w", err)
@@ -203,6 +299,23 @@ func provisionAt(ctx context.Context, mmBin, prefix string) error {
 func createAt(ctx context.Context, mmBin, prefix string) error {
 	args := append([]string{"-r", prefix, "--no-rc", "create", "-y", "-p", prefix, "-c", "conda-forge"}, packages...)
 	return runMicromamba(ctx, mmBin, args...)
+}
+
+// ensureFusermount3InBin symlinks bin/fusermount3 to ../sbin/fusermount3 when
+// the fuse3 package installed the setuid helper there instead of bin/ — some
+// builds do. libfuse3 bakes an absolute bin/fusermount3 path into itself at
+// install time (see stagingName's own doc comment); if the real binary only
+// exists in sbin/, that baked path never resolves regardless of $PATH.
+func ensureFusermount3InBin(prefix string) error {
+	sbinPath := filepath.Join(prefix, "sbin", "fusermount3")
+	if !utils.FileExists(sbinPath) {
+		return nil // this build put it in bin/ already, or doesn't ship it
+	}
+	binPath := filepath.Join(prefix, "bin", "fusermount3")
+	if utils.FileExists(binPath) {
+		return nil
+	}
+	return os.Symlink(filepath.Join("..", "sbin", "fusermount3"), binPath)
 }
 
 // cleanAt reclaims disk after provisioning (see the README, Bootstrap

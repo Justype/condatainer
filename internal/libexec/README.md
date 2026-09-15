@@ -22,9 +22,10 @@ typed by a user.
 
 The bootstrap binary must run from **outside** the prefix it creates. `micromamba create -r X -p
 X` refuses outright if `X` already exists — even genuinely empty, not just non-empty — with
-"Overwriting root prefix is not permitted." `writableTarget` resolves a tier's directory (which
-`config.GetWritableLibexecDir` creates as a side effect, mirroring how an image's write directory
-is resolved) and immediately removes it again so `create` sees a path that has never existed.
+"Overwriting root prefix is not permitted." Every generation is therefore built at a fixed hidden
+name, `stagingName` (`.libexec`), sitting alongside the live `libexec/` rather than inside it, and
+is only renamed into place once it has passed `verifyToolchain` — see *Baked-in absolute paths*
+below for why that staging name has to stay fixed rather than being renamed away afterward.
 
 The create command is exactly:
 
@@ -66,6 +67,30 @@ level had ended up group-writable and everything beneath it (`bin/`, `lib/`, `et
 micromamba's own umask-derived mode. Left unfixed, `Update`'s later `os.RemoveAll(target)` would
 only succeed for whoever happens to own each individual file — breaking "one copy serves the whole
 group" for every group member except the one who provisioned this generation.
+
+## Baked-in absolute paths
+
+micromamba's own prefix substitution patches some absolute paths directly into the binaries it
+installs, using whatever `-p` prefix `create` was given — not just library `RPATH`s (which use
+`$ORIGIN` and survive a later move), but paths a binary execs at runtime. `libfuse3`'s
+`fusermount3` helper lookup is one: it is compiled in as an absolute `<prefix>/bin/fusermount3`
+path, tried before any `$PATH` search — confirmed by inspecting the installed `libfuse3.so`
+directly, not documented behavior.
+
+That means the name a generation is built under has to be the name it keeps forever, not a name
+that gets renamed away on activation: renaming breaks any such baked path permanently, with no way
+to detect it beyond apptainer's own FUSE-mount driver failing at runtime with "Failed to call
+'fusermount3': No such file or directory". `stagingName` (`.libexec`) is recreated as a symlink to
+the live `libexec/` immediately after every activation for exactly this reason — nothing in this
+package itself ever resolves through it (`Dir()` and everything built on it always resolve
+`libexec/` directly); it exists purely so a binary's own baked-in `.libexec/...` lookup keeps
+resolving.
+
+`ensureFusermount3InBin` closes the other half of the same failure: this build of the `fuse3`
+package installs the setuid helper into `sbin/`, not `bin/`, but the baked-in path always says
+`bin/` regardless of where the package actually put it. `provisionAt` symlinks
+`bin/fusermount3 -> ../sbin/fusermount3` whenever it finds the binary only in `sbin/`, so the baked
+path resolves to something that actually exists.
 
 ## Toolchain activation
 
@@ -185,18 +210,39 @@ an in-progress update fails immediately with a clear message rather than blockin
 never waits either.
 
 Holding the lock guarantees nothing *condatainer* is using the outgoing generation — but `Update`
-still doesn't remove it in place. It renames it to a fixed `target+".old"`, activates staging, then
-makes one best-effort attempt to remove `old`. A rename succeeds even while a file inside is open or
-executing; removal does not, so activation is never gated on cleanup.
+still doesn't remove it in place. It renames it to a fixed `staleName` (`.libexec.old`), activates
+staging, then makes one best-effort attempt to remove it. A rename succeeds even while a file
+inside is open or executing; removal does not, so activation is never gated on cleanup.
 
 `liveLock` is released right after that rename, not deferred to the end of `Update`: its own `.lock`
-file moves with `old`, so holding it open through the removal attempt would mean unlinking a file
-this process still has open — a guaranteed silly-rename on NFS. Releasing here is safe, since
-nothing looks up a lock at `target` once staging has taken its place.
+file moves with the outgoing generation, so holding it open through the removal attempt would mean
+unlinking a file this process still has open — a guaranteed silly-rename on NFS. Releasing here is
+safe, since nothing looks up a lock at `target` once staging has taken its place.
 
-If removing `old` fails, `Update` logs a warning and leaves it — no retry loop, no crash-recovery
-sweep. The next `Update` call clears it (or tries again) before renaming a fresh `target` aside; a
-crash mid-`Update` recovers the same way, by running it again.
+If removing the outgoing generation fails, `Update` logs a warning and leaves it — no retry loop.
+The next `Update` clears it before moving a fresh live generation aside in its own place.
+
+### Crash recovery
+
+SIGKILL cannot be caught, so recovering from one is pure on-disk inspection: `recoverStale` runs at
+the very start of `Update`, but only when nothing is currently live. A live generation's own lock,
+acquired immediately once `Dir()` finds one, already protects it for the rest of `Update`; the
+normal flow further down already clears stray staging debris and any leftover `.libexec.old` as it
+goes, so recovery has nothing left to do once something is live. A crash can only have interrupted
+`Update` at one of a few points, and each leaves a distinct, recognizable shape:
+
+- Nothing at `libexec`, `.libexec`, or `.libexec.old`: nothing to recover — this tier was never
+  provisioned, or genuinely has nothing worth keeping.
+- Only `.libexec.old`: the crash landed between moving the outgoing generation aside and finishing
+  its replacement. Restore it.
+- `.libexec` (a real directory, not yet the compat symlink) present alongside `.libexec.old`: the
+  crash could have landed either just before or just after `verifyToolchain` passed on `.libexec`,
+  and those two cases need opposite handling. Re-running `verifyToolchain` against it is what tells
+  them apart — no separate completion marker is needed, since that check already answers "is this
+  generation complete" for a freshly built one. Passes: finish the interrupted activation (rename
+  it into place, drop `.old`). Fails: discard it and restore `.old` instead.
+- `libexec` itself already provisioned: nothing to recover regardless of what else is lying around
+  — see above.
 
 A generation with no `.lock` file yet (one written by code that predates this mechanism, or a
 sentinel that failed to write) is self-healed by creating an empty one before locking, in both
