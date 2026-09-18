@@ -2709,7 +2709,8 @@ condatainer update [FLAGS]
 
 * `--build`: Refresh the build script metadata cache.
 * `--helper`: Refresh the helper script metadata cache.
-* `--libexec`: Refresh the self-provisioned toolchain.
+* `--libexec [package...]`: Update the self-provisioned toolchain. It holds `micromamba`, and only the
+  packages you name are installed with it: `apptainer`, `squashfs-tools`, `squashfuse`.
 
 By default (no flags), both `--build` and `--helper` are enabled.
 
@@ -2722,8 +2723,9 @@ By default (no flags), both `--build` and `--helper` are enabled.
 * Removes cache files for remotes no longer configured (orphan cleanup).
 * `--libexec` refuses rather than waits if any condatainer session is currently using the
   toolchain — stop those sessions first, then retry.
-* `--libexec` prints each tool's version (`apptainer`, `mksquashfs`, `squashfuse`, `micromamba`)
-  after a successful update.
+* `--libexec` with no packages updates what is installed, and creates the toolchain with `micromamba`
+  when there is none.
+* `--libexec` prints the version of each installed tool after a successful update.
 
 **Examples:**
 
@@ -2737,8 +2739,11 @@ condatainer update --build
 # Helper script metadata only
 condatainer update --helper
 
-# Refresh the self-provisioned toolchain
+# Update the installed toolchain
 condatainer update --libexec
+
+# Install packages into it
+condatainer update --libexec apptainer squashfs-tools squashfuse
 ```
 
 The default root image — `<distro>/base` (e.g. `ubuntu24/base`), where `<distro>` is `default_distro`

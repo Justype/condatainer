@@ -1,7 +1,7 @@
 # Self-Provisioned Toolchain Troubleshooting
 
 This applies only when you are using the self-provisioned toolchain (`mksquashfs`, `squashfuse`,
-`apptainer` installed by `condatainer update --libexec`), not a system-installed or module-loaded
+`apptainer` installed by `condatainer update --libexec <package>`), not a system-installed or module-loaded
 Apptainer.
 
 ## Mount or unmount errors mentioning `fusermount3`

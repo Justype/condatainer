@@ -104,7 +104,7 @@ curl -fsSL -o /opt/condatainer/bin/condatainer \
 chmod 755 /opt/condatainer/bin/condatainer
 
 /opt/condatainer/bin/condatainer config init -l app-root
-/opt/condatainer/bin/condatainer update --libexec
+/opt/condatainer/bin/condatainer update --libexec apptainer squashfs-tools squashfuse
 chmod -R go-w /opt/condatainer
 ```
 

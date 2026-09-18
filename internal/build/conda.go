@@ -133,7 +133,7 @@ func (b *BuildObject) buildInstallCmd() (cmd string, extraBindPaths []string, er
 func micromambaCmd() (string, error) {
 	path, ok := libexec.MicromambaPath()
 	if !ok {
-		return "", libexec.ErrNotProvisioned
+		return "", libexec.NotInstalledError("micromamba")
 	}
 	return path, nil
 }

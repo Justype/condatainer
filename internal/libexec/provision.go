@@ -13,7 +13,6 @@ import (
 	"strings"
 
 	"github.com/Justype/condatainer/internal/config"
-	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -24,22 +23,64 @@ func commandContext(ctx context.Context, name string, args ...string) *exec.Cmd 
 	return exec.CommandContext(ctx, name, args...)
 }
 
-// packages is the full self-provisioned toolchain, installed together in one
-// solve. micromamba is included so the standalone bootstrap binary that
-// creates the environment is immediately superseded by a tracked, updatable
-// package inside it, the same way the official installer manages itself.
-var packages = []string{"micromamba", "squashfs-tools", "squashfuse", "apptainer"}
+// pkg is one conda package this toolchain can hold.
+type pkg struct {
+	name   string   // conda package name
+	bins   []string // binaries it installs; bins[0] marks it installed
+	verify []string // binaries whose version output must name themselves
+	report string   // binary whose version is reported and floor-checked ("" = none)
 
-// apptainerZstdFloor is the minimum apptainer version this toolchain must
-// provide. See the README, Verification, for why this is independent of
-// internal/runtime/apptainer.CheckZstdSupport despite the same threshold.
-const apptainerZstdFloorMajor, apptainerZstdFloorMinor = 1, 4
+	floorMajor, floorMinor int    // minimum version of report; 0 = no floor
+	floorNeed              string // what the floor buys, for a failure message
+}
 
-// squashfsToolsFloor is the minimum squashfs-tools version this toolchain
-// must provide: below 4.4, mksquashfs cannot produce zstd-compressed
-// archives, and unsquashfs has no -offset, which internal/image/squashfs
-// relies on to read a SquashFS partition inside a SIF in place.
-const squashfsToolsFloorMajor, squashfsToolsFloorMinor = 4, 4
+// packages lists what a prefix may hold, in install order. micromamba is the
+// base every prefix carries: it installs and updates the rest, and its binary
+// marks a tier as provisioned.
+var packages = []pkg{
+	{name: "micromamba", bins: []string{"micromamba"}, report: "micromamba"},
+	{
+		name: "squashfs-tools", bins: []string{"mksquashfs", "unsquashfs"},
+		verify: []string{"mksquashfs", "unsquashfs"}, report: "mksquashfs",
+		floorMajor: 4, floorMinor: 4, floorNeed: "zstd and -offset support",
+	},
+	{name: "squashfuse", bins: []string{"squashfuse", "squashfuse_ll"}, verify: []string{"squashfuse"}, report: "squashfuse"},
+	{
+		name: "apptainer", bins: []string{"apptainer"}, verify: []string{"apptainer"}, report: "apptainer",
+		floorMajor: 1, floorMinor: 4, floorNeed: "zstd support",
+	},
+}
+
+// packageFor finds the package that is called name or installs a binary called name.
+func packageFor(name string) (pkg, bool) {
+	for _, p := range packages {
+		if p.name == name {
+			return p, true
+		}
+		for _, bin := range p.bins {
+			if bin == name {
+				return p, true
+			}
+		}
+	}
+	return pkg{}, false
+}
+
+// installedAt reports whether p's binary is present in prefix's bin/.
+func (p pkg) installedAt(prefix string) bool {
+	return utils.FileExists(filepath.Join(prefix, "bin", p.bins[0]))
+}
+
+// installedPackages returns the packages present in prefix, in install order.
+func installedPackages(prefix string) []pkg {
+	var have []pkg
+	for _, p := range packages {
+		if p.installedAt(prefix) {
+			have = append(have, p)
+		}
+	}
+	return have
+}
 
 // versionFlag is the flag a provisioned binary prints its own version for.
 // squashfs-tools (mksquashfs, unsquashfs) predates GNU-style long options and
@@ -54,101 +95,43 @@ func versionFlag(name string) string {
 	}
 }
 
-// stagingName is the fixed, hidden name a fresh generation is built under
-// before activation — a permanent, target-adjacent name rather than today's
-// former rename-in-place suffix, because micromamba's own prefix
-// substitution bakes this exact path into some of what it installs (e.g.
-// libfuse3's fusermount3 helper path). Renaming that directory away breaks
-// any such baked path; recreating this name as a symlink to the live
-// generation after activation keeps it resolving. See the README, Baked-in
-// absolute paths.
-const stagingName = ".libexec"
+// libexecLockName is the sibling lock that serializes Update calls on a tier,
+// including the first one, when there is no prefix yet to hold a lock.
+const libexecLockName = ".libexec.lock"
 
-// staleName is where the outgoing generation is moved aside during
-// activation, and what a crashed Update leaves for the next one to recover
-// from (see recoverStale).
-const staleName = ".libexec.old"
-
-// tierDir returns the path of a moved-around name (stagingName or staleName)
-// alongside target, e.g. tierDir(target, stagingName).
-func tierDir(target, name string) string {
-	return filepath.Join(filepath.Dir(target), name)
-}
-
-// isProvisioned reports whether dir holds a real (non-symlink) generation —
-// the same marker check Dir() makes, for one path rather than every tier.
-func isProvisioned(dir string) bool {
-	_, err := os.Stat(filepath.Join(dir, "bin", binMarker))
-	return err == nil
-}
-
-// ensureCompatSymlink (re)creates the compatibility symlink at staging,
-// pointing at target, unless it already correctly does. See stagingName's
-// own doc comment for why this needs to exist at all.
-func ensureCompatSymlink(target, staging string) error {
-	if link, err := os.Readlink(staging); err == nil && link == target {
-		return nil
+// resolveTools maps requested package names to packages.
+func resolveTools(names []string) ([]pkg, error) {
+	var out []pkg
+	for _, name := range names {
+		var found bool
+		for _, p := range packages {
+			if p.name == name {
+				out = append(out, p)
+				found = true
+				break
+			}
+		}
+		if !found {
+			valid := make([]string, len(packages))
+			for i, p := range packages {
+				valid[i] = p.name
+			}
+			return nil, fmt.Errorf("unknown toolchain package %q (available: %s)", name, strings.Join(valid, ", "))
+		}
 	}
-	os.Remove(staging) // clear whatever (if anything) is there, symlink or not
-	return os.Symlink(target, staging)
+	return out, nil
 }
 
-// recoverStale resolves any staging/stale leftovers at target's tier from a
-// previous Update that never finished, before this one proceeds. A crash
-// (including SIGKILL, which cannot be caught) can only have interrupted
-// Update at one of a few points, and each leaves a distinct, recognizable
-// shape — see the README, Locking / Crash recovery.
-func recoverStale(ctx context.Context, target string) {
-	staging := tierDir(target, stagingName)
-	old := tierDir(target, staleName)
-
-	stagingInfo, err := os.Lstat(staging)
-	stagingIsDir := err == nil && stagingInfo.Mode()&os.ModeSymlink == 0 && stagingInfo.IsDir()
-	oldExists := utils.DirExists(old)
-
-	switch {
-	case isProvisioned(target):
-		// The live generation is intact regardless of what else is lying
-		// around — anything else is build or cleanup debris.
-		if stagingIsDir {
-			os.RemoveAll(staging)
-		}
-		if oldExists {
-			os.RemoveAll(old)
-		}
-	case stagingIsDir && verifyToolchain(ctx, staging) == nil:
-		// Crashed after staging passed verification but before (or during)
-		// activation: finish it rather than redo the work.
-		if err := os.Rename(staging, target); err != nil {
-			return
-		}
-		if oldExists {
-			os.RemoveAll(old)
-		}
-	case oldExists:
-		// Staging either never finished or failed re-verification; the
-		// previously-live generation is the one to trust.
-		if stagingIsDir {
-			os.RemoveAll(staging)
-		}
-		if err := os.Rename(old, target); err != nil {
-			return
-		}
-	default:
-		return // nothing usable anywhere; Update proceeds as a fresh install
+// Update creates or updates the toolchain prefix in place, under an exclusive
+// lock. With no tools it updates what is installed, or creates a prefix holding
+// micromamba on a tier with none; naming tools also installs any that are
+// missing. A prefix without conda-meta/ is recreated.
+func Update(ctx context.Context, tools ...string) error {
+	requested, err := resolveTools(tools)
+	if err != nil {
+		return err
 	}
 
-	if err := ensureCompatSymlink(target, staging); err != nil {
-		logging.FromContext(ctx).Warn("could not restore the toolchain's compatibility symlink",
-			"path", staging, "err", err)
-	}
-}
-
-// Update refreshes the toolchain: create a fresh generation at a staging
-// path, verify it, move the outgoing generation aside and activate the new
-// one, then remove what was moved aside — all under the live generation's
-// exclusive lock (see the README, Locking).
-func Update(ctx context.Context) error {
 	live, hadLive := Dir()
 	target := live
 	if !hadLive {
@@ -158,154 +141,194 @@ func Update(ctx context.Context) error {
 		}
 		target = dir
 	}
-
-	if !hadLive {
-		// Nothing live to protect yet — safe to resolve any leftovers from a
-		// previous Update that crashed before finishing. When a generation is
-		// already live, its own lock (acquired below) is what protects it;
-		// the normal flow further down already clears stray staging/old
-		// leftovers as it goes, so recovery has nothing to add there.
-		recoverStale(ctx, target)
-		hadLive = isProvisioned(target)
+	parent := filepath.Dir(target)
+	if err := utils.MkdirAllShared(parent); err != nil {
+		return fmt.Errorf("failed to create %s: %w", parent, err)
 	}
 
-	var liveLock *utils.FlockHandle
+	tierLock, err := acquireTierLock(filepath.Join(parent, libexecLockName))
+	if err != nil {
+		return err
+	}
+	defer tierLock.Close()
+
+	var useLock *utils.FlockHandle
 	if hadLive {
 		lockPath := filepath.Join(target, lockFileName)
 		if !utils.FileExists(lockPath) {
-			// Self-heal a generation that predates this mechanism (see README).
 			if f, err := utils.CreateFileWritable(lockPath); err == nil {
 				f.Close()
 			}
 		}
-		lock, err := utils.AcquireFlock(lockPath, true)
+		useLock, err = utils.AcquireFlock(lockPath, true)
 		if err != nil {
 			return fmt.Errorf("condatainer is currently running (toolchain is locked); stop all running condatainer sessions before updating: %w", err)
 		}
-		liveLock = lock
+		defer func() {
+			if useLock != nil {
+				useLock.Close()
+			}
+		}()
 	}
-	defer func() {
-		if liveLock != nil {
-			liveLock.Close()
-		}
-	}()
 
-	staging := tierDir(target, stagingName)
-	os.RemoveAll(staging) // clears the compat symlink, or a leftover from a previously-failed attempt
+	inPlace := hadLive && utils.DirExists(filepath.Join(target, "conda-meta"))
+	if inPlace {
+		return updateInPlace(ctx, target, requested)
+	}
 
-	// Reuse the live toolchain's own micromamba when there is one — it is a
-	// separate binary from the staging path being created, so this is the
-	// ordinary "binary at path A creates an environment at path B" case, not
-	// the self-referential one. Only first-time provisioning has nothing to
-	// borrow from.
-	var mmBin string
+	// A prefix with no conda-meta/, or a half-built one, cannot be updated by
+	// micromamba; recreate it holding the same tools plus any requested.
+	want := requested
 	if hadLive {
-		if p := filepath.Join(target, "bin", "micromamba"); utils.FileExists(p) {
-			mmBin = p
-		}
+		want = mergePackages(installedPackages(target), requested)
+		// The in-prefix lock file goes with the directory, so release it first.
+		useLock.Close()
+		useLock = nil
 	}
-	var cleanup func()
-	if mmBin == "" {
-		var err error
-		mmBin, cleanup, err = downloadBootstrap(ctx)
-		if err != nil {
-			return err
-		}
+	if err := utils.RemoveAllWritable(target); err != nil {
+		return fmt.Errorf("failed to remove the old toolchain: %w", err)
 	}
-	if cleanup != nil {
-		defer cleanup()
-	}
+	return createPrefix(ctx, target, want)
+}
 
-	if err := provisionAt(ctx, mmBin, staging); err != nil {
-		os.RemoveAll(staging)
+// mergePackages returns the packages in a and b, once each, in install order.
+func mergePackages(a, b []pkg) []pkg {
+	var out []pkg
+	for _, p := range packages {
+		for _, list := range [][]pkg{a, b} {
+			if containsPkg(list, p) {
+				out = append(out, p)
+				break
+			}
+		}
+	}
+	return out
+}
+
+func containsPkg(list []pkg, p pkg) bool {
+	for _, q := range list {
+		if q.name == p.name {
+			return true
+		}
+	}
+	return false
+}
+
+// acquireTierLock takes the tier's exclusive Update lock, creating its file.
+func acquireTierLock(path string) (*utils.FlockHandle, error) {
+	if !utils.FileExists(path) {
+		if f, err := utils.CreateFileWritable(path); err == nil {
+			f.Close()
+		}
+	}
+	lock, err := utils.AcquireFlock(path, true)
+	if err != nil {
+		return nil, fmt.Errorf("another condatainer update of the toolchain is running: %w", err)
+	}
+	return lock, nil
+}
+
+// createPrefix builds a new prefix at target (which must not exist) holding
+// micromamba plus want, from a downloaded bootstrap binary, and removes the
+// prefix again if any step fails so nothing half-built looks provisioned.
+func createPrefix(ctx context.Context, target string, want []pkg) error {
+	mmBin, cleanup, err := downloadBootstrap(ctx)
+	if err != nil {
 		return err
 	}
+	defer cleanup()
 
-	if err := verifyToolchain(ctx, staging); err != nil {
-		os.RemoveAll(staging)
-		return fmt.Errorf("newly provisioned toolchain failed verification, discarded: %w", err)
+	names := packageNames(mergePackages(want, packages[:1]))
+	args := append([]string{"create", "-y", "-p", target, "-c", "conda-forge"}, names...)
+	if err := runMicromamba(ctx, mmBin, target, args...); err != nil {
+		utils.RemoveAllWritable(target) //nolint:errcheck
+		return fmt.Errorf("failed to provision the toolchain: %w", err)
 	}
-
-	// old is where the outgoing generation is moved aside: a rename succeeds
-	// unconditionally even while a file inside is open or executing, unlike
-	// removal, so it never blocks activation on anything being in use.
-	old := tierDir(target, staleName)
-	if hadLive {
-		os.RemoveAll(old) // leftover from a previous Update that couldn't remove it
-		if err := os.Rename(target, old); err != nil {
-			return fmt.Errorf("failed to move the outgoing toolchain aside: %w", err)
-		}
-		// liveLock's own file just moved with the rest of old; release it
-		// now rather than at the end, or removal below would be unlinking a
-		// file this same process still has open.
-		liveLock.Close()
-		liveLock = nil
-	} else {
-		os.Remove(target) //nolint:errcheck // best-effort; activation fails loudly below if this didn't clear it
-	}
-	if err := os.Rename(staging, target); err != nil {
-		return fmt.Errorf("failed to activate the new toolchain: %w", err)
-	}
-	if err := ensureCompatSymlink(target, staging); err != nil {
-		logging.FromContext(ctx).Warn("could not create the toolchain's compatibility symlink",
-			"path", staging, "err", err)
-	}
-	if hadLive {
-		if err := os.RemoveAll(old); err != nil {
-			logging.FromContext(ctx).Warn("could not remove the outgoing toolchain generation; left on disk",
-				"path", old, "err", err)
-		}
+	if err := finishPrefix(ctx, mmBin, target); err != nil {
+		utils.RemoveAllWritable(target) //nolint:errcheck
+		return err
 	}
 	return nil
 }
 
-// provisionAt runs the full bootstrap sequence into a not-yet-existing
-// prefix: create, clean, strip conda-meta (see the README, Bootstrap
-// sequence), then write this generation's own lock sentinel.
-func provisionAt(ctx context.Context, mmBin, prefix string) error {
-	if err := createAt(ctx, mmBin, prefix); err != nil {
-		return fmt.Errorf("failed to provision the toolchain: %w", err)
+// updateInPlace installs any requested package the prefix lacks, then updates
+// the requested packages, or everything installed when none were named, using
+// the prefix's own micromamba.
+func updateInPlace(ctx context.Context, target string, requested []pkg) error {
+	mmBin := filepath.Join(target, "bin", "micromamba")
+	if !utils.FileExists(mmBin) {
+		return fmt.Errorf("%s is missing; remove %s and run `condatainer update --libexec`", mmBin, target)
 	}
+
+	var missing []pkg
+	for _, p := range requested {
+		if !p.installedAt(target) {
+			missing = append(missing, p)
+		}
+	}
+	if len(missing) > 0 {
+		args := append([]string{"install", "-y", "-p", target, "-c", "conda-forge"}, packageNames(missing)...)
+		if err := runMicromamba(ctx, mmBin, target, args...); err != nil {
+			return fmt.Errorf("failed to install into the toolchain: %w", err)
+		}
+	}
+
+	args := []string{"update", "-y", "-p", target, "-c", "conda-forge"}
+	if len(requested) == 0 {
+		args = append(args, "-a")
+	} else {
+		args = append(args, packageNames(requested)...)
+	}
+	if err := runMicromamba(ctx, mmBin, target, args...); err != nil {
+		return fmt.Errorf("failed to update the toolchain; run `condatainer update --libexec` again: %w", err)
+	}
+	return finishPrefix(ctx, mmBin, target)
+}
+
+func packageNames(list []pkg) []string {
+	names := make([]string, len(list))
+	for i, p := range list {
+		names[i] = p.name
+	}
+	return names
+}
+
+// finishPrefix runs after a successful create or update: link fusermount3,
+// clean the package cache, share the tree with the group, ensure the lock
+// sentinel, and verify what is installed.
+func finishPrefix(ctx context.Context, mmBin, prefix string) error {
 	if err := ensureFusermount3InBin(prefix); err != nil {
 		return fmt.Errorf("failed to link fusermount3: %w", err)
 	}
-	if err := cleanAt(ctx, mmBin, prefix); err != nil {
+	if err := runMicromamba(ctx, mmBin, prefix, "clean", "-a", "-f", "-y"); err != nil {
 		return fmt.Errorf("failed to clean the toolchain cache: %w", err)
 	}
-	if err := os.RemoveAll(filepath.Join(prefix, "conda-meta")); err != nil {
-		return fmt.Errorf("failed to remove conda-meta: %w", err)
-	}
+	os.Remove(filepath.Join(prefix, ".cache")) //nolint:errcheck // an empty leftover of the contained cache
 	// micromamba creates every file under prefix itself, bypassing this
-	// codebase's own MkdirAllShared/CreateFileWritable entirely, so nothing
-	// below the top level picks up "2775" group-write on its own — confirmed
-	// against a real provisioned tree, where only prefix itself came out
-	// group-writable and every file and directory under it stayed at
-	// micromamba's own umask-derived mode. Sharing the whole tree here is
-	// what makes Update's later os.RemoveAll (a different group member than
-	// whoever provisioned this generation) actually able to remove it.
+	// codebase's own MkdirAllShared/CreateFileWritable, so nothing below the
+	// top level picks up group-write on its own.
 	if err := utils.ShareTreeWithParentGroup(prefix); err != nil {
 		return fmt.Errorf("failed to share the toolchain with the group: %w", err)
 	}
-	lockFile, err := utils.CreateFileWritable(filepath.Join(prefix, lockFileName))
-	if err != nil {
-		return fmt.Errorf("failed to create the lock sentinel: %w", err)
+	lockPath := filepath.Join(prefix, lockFileName)
+	if !utils.FileExists(lockPath) {
+		lockFile, err := utils.CreateFileWritable(lockPath)
+		if err != nil {
+			return fmt.Errorf("failed to create the lock sentinel: %w", err)
+		}
+		lockFile.Close()
 	}
-	lockFile.Close()
+	if err := verifyToolchain(ctx, prefix); err != nil {
+		return fmt.Errorf("the toolchain failed verification; run `condatainer update --libexec` again: %w", err)
+	}
 	return nil
-}
-
-// createAt runs `micromamba create` into prefix from a binary that lives
-// outside it (see the README, Bootstrap sequence, for the exact flags).
-func createAt(ctx context.Context, mmBin, prefix string) error {
-	args := append([]string{"-r", prefix, "--no-rc", "create", "-y", "-p", prefix, "-c", "conda-forge"}, packages...)
-	return runMicromamba(ctx, mmBin, args...)
 }
 
 // ensureFusermount3InBin symlinks bin/fusermount3 to ../sbin/fusermount3 when
 // the fuse3 package installed the setuid helper there instead of bin/ — some
-// builds do. libfuse3 bakes an absolute bin/fusermount3 path into itself at
-// install time (see stagingName's own doc comment); if the real binary only
-// exists in sbin/, that baked path never resolves regardless of $PATH.
+// builds do. libfuse3 bakes an absolute <prefix>/bin/fusermount3 path into
+// itself at install time; if the real binary only exists in sbin/, that baked
+// path never resolves regardless of $PATH.
 func ensureFusermount3InBin(prefix string) error {
 	sbinPath := filepath.Join(prefix, "sbin", "fusermount3")
 	if !utils.FileExists(sbinPath) {
@@ -318,29 +341,37 @@ func ensureFusermount3InBin(prefix string) error {
 	return os.Symlink(filepath.Join("..", "sbin", "fusermount3"), binPath)
 }
 
-// cleanAt reclaims disk after provisioning (see the README, Bootstrap
-// sequence, for why -f/--force-pkgs-dirs is required).
-func cleanAt(ctx context.Context, mmBin, prefix string) error {
-	return runMicromamba(ctx, mmBin, "-r", prefix, "--no-rc", "clean", "-a", "-f", "-y")
-}
+// runMicromamba runs one micromamba subcommand rooted at prefix, with the
+// package cache, repodata cache and HOME kept inside or apart from it so
+// nothing lands in the invoking user's home, and the caller's ambient
+// conda/mamba variables scrubbed.
+func runMicromamba(ctx context.Context, mmBin, prefix string, sub ...string) error {
+	home, err := os.MkdirTemp("", "cnt-libexec-home-")
+	if err != nil {
+		return fmt.Errorf("failed to create a scratch home: %w", err)
+	}
+	defer os.RemoveAll(home)
 
-// runMicromamba runs one micromamba invocation with the caller's ambient
-// conda/mamba env vars scrubbed, so an inherited CONDA_PREFIX or
-// MAMBA_ROOT_PREFIX from wherever condatainer itself is running cannot leak
-// into the environment being provisioned.
-func runMicromamba(ctx context.Context, mmBin string, args ...string) error {
 	managed := map[string]bool{
 		"CONDA_PREFIX": true, "CONDARC": true, "MAMBA_NO_RC": true,
 		"MAMBA_ROOT_PREFIX": true, "MAMBA_TARGET_PREFIX": true,
+		"CONDA_PKGS_DIRS": true, "MAMBA_PKGS_DIRS": true,
+		"XDG_CACHE_HOME": true, "HOME": true,
 	}
-	env := make([]string, 0, len(os.Environ()))
+	env := make([]string, 0, len(os.Environ())+3)
 	for _, entry := range os.Environ() {
 		name, _, _ := strings.Cut(entry, "=")
 		if !managed[name] {
 			env = append(env, entry)
 		}
 	}
+	env = append(env,
+		"CONDA_PKGS_DIRS="+filepath.Join(prefix, "pkgs"),
+		"XDG_CACHE_HOME="+filepath.Join(prefix, ".cache"),
+		"HOME="+home,
+	)
 
+	args := append([]string{"-r", prefix, "--no-rc"}, sub...)
 	cmd := commandContext(ctx, mmBin, args...)
 	cmd.Env = env
 	var out bytes.Buffer
@@ -352,31 +383,29 @@ func runMicromamba(ctx context.Context, mmBin string, args ...string) error {
 	return nil
 }
 
-// verifyToolchain sanity-checks a staged (not yet live) toolchain before it
-// is allowed to replace the running one: each tool must run (checked by
-// output content, not exit status — see the README, Verification), the
-// staged apptainer must clear the zstd floor, and the staged squashfs-tools
-// must clear its own floor.
+// verifyToolchain sanity-checks the packages installed in prefix: each listed
+// binary must run (checked by output content, not exit status — see the
+// README, Verification) and each floor must hold.
 func verifyToolchain(ctx context.Context, prefix string) error {
-	for _, name := range []string{"apptainer", "mksquashfs", "unsquashfs", "squashfuse"} {
-		path := filepath.Join(prefix, "bin", name)
-		out, _ := commandContext(ctx, path, versionFlag(name)).CombinedOutput()
-		if !strings.Contains(strings.ToLower(string(out)), name) {
-			return fmt.Errorf("%s does not run: unexpected output: %s", name, strings.TrimSpace(string(out)))
+	for _, p := range installedPackages(prefix) {
+		for _, name := range p.verify {
+			path := filepath.Join(prefix, "bin", name)
+			out, _ := commandContext(ctx, path, versionFlag(name)).CombinedOutput()
+			if !strings.Contains(strings.ToLower(string(out)), name) {
+				return fmt.Errorf("%s does not run: unexpected output: %s", name, strings.TrimSpace(string(out)))
+			}
 		}
-	}
-
-	if err := verifyFloor(ctx, prefix, "apptainer", apptainerZstdFloorMajor, apptainerZstdFloorMinor, "zstd support"); err != nil {
-		return err
-	}
-	if err := verifyFloor(ctx, prefix, "mksquashfs", squashfsToolsFloorMajor, squashfsToolsFloorMinor, "zstd and -offset support"); err != nil {
-		return err
+		if p.floorMajor > 0 {
+			if err := verifyFloor(ctx, prefix, p.report, p.floorMajor, p.floorMinor, p.floorNeed); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
 
-// verifyFloor reads name's own version from the staged prefix and checks it
-// against floorMajor.floorMinor, naming what that floor buys in a failure.
+// verifyFloor reads name's own version from prefix and checks it against
+// floorMajor.floorMinor, naming what that floor buys in a failure.
 func verifyFloor(ctx context.Context, prefix, name string, floorMajor, floorMinor int, need string) error {
 	out, err := commandContext(ctx, filepath.Join(prefix, "bin", name), versionFlag(name)).Output()
 	if err != nil {
@@ -406,28 +435,26 @@ type ToolVersion struct {
 	Version string
 }
 
-// versionedBins is the one binary per package this package installs whose
-// version is worth reporting — not unsquashfs/squashfuse_ll, since each
-// always shares its sibling's version.
-var versionedBins = []string{"apptainer", "mksquashfs", "squashfuse", "micromamba"}
-
-// Versions runs each binary's own version flag (see versionFlag) against the
-// live toolchain's own binaries. A binary that fails to run or prints
-// nothing parseVersion recognizes reports "unknown" rather than failing the
-// rest.
+// Versions runs each installed package's reported binary's own version flag
+// (see versionFlag) against the live toolchain. A binary that fails to run or
+// prints nothing parseVersion recognizes reports "unknown" rather than failing
+// the rest.
 func Versions(ctx context.Context) ([]ToolVersion, error) {
 	dir, ok := Dir()
 	if !ok {
 		return nil, ErrNotProvisioned
 	}
-	versions := make([]ToolVersion, 0, len(versionedBins))
-	for _, name := range versionedBins {
-		out, _ := commandContext(ctx, filepath.Join(dir, "bin", name), versionFlag(name)).CombinedOutput()
+	var versions []ToolVersion
+	for _, p := range installedPackages(dir) {
+		if p.report == "" {
+			continue
+		}
+		out, _ := commandContext(ctx, filepath.Join(dir, "bin", p.report), versionFlag(p.report)).CombinedOutput()
 		version := parseVersion(string(out))
 		if version == "" {
 			version = "unknown"
 		}
-		versions = append(versions, ToolVersion{Name: name, Version: version})
+		versions = append(versions, ToolVersion{Name: p.report, Version: version})
 	}
 	return versions, nil
 }

@@ -32,12 +32,22 @@ var updateCmd = &cobra.Command{
 	Short: "Update script metadata caches or the toolchain",
 	Long: `Update build script metadata, helper script metadata, or the self-provisioned toolchain.
 
-With no flags, refreshes both the build and helper script metadata caches.`,
+With no flags, refreshes both the build and helper script metadata caches.
+
+With --libexec, updates the tools installed in the toolchain, or creates it with
+micromamba when there is none. Name packages after it to install them too:
+apptainer, squashfs-tools, squashfuse.`,
 	Example: `  condatainer update                 # Refresh build + helper metadata (default)
   condatainer update --build         # Build script metadata only
   condatainer update --helper        # Helper script metadata only
-  condatainer update --libexec       # Refresh the self-provisioned toolchain`,
-	Args:         cobra.NoArgs,
+  condatainer update --libexec       # Update the installed toolchain
+  condatainer update --libexec apptainer squashfs-tools  # Install and update these`,
+	Args: func(cmd *cobra.Command, args []string) error {
+		if len(args) > 0 && !updateLibexec {
+			return fmt.Errorf("packages can only be named with --libexec")
+		}
+		return nil
+	},
 	SilenceUsage: true,
 	RunE:         runUpdate,
 }
@@ -46,7 +56,7 @@ func init() {
 	rootCmd.AddCommand(updateCmd)
 	updateCmd.Flags().BoolVar(&updateBuild, "build", false, "Refresh build script metadata cache")
 	updateCmd.Flags().BoolVar(&updateHelpScripts, "helper", false, "Refresh helper script metadata cache")
-	updateCmd.Flags().BoolVar(&updateLibexec, "libexec", false, "Refresh the self-provisioned toolchain (mksquashfs, squashfuse, apptainer)")
+	updateCmd.Flags().BoolVar(&updateLibexec, "libexec", false, "Update the self-provisioned toolchain; name packages to install them")
 }
 
 func runUpdate(cmd *cobra.Command, args []string) error {
@@ -84,7 +94,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 		// libexec.Update holds its own lock and refuses internally if the
 		// toolchain is in use; no separate check needed here.
 		utils.PrintMessage("Updating the self-provisioned toolchain...")
-		if err := libexec.Update(cmd.Context()); err != nil {
+		if err := libexec.Update(cmd.Context(), args...); err != nil {
 			return fmt.Errorf("failed to update the toolchain: %w", err)
 		}
 		utils.PrintSuccess("Toolchain updated successfully.")

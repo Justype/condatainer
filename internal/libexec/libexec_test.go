@@ -3,6 +3,7 @@ package libexec
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Justype/condatainer/internal/config"
@@ -29,7 +30,7 @@ func withScratchTier(t *testing.T) string {
 	return scratch
 }
 
-// provisionedStub drops a fake bin/apptainer and a lock sentinel under
+// provisionedStub drops a fake bin/micromamba and a lock sentinel under
 // tier/libexec, just enough to satisfy Dir's marker check and let
 // AcquireUse/Update's own locking be exercised without a real bootstrap.
 func provisionedStub(t *testing.T, tier string) {
@@ -38,8 +39,8 @@ func provisionedStub(t *testing.T, tier string) {
 	if err := utils.MkdirAllShared(bin); err != nil {
 		t.Fatalf("failed to create stub bin dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(bin, "apptainer"), []byte("#!/bin/sh\n"), 0755); err != nil {
-		t.Fatalf("failed to write stub apptainer: %v", err)
+	if err := os.WriteFile(filepath.Join(bin, "micromamba"), []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatalf("failed to write stub micromamba: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(tier, "libexec", lockFileName), nil, 0644); err != nil {
 		t.Fatalf("failed to write stub lock sentinel: %v", err)
@@ -68,7 +69,7 @@ func TestDirIgnoresUnprovisionedTiers(t *testing.T) {
 
 func TestDirIgnoresAnEmptyLibexecDir(t *testing.T) {
 	scratch := withScratchTier(t)
-	// libexec/ exists but was never actually provisioned (no bin/apptainer) —
+	// libexec/ exists but was never actually provisioned (no bin/micromamba) —
 	// e.g. a half-finished bootstrap or a stale .new left by a crash.
 	if err := utils.MkdirAllShared(filepath.Join(scratch, "libexec")); err != nil {
 		t.Fatalf("failed to create empty libexec dir: %v", err)
@@ -78,26 +79,42 @@ func TestDirIgnoresAnEmptyLibexecDir(t *testing.T) {
 	}
 }
 
-func TestApptainerPathAndMksquashfsPath(t *testing.T) {
+func TestPathReportsOnlyInstalledTools(t *testing.T) {
 	scratch := withScratchTier(t)
 	provisionedStub(t, scratch)
+	bin := filepath.Join(scratch, "libexec", "bin")
 
+	if _, ok := ApptainerPath(); ok {
+		t.Error("ApptainerPath() found an apptainer that is not installed")
+	}
+	if Installed("apptainer") {
+		t.Error("Installed(apptainer) = true, want false")
+	}
+
+	if err := os.WriteFile(filepath.Join(bin, "apptainer"), []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
 	path, ok := ApptainerPath()
 	if !ok {
-		t.Fatal("ApptainerPath() = not found")
+		t.Fatal("ApptainerPath() = not found after installing it")
 	}
-	if want := filepath.Join(scratch, "libexec", "bin", "apptainer"); path != want {
+	if want := filepath.Join(bin, "apptainer"); path != want {
 		t.Errorf("ApptainerPath() = %s, want %s", path, want)
 	}
-
-	// mksquashfs was never written by the stub; MksquashfsPath only names the
-	// path within an already-provisioned bin/, it does not check this one file.
-	msPath, ok := MksquashfsPath()
-	if !ok {
-		t.Fatal("MksquashfsPath() = not found")
+	if _, ok := MksquashfsPath(); ok {
+		t.Error("MksquashfsPath() found a mksquashfs that is not installed")
 	}
-	if want := filepath.Join(scratch, "libexec", "bin", "mksquashfs"); msPath != want {
-		t.Errorf("MksquashfsPath() = %s, want %s", msPath, want)
+}
+
+func TestProvidesAndMessagesNameThePackage(t *testing.T) {
+	if !Provides("mksquashfs") || !Provides("squashfs-tools") || Provides("debugfs") {
+		t.Error("Provides() disagrees with the package table")
+	}
+	if got := NotProvisionedMessage("mksquashfs"); !strings.Contains(got, "update --libexec squashfs-tools") {
+		t.Errorf("NotProvisionedMessage(mksquashfs) = %q, want it to name squashfs-tools", got)
+	}
+	if got := NotProvisionedMessage("debugfs"); strings.Contains(got, "update --libexec") {
+		t.Errorf("NotProvisionedMessage(debugfs) = %q, must not suggest an install", got)
 	}
 }
 

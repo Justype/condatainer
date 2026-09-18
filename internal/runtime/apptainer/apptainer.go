@@ -82,7 +82,7 @@ func ResolveBin(fakeroot bool) error {
 	if !fakeroot {
 		path, ok := libexec.ApptainerPath()
 		if !ok {
-			return libexec.ErrNotProvisioned
+			return libexec.NotInstalledError("apptainer")
 		}
 		return SetBin(path)
 	}

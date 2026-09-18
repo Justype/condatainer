@@ -1,10 +1,10 @@
 # internal/libexec
 
-Resolves and provisions CondaTainer's self-provisioned toolchain — `mksquashfs`, `squashfuse`,
-and an ordinary (non-fakeroot) `apptainer` — installed via `micromamba` into one of the four
-data-directory tiers. It is never a recipe's concern and never contributes to any artifact's
-identity: the toolchain is host-local infrastructure, the same status as the Apptainer binary
-itself.
+Resolves and provisions CondaTainer's self-provisioned toolchain: one micromamba prefix in one of
+the four data-directory tiers. It always holds `micromamba`, and holds `squashfs-tools`
+(`mksquashfs`, `unsquashfs`), `squashfuse` and an ordinary (non-fakeroot) `apptainer` only when
+asked for by name. It is never a recipe's concern and never contributes to any artifact's identity:
+the toolchain is host-local infrastructure, the same status as the Apptainer binary itself.
 
 ## Placement
 
@@ -18,79 +18,69 @@ tool`'s archive-read error shaping, `internal/toolpath`'s resolver, `Build.Tools
 record). `libexec` is the FHS term for exactly this — executables invoked by other programs, never
 typed by a user.
 
-## Bootstrap sequence
+## The package table
 
-The bootstrap binary must run from **outside** the prefix it creates. `micromamba create -r X -p
-X` refuses outright if `X` already exists — even genuinely empty, not just non-empty — with
-"Overwriting root prefix is not permitted." Every generation is therefore built at a fixed hidden
-name, `stagingName` (`.libexec`), sitting alongside the live `libexec/` rather than inside it, and
-is only renamed into place once it has passed `verifyToolchain` — see *Baked-in absolute paths*
-below for why that staging name has to stay fixed rather than being renamed away afterward.
+`packages` in `provision.go` is the one list of what a prefix may hold: each package's conda name,
+the binaries it installs, which of them are checked for running, which one is reported and
+floor-checked, and the floor. `Provides`, `Installed`, `Versions`, `verifyToolchain` and every
+message that names a package derive from it. What a prefix holds is read from its `bin/`, not from
+code, so a prefix with only `micromamba` is a complete, valid one.
 
-The create command is exactly:
+`micromamba` is the base: its binary is what `Dir()` treats as "this tier is provisioned", and it is
+what installs and updates everything else. Nothing else is installed unless named.
 
-```
-<bootstrap-or-live-micromamba> -r <prefix> --no-rc create -y -p <prefix> -c conda-forge \
-    micromamba squashfs-tools squashfuse apptainer
-```
+## Create and update
 
-- `-r`/`--no-rc` are **global** flags and must precede the subcommand.
-- `-r` pinned to the same path as `-p` stops libmamba's default `pkgs_dirs` list from falling
-  back to a per-user `$HOME` location regardless of `-p` — a real leak, confirmed by watching it
-  happen. On a shared, group-writable tier this is not cosmetic: an unpinned root silently
-  defaulting to `$HOME` would break "one copy serves the whole group" for every other user
-  hitting the same tier.
-- `--no-rc` stops the invoking user's own `~/.condarc` (channels, `channel_priority`, …) from
-  influencing the solve.
-- The package is `squashfs-tools`, not `mksquashfs`.
-- `micromamba` is included in its own install spec so the bootstrap binary is immediately
-  superseded by a tracked, updatable package inside the prefix — the same self-management the
-  official installer does.
+Each `update --libexec` call takes an exclusive lock on the tier (a sibling `.libexec.lock`, so it
+exists before any prefix does) and, when a prefix is live, on that prefix's own `.lock` as well.
+Then one of three things happens.
 
-After `create`, `cleanAt` runs `clean -a -f -y`. `-f`/`--force-pkgs-dirs` is required: `-a`/`--all`
-alone leaves the per-package unpacked cache directories behind, because micromamba considers them
-"in use" by the very environment they were installed into. Measured for the full toolchain: 2964
-files / 325 MB with `-a` alone, 938 files / 293 MB with `-a -f`.
+- **No prefix yet.** A standalone micromamba is downloaded outside the tier and creates the prefix
+  directly at its final `libexec/` path with `micromamba` plus any named packages. A failed create
+  removes the prefix, so nothing half-built is ever reported as provisioned.
+- **A live prefix with `conda-meta/`.** The prefix's own micromamba updates it in place: named
+  packages that are missing are installed, then the named ones (or, with none named, every
+  installed package) are updated. `update`, not `install`, because `install` leaves an
+  already-satisfied spec at its current version.
+- **A live prefix with no `conda-meta/`.** micromamba cannot track such a prefix; it would treat it
+  as empty and forget every installed package. It is removed and recreated with the tools that were
+  in its `bin/`, plus any named.
 
-`provisionAt` then removes `conda-meta/` entirely and writes this generation's own `.lock`
-sentinel (see Locking below). Removing `conda-meta/` is detection-hiding only, not a mutation
-safeguard: tested both ways, `install`/`update -p <prefix>` "succeed" regardless — with
-`conda-meta/` present it's a normal update, without it micromamba just treats the directory as
-fresh and silently relinks over every existing file with warnings instead of errors. The only
-effect of removing it is that `conda env list` and IDE Python-interpreter scanners (which walk
-the filesystem for `conda-meta/history`) never pick up `libexec` as something to offer.
+Afterwards, whichever path ran: `fusermount3` is linked into `bin/` if only `sbin/` has it,
+`clean -a -f -y` reclaims the package cache, the tree is shared with the parent group, the lock
+sentinel is ensured, and `verifyToolchain` checks what is installed. A failed update leaves whatever
+micromamba left, and re-running the update repairs it; there is no rollback copy.
 
-`provisionAt` also runs `utils.ShareTreeWithParentGroup(prefix)` before the lock sentinel. `create`
-writes every file under `prefix` itself, entirely outside this codebase's own `MkdirAllShared`/
-`CreateFileWritable` — confirmed against a real provisioned tree, where only `prefix`'s own top
-level had ended up group-writable and everything beneath it (`bin/`, `lib/`, `etc/`, …) was still at
-micromamba's own umask-derived mode. Left unfixed, `Update`'s later `os.RemoveAll(target)` would
-only succeed for whoever happens to own each individual file — breaking "one copy serves the whole
-group" for every group member except the one who provisioned this generation.
+`micromamba self-update` is not used: it swaps the binary but leaves `conda-meta/` recording the old
+version.
 
-## Baked-in absolute paths
+### Nothing leaks out of the prefix
 
-micromamba's own prefix substitution patches some absolute paths directly into the binaries it
-installs, using whatever `-p` prefix `create` was given — not just library `RPATH`s (which use
-`$ORIGIN` and survive a later move), but paths a binary execs at runtime. `libfuse3`'s
-`fusermount3` helper lookup is one: it is compiled in as an absolute `<prefix>/bin/fusermount3`
-path, tried before any `$PATH` search — confirmed by inspecting the installed `libfuse3.so`
-directly, not documented behavior.
+`-r <prefix>` alone does not contain micromamba. `runMicromamba` also sets
+`CONDA_PKGS_DIRS=<prefix>/pkgs` and `XDG_CACHE_HOME=<prefix>/.cache`, and points `HOME` at a
+throwaway directory removed afterwards. Without them micromamba writes to `~/.mamba/pkgs`,
+`~/.cache/conda`, and registers the prefix in `~/.conda/environments.txt`, which no variable turns
+off. On a shared tier that would also put the cache in whichever user ran the update.
 
-That means the name a generation is built under has to be the name it keeps forever, not a name
-that gets renamed away on activation: renaming breaks any such baked path permanently, with no way
-to detect it beyond apptainer's own FUSE-mount driver failing at runtime with "Failed to call
-'fusermount3': No such file or directory". `stagingName` (`.libexec`) is recreated as a symlink to
-the live `libexec/` immediately after every activation for exactly this reason — nothing in this
-package itself ever resolves through it (`Dir()` and everything built on it always resolve
-`libexec/` directly); it exists purely so a binary's own baked-in `.libexec/...` lookup keeps
-resolving.
+A pre-existing directory at the prefix makes `create` refuse, so the throwaway `HOME` cannot live
+inside it. `clean -a -f` is required: `-a` alone leaves the per-package unpacked directories,
+because micromamba considers them in use by the very environment they were installed into.
 
-`ensureFusermount3InBin` closes the other half of the same failure: this build of the `fuse3`
-package installs the setuid helper into `sbin/`, not `bin/`, but the baked-in path always says
-`bin/` regardless of where the package actually put it. `provisionAt` symlinks
-`bin/fusermount3 -> ../sbin/fusermount3` whenever it finds the binary only in `sbin/`, so the baked
-path resolves to something that actually exists.
+### Why `conda-meta/` stays
+
+Removing it hides the prefix from `conda env list` and IDE scanners, but `install` and `update` then
+"succeed" while forgetting every earlier package record, leaving those packages' files untracked.
+The cost of keeping it is that the prefix can be offered as an environment.
+
+### Baked-in absolute paths
+
+micromamba's prefix substitution patches some absolute paths into the binaries it installs, using
+the `-p` prefix `create` was given — not just library `RPATH`s (which use `$ORIGIN` and survive a
+move) but paths a binary execs at runtime. `libfuse3`'s `fusermount3` helper lookup is one: an
+absolute `<prefix>/bin/fusermount3`, tried before any `$PATH` search. So the prefix is created at
+the path it keeps and never renamed, and `ensureFusermount3InBin` links `bin/fusermount3` to
+`../sbin/fusermount3` when the package installed it only in `sbin/`. The path handed to `-p` is
+the symlink-resolved one, since that string is what gets baked in.
 
 ## Toolchain activation
 
@@ -105,9 +95,8 @@ prefix on each script's own `.` (`CONDA_PREFIX=<prefix> . "$script"`), never exp
 wrapper, so it reaches that script and anything it spawns but not the containerized command
 apptainer goes on to run — see `internal/runtime/apptainer/README.md`.
 
-Only `conda-meta/` is stripped from a freshly provisioned prefix (see Bootstrap sequence above);
-`activate.d`, `deactivate.d`, and `envvars` are all left in place, since any of them could matter
-for the same reason `activate.d` does.
+`conda-meta/`, `activate.d`, `deactivate.d`, and `envvars` are all left in place, since any of
+them could matter for the same reason `activate.d` does.
 
 ## Resolved paths, not logical ones
 
@@ -143,21 +132,22 @@ different environment than the one a script running inside the container it laun
 
 ## Naming a missing tool
 
-`Path`/`BinDir`/`Dir` build a path for any name regardless of whether this package actually installs
-it — deliberately, since that is what lets `toolpath.Resolve` ask about a name like `debugfs` this
-package never provisions and fall through cleanly. That means none of them can answer "is `name`
-actually one of mine," which a caller needs before it decides what to tell the user. `Provides(name)`
-answers it, against the exact *binary* names `provision.go`'s package spec installs — not the package
-names themselves, since one package can give more than one binary: `squashfs-tools` gives two
-(`mksquashfs`, `unsquashfs`), and so does `squashfuse` (`squashfuse`, `squashfuse_ll`).
+`Path(name)` returns a path only when that binary is installed in the provisioned `bin/`, so
+`toolpath.Resolve` asking about a name like `debugfs` this package never provisions falls through
+cleanly, and so does one that is provisionable but not installed. Neither tells a caller *why*, which
+it needs before deciding what to say. `Provides(name)` answers whether `name` is a binary or package
+the table can install, and `Installed(name)` whether this tier has it. A package can give more than
+one binary: `squashfs-tools` gives `mksquashfs` and `unsquashfs`, and `squashfuse` gives `squashfuse`
+and `squashfuse_ll`.
 
-`ErrNotProvisioned` and `NotProvisionedMessage` both report the same thing — nothing is provisioned,
-or `Provides(name)` is false for what was asked — but reach different consumers. `ErrNotProvisioned`
-is a Go sentinel for a caller that fails before starting a container (`apptainer.ResolveBin`,
-`conda.go`'s `micromambaCmd`/`condaExecOpts`); `NotProvisionedMessage(name)` is a plain string for
-anything else that needs the wording without a Go error to carry it — a host-side caller that already
-resolved through `toolpath` and would otherwise need this package as a second import just for a
-message. That case is why `toolpath.NotFoundMessage(name)` exists as a thin re-export:
+`ErrNotProvisioned` and `NotProvisionedMessage` report a missing tool to different consumers.
+`ErrNotProvisioned` is the Go sentinel for a caller that fails before starting a container
+(`apptainer.ResolveBin`, `conda.go`'s `micromambaCmd`/`condaExecOpts`); `NotInstalledError(name)`
+returns it when no tier is provisioned and otherwise an error naming the package that installs
+`name`, since the bare `update --libexec` no longer installs it. `NotProvisionedMessage(name)` is a
+plain string for anything else that needs the wording without a Go error to carry it — a host-side
+caller that already resolved through `toolpath` and would otherwise need this package as a second
+import just for a message. That case is why `toolpath.NotFoundMessage(name)` exists as a thin re-export:
 `internal/image/tool`'s `CheckDependencies`, `internal/image/squashfs`'s cached-empty-string case, and
 `internal/image/freeze/fuse2fs.go`'s `findSquashfuse`/`findFuse2fs` all go through that, not this
 package directly — every one of them already imports `toolpath` for `Resolve` itself, so reaching past
@@ -187,7 +177,7 @@ give it an opinion about hosts and PATH search that provisioning has no business
 This package importing nothing under `internal/image` is not incidental — it is what lets
 `internal/toolpath` import this package directly with no cycle, since `internal/image/squashfs`
 (which needs `toolpath.Resolve`) is itself reachable from `internal/image`, and `internal/image`
-must never depend on anything that depends back on one of its own children. The generation lock
+must never depend on anything that depends back on one of its own children. The lock
 below is the one thing this package used to share with `internal/image` (both wanted a plain
 non-blocking flock); it now uses `internal/utils.AcquireFlock` instead of `internal/image.
 AcquireLock` — the actual flock mechanics were the only genuinely shared part, so that's the one
@@ -199,75 +189,43 @@ returns.
 
 ## Locking
 
-Every generation gets its own `.lock` sentinel, created fresh by `provisionAt` — never shared
-across generations, since each is a distinct inode from its own `create` call. This mirrors
-exactly how `.sqf`/`.sif` overlays are protected (CLAUDE.md, *File Locking*): a reader
-(`AcquireUse`, called from `internal/runtime/exec.Prepare` alongside the existing overlay/base
-locks) holds `LOCK_SH` for the duration of one apptainer subprocess call; `Update` must take
-`LOCK_EX` on the live generation before touching anything, and refuses outright if it can't —
-both sides use `internal/utils.AcquireFlock`'s non-blocking flock, so a reader that collides with
-an in-progress update fails immediately with a clear message rather than blocking, and `Update`
-never waits either.
+Two locks, both non-blocking `flock`s through `internal/utils.AcquireFlock`, so a collision fails at
+once with a clear message and nobody waits.
 
-Holding the lock guarantees nothing *condatainer* is using the outgoing generation — but `Update`
-still doesn't remove it in place. It renames it to a fixed `staleName` (`.libexec.old`), activates
-staging, then makes one best-effort attempt to remove it. A rename succeeds even while a file
-inside is open or executing; removal does not, so activation is never gated on cleanup.
-
-`liveLock` is released right after that rename, not deferred to the end of `Update`: its own `.lock`
-file moves with the outgoing generation, so holding it open through the removal attempt would mean
-unlinking a file this process still has open — a guaranteed silly-rename on NFS. Releasing here is
-safe, since nothing looks up a lock at `target` once staging has taken its place.
-
-If removing the outgoing generation fails, `Update` logs a warning and leaves it — no retry loop.
-The next `Update` clears it before moving a fresh live generation aside in its own place.
-
-### Crash recovery
-
-SIGKILL cannot be caught, so recovering from one is pure on-disk inspection: `recoverStale` runs at
-the very start of `Update`, but only when nothing is currently live. A live generation's own lock,
-acquired immediately once `Dir()` finds one, already protects it for the rest of `Update`; the
-normal flow further down already clears stray staging debris and any leftover `.libexec.old` as it
-goes, so recovery has nothing left to do once something is live. A crash can only have interrupted
-`Update` at one of a few points, and each leaves a distinct, recognizable shape:
-
-- Nothing at `libexec`, `.libexec`, or `.libexec.old`: nothing to recover — this tier was never
-  provisioned, or genuinely has nothing worth keeping.
-- Only `.libexec.old`: the crash landed between moving the outgoing generation aside and finishing
-  its replacement. Restore it.
-- `.libexec` (a real directory, not yet the compat symlink) present alongside `.libexec.old`: the
-  crash could have landed either just before or just after `verifyToolchain` passed on `.libexec`,
-  and those two cases need opposite handling. Re-running `verifyToolchain` against it is what tells
-  them apart — no separate completion marker is needed, since that check already answers "is this
-  generation complete" for a freshly built one. Passes: finish the interrupted activation (rename
-  it into place, drop `.old`). Fails: discard it and restore `.old` instead.
-- `libexec` itself already provisioned: nothing to recover regardless of what else is lying around
-  — see above.
-
-A generation with no `.lock` file yet (one written by code that predates this mechanism, or a
-sentinel that failed to write) is self-healed by creating an empty one before locking, in both
-`Update` and `AcquireUse` — otherwise every reader would report "being updated" forever for a
-generation nothing is actually updating. Creating it without checking for a race first is fine:
-the flock acquired right after is what actually serializes access, not the file's creation.
+- **`<prefix>/.lock`.** A reader (`AcquireUse`, called from `internal/runtime/exec.Prepare` alongside
+  the existing overlay/base locks) holds `LOCK_SH` for the duration of one apptainer subprocess
+  call. `Update` takes `LOCK_EX` before touching a live prefix and refuses if a reader holds it. This
+  mirrors how `.sqf`/`.sif` overlays are protected (CLAUDE.md, *File Locking*). A prefix with no
+  `.lock` file gets an empty one before locking: creating it without checking for a race is fine,
+  since the flock acquired right after is what serializes access.
+- **`<tier>/.libexec.lock`.** Held by `Update` for its whole run, so two updates of one tier cannot
+  interleave, including the first one, when there is no prefix yet to hold a lock. When a prefix
+  without `conda-meta/` is recreated, the in-prefix lock is released before the removal, because the
+  file goes with the directory and unlinking a file this process still has open leaves a silly-rename
+  on NFS.
 
 ## Verification
 
-`verifyToolchain` checks a staged (not yet live) generation by output content, not exit status.
+`verifyToolchain` checks a prefix's installed packages by output content, not exit status.
 `squashfuse` always exits 254 for an argument-free invocation — version and help flags included —
 even though it prints its own name and version banner regardless; only a real archive +
 mountpoint argument gets exit 0. `apptainer`/`mksquashfs`/`unsquashfs` do exit 0 for their own
-version flag, but content-checking all four the same way needs no per-tool special case.
+version flag, but content-checking all of them the same way needs no per-tool special case.
+`micromamba` prints only a bare version, so it is not content-checked.
 
 `versionFlag` is the one place that flag differs per tool: `mksquashfs`/`unsquashfs`
 (squashfs-tools) predate GNU-style long options and only recognize `-version`; everything else
-provisioned here takes `--version`.
+takes `--version`.
 
-Two floors, both checked by `verifyFloor` against `meetsFloor`:
+Two floors, in the package table and checked only for packages that are installed:
 
 - apptainer `>= 1.4` — below that, it cannot mount a zstd-compressed SquashFS. This package's own
   threshold is independent of `internal/runtime/apptainer.CheckZstdSupport` (same number) because
-  verifying a *staged* binary must never touch that package's global, live-apptainer state.
+  verifying a prefix must never touch that package's global, live-apptainer state.
 - squashfs-tools (checked via `mksquashfs`, since `unsquashfs` always ships the same version)
   `>= 4.4` — below that, `mksquashfs` cannot produce zstd-compressed archives, and `unsquashfs`
   has no `-offset`, which `internal/image/squashfs` relies on to read a SquashFS partition inside
   a SIF in place.
+
+A prefix that fails verification after an update is reported as such, and re-running the update
+repairs it; `Dir()` still treats it as provisioned, since its `micromamba` is what runs the repair.

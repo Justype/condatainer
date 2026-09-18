@@ -39,8 +39,8 @@ func withProvisionedLibexec(t *testing.T, name string) string {
 	if err := utils.MkdirAllShared(bin); err != nil {
 		t.Fatalf("failed to create stub bin dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(bin, "apptainer"), []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatalf("failed to write stub apptainer: %v", err)
+	if err := os.WriteFile(filepath.Join(bin, "micromamba"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("failed to write stub micromamba: %v", err)
 	}
 	if name != "" {
 		writeFakeExecutable(t, bin, name)

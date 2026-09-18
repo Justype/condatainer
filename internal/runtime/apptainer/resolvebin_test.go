@@ -32,6 +32,10 @@ func writeFakeBin(t *testing.T, dir, name, output string) string {
 	if err := os.MkdirAll(bin, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// micromamba is what marks a libexec tier provisioned.
+	if err := os.WriteFile(filepath.Join(bin, "micromamba"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	path := filepath.Join(bin, name)
 	script := "#!/bin/sh\necho '" + output + "'\n"
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {

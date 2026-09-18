@@ -1,7 +1,7 @@
 // Package libexec resolves and provisions CondaTainer's self-provisioned
-// toolchain — mksquashfs, squashfuse, and an ordinary (non-fakeroot)
-// apptainer, installed via micromamba into one of the four data-directory
-// tiers. See the package README for the design.
+// toolchain — micromamba plus, on request, mksquashfs, squashfuse and an
+// ordinary (non-fakeroot) apptainer, installed via micromamba into one of the
+// four data-directory tiers. See the package README for the design.
 package libexec
 
 import (
@@ -15,8 +15,9 @@ import (
 )
 
 // binMarker is the executable that must exist for a tier's libexec/ to count
-// as provisioned, rather than an empty or half-written directory.
-const binMarker = "apptainer"
+// as provisioned, rather than an empty or half-written directory. micromamba
+// is the one package every prefix holds.
+const binMarker = "micromamba"
 
 // ErrNotProvisioned is what a container-bound caller returns when nothing is
 // provisioned at any tier. Condatainer never auto-provisions on its own — an
@@ -24,41 +25,44 @@ const binMarker = "apptainer"
 // every message directs the user to the one command that does.
 var ErrNotProvisioned = errors.New("the self-provisioned toolchain is not installed; run `condatainer update --libexec` first")
 
-// providedBins are the exact binary names provision.go's package spec
-// installs. Path/BinDir build a path for any name regardless of whether
-// this package actually installs it (see Path's own doc comment — that is
-// what lets toolpath.Resolve ask about names like "debugfs" it never
-// provisions), so this is the one place a caller can ask "is name actually
-// one of mine" before pointing someone at `condatainer update --libexec`.
-var providedBins = map[string]bool{
-	"apptainer":     true, // apptainer
-	"mksquashfs":    true, // squashfs-tools
-	"unsquashfs":    true, // squashfs-tools
-	"squashfuse":    true, // squashfuse
-	"squashfuse_ll": true, // squashfuse
-	"micromamba":    true, // micromamba
-}
-
-// Provides reports whether name is one of the binaries this package's own
-// spec installs, independent of whether a toolchain is actually provisioned
-// anywhere right now.
+// Provides reports whether name is a binary or package this package can
+// install, independent of whether it is installed anywhere right now. Path
+// and BinDir build a path for any name (that is what lets toolpath.Resolve
+// ask about names like "debugfs" this package never provisions), so this is
+// the one place a caller can ask "is name actually one of mine" before
+// pointing someone at `condatainer update --libexec`.
 func Provides(name string) bool {
-	return providedBins[name]
+	_, ok := packageFor(name)
+	return ok
 }
 
 // NotProvisionedMessage explains why name could not be found — for embedding
 // in a generated shell script's own failure message, where a Go error value
-// cannot reach. It names the toolchain-install fix only when Provides(name):
+// cannot reach. It names the install command only when Provides(name):
 // pointing someone at `condatainer update --libexec` for a tool this package
 // never installs (e2fsprogs, say) would not help. Single-quoted, not
 // backtick-quoted like ErrNotProvisioned's own text: this string is meant to
 // sit inside a double-quoted shell echo, where a backtick would attempt
 // command substitution instead of printing literally.
 func NotProvisionedMessage(name string) string {
-	if Provides(name) {
-		return fmt.Sprintf("%s not found; run 'condatainer update --libexec' to install it", name)
+	if p, ok := packageFor(name); ok {
+		return fmt.Sprintf("%s not found; run 'condatainer update --libexec %s' to install it", name, p.name)
 	}
 	return name + " not found"
+}
+
+// NotInstalledError is what a container-bound caller returns when name is not
+// in the toolchain: ErrNotProvisioned when no tier is provisioned at all,
+// otherwise a message naming the package that installs it.
+func NotInstalledError(name string) error {
+	if _, ok := Dir(); !ok {
+		return ErrNotProvisioned
+	}
+	p, ok := packageFor(name)
+	if !ok {
+		return fmt.Errorf("%s is not part of the self-provisioned toolchain", name)
+	}
+	return fmt.Errorf("%s is not installed in the self-provisioned toolchain; run `condatainer update --libexec %s`", name, p.name)
 }
 
 // lockFileName is the per-generation lock sentinel a reader holds LOCK_SH on
@@ -66,7 +70,7 @@ func NotProvisionedMessage(name string) string {
 const lockFileName = ".lock"
 
 // Dir returns the nearest tier's libexec directory that is actually
-// provisioned (has bin/apptainer), resolved to its real (symlink-free) path,
+// provisioned (has bin/micromamba), resolved to its real (symlink-free) path,
 // and true. Returns "", false if none is.
 func Dir() (string, bool) {
 	for _, dir := range config.GetLibexecSearchPaths() {
@@ -117,19 +121,26 @@ func MicromambaPath() (string, bool) {
 	return Path("micromamba")
 }
 
-// Path returns the path a binary called name would have in the provisioned
-// bin/, and true if a toolchain is provisioned at all — regardless of
-// whether name is actually one of the tools it installs. The named
-// accessors above are for a container-bound caller that already knows which
-// tool it wants; internal/toolpath.Resolve calls this one directly for an
-// arbitrary name, since a tool this package never provisions simply isn't
-// found on the host-side stat check that follows.
+// Path returns the path of the binary called name in the provisioned bin/,
+// and true only if it is installed there. internal/toolpath.Resolve calls this
+// for an arbitrary name, and a name this package never provisions is simply
+// not found.
 func Path(name string) (string, bool) {
 	bin, ok := BinDir()
 	if !ok {
 		return "", false
 	}
-	return filepath.Join(bin, name), true
+	path := filepath.Join(bin, name)
+	if !utils.FileExists(path) {
+		return "", false
+	}
+	return path, true
+}
+
+// Installed reports whether the nearest provisioned tier has the binary name.
+func Installed(name string) bool {
+	_, ok := Path(name)
+	return ok
 }
 
 // LockPath returns the live generation's lock sentinel, and true if a
