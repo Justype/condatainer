@@ -109,5 +109,7 @@ if apptainer.IsBuildCancelled(err) {
 ## Implementation Notes
 
 - Build operations unset `SINGULARITY_BIND`/`APPTAINER_BIND` to avoid `%post` mount conflicts
+- Definition builds pass `--fix-perms`, so an OCI base's owner-unreadable files and no-write directories
+  are packed with their content and removable at cleanup
 - Context cancellation: SIGTERM (5s wait) → SIGKILL
 - Version cached after first `GetVersion()`, invalidated on `SetBin()` change

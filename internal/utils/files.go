@@ -3,6 +3,8 @@ package utils
 import (
 	"compress/gzip"
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -136,6 +138,26 @@ func RemoveDirIfEmpty(dir string) {
 		return
 	}
 	os.Remove(dir)
+}
+
+// RemoveAllWritable removes path like os.RemoveAll. Only when that fails for lack of
+// permission does it give the owner rwx on every directory below path (a directory
+// without owner write cannot lose its entries) and remove again.
+func RemoveAllWritable(path string) error {
+	err := os.RemoveAll(path)
+	if err == nil || !errors.Is(err, fs.ErrPermission) {
+		return err
+	}
+	_ = filepath.WalkDir(path, func(p string, d fs.DirEntry, walkErr error) error {
+		if d == nil || !d.IsDir() {
+			return nil
+		}
+		if info, statErr := d.Info(); statErr == nil && info.Mode().Perm()&0o700 != 0o700 {
+			_ = os.Chmod(p, info.Mode().Perm()|0o700)
+		}
+		return nil
+	})
+	return os.RemoveAll(path)
 }
 
 // CreateFileWritable creates or truncates a file using standard writable file permissions.

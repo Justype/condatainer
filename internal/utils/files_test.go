@@ -283,3 +283,29 @@ func TestIsImg(t *testing.T) {
 		}
 	}
 }
+
+func TestRemoveAllWritable(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses directory permissions")
+	}
+	root := filepath.Join(t.TempDir(), "tree")
+	locked := filepath.Join(root, "a", "locked")
+	if err := os.MkdirAll(locked, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(locked, "f"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(locked, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(root); err == nil {
+		t.Fatal("plain RemoveAll should fail on a no-write directory")
+	}
+	if err := RemoveAllWritable(root); err != nil {
+		t.Fatalf("RemoveAllWritable: %v", err)
+	}
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Fatalf("tree still exists: %v", err)
+	}
+}

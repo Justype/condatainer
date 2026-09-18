@@ -119,6 +119,9 @@ func (b *BuildObject) buildDef(ctx context.Context) error {
 		NoCleanup: false,
 		Sandbox:   true,
 		TmpDir:    b.ws.BaseRoot,
+		// A Red Hat based image ships unreadable and read-only entries that
+		// mksquashfs would pack as empty files and Cleanup could not remove.
+		Additional: []string{"--fix-perms"},
 	}
 
 	if err := apptainer.Build(ctx, b.ws.Sandbox, buildDefSource, buildOpts); err != nil {

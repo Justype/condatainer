@@ -418,7 +418,7 @@ func (b *BuildObject) adoptWorkspace(info BuildLockInfo) error {
 
 func (b *BuildObject) removeOwnerWorkspace(info BuildLockInfo) {
 	ws := workspaceForOwner(b.spec.Image.Name, b.ws.BaseRoot, b.ws.imageExt, b.ws.isDef, info)
-	os.RemoveAll(ws.Root) //nolint:errcheck
+	utils.RemoveAllWritable(ws.Root) //nolint:errcheck
 	utils.RemoveDirIfEmpty(filepath.Dir(ws.Root))
 }
 
@@ -593,7 +593,8 @@ func (b *BuildObject) retargetWorkspace() {
 
 // Cleanup removes the build workspace (materialized recipe, tmp overlay, build dir), plus
 // the partial target overlay on failure. Announces the work when there is something
-// to remove; a no-op cleanup stays silent.
+// to remove; a no-op cleanup stays silent. A workspace holding directories without owner
+// write permission is made removable only if the plain removal fails.
 func (b *BuildObject) Cleanup(failed bool) error {
 	log := slog.Default()
 
@@ -605,7 +606,7 @@ func (b *BuildObject) Cleanup(failed bool) error {
 	// Every generated input and intermediate belongs to this producer root.
 	if b.ws.Root != "" {
 		log.Debug("cleaning up build workspace", "path", b.ws.Root)
-		if err := os.RemoveAll(b.ws.Root); err != nil && !os.IsNotExist(err) {
+		if err := utils.RemoveAllWritable(b.ws.Root); err != nil && !os.IsNotExist(err) {
 			log.Warn("failed to remove build workspace", "path", b.ws.Root, "err", err)
 		}
 		utils.RemoveDirIfEmpty(filepath.Dir(b.ws.Root))
