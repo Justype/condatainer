@@ -227,26 +227,18 @@ func buildCondatainerCmd(opts RunOptions, spec *scheduler.ResourceSpec) (string,
 	return strings.Join(parts, " "), nil
 }
 
-// ResolveEnvOverlayInDir resolves the project's environment overlay in cwd:
-// the writable .img if one exists, else the read-only env-typed .sqf beside
-// where it would go. Never creates anything. Callers check utils.IsImg on
-// the result to tell which form was found.
+// ResolveEnvOverlayInDir resolves the project's environment overlay in cwd.
+// See container.ResolveEnvOverlay, which this delegates to so
+// internal/project can share the same resolution without importing this
+// package (which itself imports internal/project).
 func ResolveEnvOverlayInDir(envImg, cwd string) string {
-	if p := utils.FindEnvOverlay(envImg, cwd); p != "" {
-		return p
-	}
-	if envImg != "" && envImg != "env.img" {
-		return ""
-	}
-	return FindEnvSnapshot(cwd)
+	return container.ResolveEnvOverlay(envImg, cwd)
 }
 
-// FindEnvSnapshot looks in cwd for an env-typed .sqf: a personal
-// env-$USER.sqf line checked before the shared env.sqf line. Returns "" if
-// neither exists.
+// FindEnvSnapshot looks in cwd for an env-typed .sqf. See
+// container.FindEnvSnapshot.
 func FindEnvSnapshot(cwd string) string {
-	wd := utils.ResolveWD(cwd)
-	return container.LookupSnapshot(filepath.Join(wd, "env.img")).Path
+	return container.FindEnvSnapshot(cwd)
 }
 
 // checkOverlayIntegrity calls ext3.CheckIntegrity on the given image file.

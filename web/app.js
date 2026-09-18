@@ -188,6 +188,7 @@ function navigate(id) {
   if      (id === 'jobs')     loadJobs();
   else if (id === 'start')    loadHelpers();
   else if (id === 'overlays') loadOverlays();
+  else if (id === 'project')  loadProjectStatus();
   else if (id === 'history')  loadHistory();
   else if (id === 'files')    { renderFileTree(); loadFileBookmarks(); navigateFiles(currentPath); }
 }
@@ -217,7 +218,7 @@ function _applyHash() {
   const slash   = h.indexOf('/');
   const section = slash < 0 ? h : h.slice(0, slash);
   const rawArg  = slash < 0 ? '' : h.slice(slash + 1);
-  if (!['jobs', 'start', 'history', 'overlays', 'files', 'settings'].includes(section)) return;
+  if (!['jobs', 'start', 'history', 'overlays', 'project', 'files', 'settings'].includes(section)) return;
   _applyingHash = true;
   try {
     if (section === 'files') {

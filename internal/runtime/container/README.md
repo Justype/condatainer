@@ -439,10 +439,16 @@ This is also the third overlay state every naive two-state consumer has to
 tell apart from "nothing has ever been created here": no `.img`, but a
 fully-populated snapshot right beside where one would go. `LookupSnapshot`
 answers it without the `.img` existing at all — it only needs the name to
-derive the sibling `.sqf` candidates. `helper.FindEnvSnapshot` builds on this
-directly; `helper.ResolveEnvOverlayInDir` treats `.img` and `.sqf` as two
-forms of one environment overlay and resolves to whichever exists, `.img`
-first — never creating either. Nothing is ever fabricated on the strength of
+derive the sibling `.sqf` candidates. `FindEnvSnapshot` builds on this
+directly; `ResolveEnvOverlay` treats `.img` and `.sqf` as two forms of one
+environment overlay and resolves to whichever exists, `.img` first — never
+creating either. Both live here rather than in `internal/helper`, which
+otherwise owns every helper-facing wrapper (`helper.FindEnvSnapshot`,
+`helper.ResolveEnvOverlayInDir`, kept as thin delegates to these): `internal/helper`
+imports `internal/project`, so `internal/project` reusing the same
+resolution (checking whether a frozen `env.sqf` is pinned) would cycle back
+through `internal/helper` if the logic stayed there. Nothing is ever
+fabricated on the strength of
 a snapshot alone: a helper or `condatainer e` that resolves to a bare `.sqf`
 mounts it read-only, and `helper.CheckEnv`'s `Snapshot` field (from
 `PairedSize`, below) is what lets the dashboard tell this state apart from

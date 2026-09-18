@@ -17,6 +17,77 @@ Every `HelperRun` records `Runner` — `"local"` for headless, or the scheduler 
 | `monitor.go` | `PollOnce()` — shared non-blocking read of all three NFS state files |
 | `params.go` | `ApplyParamFlags()`, `PromptMissingParams()` — resolve `#PARAM:` headers |
 | `config.go` | Per-helper saved config (`~/.local/share/condatainer/helper-config/<name>.conf`) |
+| `shared_history.go` | Thin `helper.RecordUsed`/`ListUsed`/`ListAll` re-exports of `internal/helperhistory` |
+
+---
+
+## Shared, cross-user helper-setup history (project-scoped)
+
+Personal reuse (`state.go`'s JSONL history) is per-`$HOME`: two people running
+`rstudio-server` from the same project directory each rediscover which
+overlays make it work, with nothing recording that the other already solved
+it. `internal/helperhistory` (a separate package — see below for why) fixes
+that by recording one entry per distinct **overlay combination** per
+`(helper name, project-root-relative location)`, shared through the
+project's own `cnt-lock/.helper-history/`.
+
+**Gated on an existing project — never created as a side effect.** This only
+ever reads or writes when the launch's `cwd` already stands inside a project
+(`project.StandingAt` is non-nil); it never runs `project init`, and outside
+a project it silently falls back to exactly today's personal-JSONL-only
+behavior. A project's mere presence already changes helper resolution
+(`CheckRequiredOverlays` switches from ambient install to strict,
+no-fallback `Standing.ResolveNames`), so auto-creating one to make a place
+for this history could break the very launch it was meant to help.
+
+**Storage is one flat directory, one JSON file per combination — no
+subdirectories, no hash.** A combination's identity (`Helper`, `Location`,
+`Overlays`) lives entirely inside the file; the filename
+(`<helper>-<location-with-slashes-converted>-<unix-nano>.json`) exists only
+to be unique on disk, never parsed back. Every read — the fresh-start lookup
+for one location, or the project-wide aggregate below — reads every file in
+the directory and filters in memory, never a targeted lookup; the file count
+is bounded by how many genuinely distinct setups a project's helpers ever
+use, not by run count.
+
+**Dedup and recency come from content and mtime, never a hash or a written
+field.** A write reads every existing file, and on a
+`Helper`/`Location`/sorted-`Overlays` match bumps that file's mtime instead
+of writing a new one. The bump goes through `unix.UtimesNanoAt` with
+`UTIME_OMIT` (atime) and the `UTIME_NOW` sentinel (mtime) — **never
+`os.Chtimes`**, which always passes an explicit timestamp that `utimensat(2)`
+only lets the file's owner set. `UTIME_NOW` waives that and needs only write
+access, which `ShareWithParentGroup` (already called inside
+`utils.CreateFileWritable`) guarantees every member of a shared, group-writable
+`cnt-lock/` has — the whole point, since this is written by whoever's UID
+happens to run the helper next.
+
+**What counts as the combination:** the resolved `-o` overlay list only, in
+exactly the form `normalizeOverlayForHistory` already produces for personal
+history (a catalog `name/version`, or a path relative to the launch `cwd`).
+Resolved `#PARAM:` values and the autoloaded env overlay (`-e`) are excluded
+— a `#PARAM:` choice is a per-launch settings question already served by
+saved config, and every helper autoloads its env overlay unconditionally, so
+it is not a decision two setups could differ on.
+
+**No browsing view, anywhere.** There is no `helper history <name>` command
+and no dashboard tab for past combinations — usage is still never evidence
+of importance, which applies to displaying it as much as to acting on it.
+The data has exactly two consumers: the fresh-start reuse lookup
+(`ListUsed`, one helper, one location, offered as a confirmed default —
+never applied silently) and `internal/project`'s project-wide "used but not
+pinned" / "which helper uses this manual pin" signals (`ListAll`, aggregated,
+never displayed as raw combinations). See `internal/project/README.md`,
+"Used but not pinned, and who uses a manual pin".
+
+**Why a separate package (`internal/helperhistory`) instead of living here.**
+`internal/project` needs to read this data too (for the aggregate signals
+above), but `internal/helper` already imports `internal/project`
+(`CheckRequiredOverlays` calls `project.StandingAt`) — so `internal/project`
+importing `internal/helper` back would cycle. `internal/helperhistory` is a
+leaf package with no dependency on either, so both can depend on it; this
+package's `RecordUsed`/`ListUsed`/`ListAll` are thin re-exports so a CLI or
+dashboard caller never has to import `internal/helperhistory` directly.
 
 ---
 

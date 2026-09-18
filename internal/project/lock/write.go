@@ -21,6 +21,25 @@ func stagingName(kind string) string {
 	return fmt.Sprintf("%s%s-%d-%d", stagingPrefix, kind, os.Getpid(), time.Now().UnixNano())
 }
 
+// ignoreFile keeps machine-local dot directories under cnt-lock/ out of git.
+const ignoreFile = ".gitignore"
+
+// EnsureIgnore writes cnt-lock/.gitignore, ignoring every dot directory
+// beneath it, unless the file already exists. A file someone edited is kept.
+func EnsureIgnore(root string) error {
+	path := filepath.Join(Dir(root), ignoreFile)
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	}
+	f, err := utils.CreateFileWritable(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.WriteString("/.*/\n")
+	return err
+}
+
 // Publish writes a lock atomically and then removes provenance entries no
 // published pin reaches.
 //
@@ -43,6 +62,9 @@ func Publish(root string, l *Lock) error {
 	}
 	dir := Dir(root)
 	if err := utils.MkdirAllShared(dir); err != nil {
+		return err
+	}
+	if err := EnsureIgnore(root); err != nil {
 		return err
 	}
 

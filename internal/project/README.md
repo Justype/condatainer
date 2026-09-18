@@ -16,7 +16,26 @@ project/
       star--2.7.11b@a31f902c12ab/
         manifest.json
         recipe
+    .gitignore
+    .helper-history/
+      rstudio-server-root-1737654321000000000.json
 ```
+
+`cnt-lock/.helper-history/` is the one deliberate exception to "everything
+under `cnt-lock/` is tracked": it is gitignored, not committed. `cnt-lock/.gitignore`
+(`/.*/`, written by `lock.EnsureIgnore` whenever the lock is published or a
+history entry is recorded, and left alone once it exists) ignores every dot
+directory there, so machine-local state needs no edit to the project's own
+`.gitignore`. It holds one
+JSON file per distinct overlay combination a helper has been run with in
+this project — shared across every user via the same group-writable
+`cnt-lock/`, so a teammate running `rstudio-server` from this project sees
+what already worked instead of rediscovering it — but the data is
+machine-local recency (a file's own mtime says which combination is
+newest), not part of what a checkout needs to rebuild. A `git checkout`
+restamping every file's mtime would silently break that, which is exactly
+what tracking it would risk. See `internal/helper/README.md`,
+"Shared, cross-user helper-setup history" for the format and the write path.
 
 ## What is stored, and what is not
 
@@ -134,6 +153,26 @@ marks which are manual, so the pin key `unpin` takes is discoverable. A pin whos
 artifact does not verify is listed as unreadable rather than dropped from the
 listing — the key is what addresses it, and hiding it would hide the thing to
 fix.
+
+### Used but not pinned, and who uses a manual pin
+
+`UnpinnedHelperOverlays` and `ManualPinUsage` (`lock_cmd.go`) both read
+`usageIndex`, a reverse index built from the project's shared helper-setup
+history (`internal/helper/README.md`): which pin key each recorded overlay
+combination would address, mapped to the helper names that used it.
+`UnpinnedHelperOverlays` is that index's keys with no matching pin — what
+answers "why does a helper's `#REQUIRED_OVERLAYS:` refuse instead of
+resolving ambiently" concretely: the strict resolution stays exactly as
+strict, and this only adds discoverability, surfaced in `project
+status`/`project lock`'s report under its own heading, never merged into the
+`#DEP:`-derived unpinned list and never written as a pin. `ManualPinUsage` is
+the same index read the other way — for each manual pin, which helpers are
+recorded using it, the manual-pin equivalent of a `#DEP:` pin's own
+`Request.Scripts`. An empty result is reported as a fact ("no recorded helper
+usage"), never a suggestion to unpin: nothing about a helper that has not run
+since this shipped, or one that runs rarely, is distinguishable from "no
+longer needed" by usage alone, and this package's principle — usage is never
+evidence of importance — applies to its absence too.
 
 ## The project's root
 

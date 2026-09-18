@@ -635,6 +635,8 @@ function selectHelper(name, overrides) {
   selectedExternalOverlays = overrides?.externals ?? [];
   _helperParamKeys = [];
   renderModuleChips();
+  dismissReuseNotice();
+  if (!overrides) checkProjectReuse();
 
   document.querySelectorAll('.h-item').forEach(e =>
     e.classList.toggle('active', e.dataset.name === name));
@@ -825,6 +827,62 @@ gid('cfg-overlay').addEventListener('input', function () {
 });
 
 gid('cfg-cwd').addEventListener('input', refreshEnvOverlayFromCWD);
+gid('cfg-cwd').addEventListener('input', checkProjectReuse);
+
+/* ── Project shared-history reuse ────────── */
+// The web equivalent of the CLI's fresh-start reuse lookup: one helper, one
+// location, offered only as a "reuse this?" prompt — never a list of past
+// combinations to browse.
+let _reuseCombos = [];
+
+async function checkProjectReuse() {
+  const notice = gid('reuse-notice');
+  if (!notice) return;
+  if (!selectedHelper || selectedModules.length || selectedExternalOverlays.length) {
+    notice.classList.remove('visible');
+    return;
+  }
+  const helperName = selectedHelper.name;
+  const cwd = gid('cfg-cwd').value || '';
+  const stale = () => !selectedHelper || selectedHelper.name !== helperName ||
+    (gid('cfg-cwd').value || '') !== cwd || selectedModules.length || selectedExternalOverlays.length;
+  try {
+    const combos = await fetch('/api/helpers/' + encodeURIComponent(helperName) +
+      '/reuse?cwd=' + encodeURIComponent(cwd)).then(r => r.json());
+    if (stale()) return;
+    _reuseCombos = combos || [];
+  } catch {
+    if (stale()) return;
+    _reuseCombos = [];
+  }
+  if (!_reuseCombos.length) {
+    notice.classList.remove('visible');
+    return;
+  }
+  gid('reuse-notice-text').textContent = 'A previous run here used: ' + _reuseCombos[0].overlays.join(', ');
+  notice.classList.add('visible');
+}
+
+// applyReuseOverlays fills selectedModules/selectedExternalOverlays from the
+// newest combination — confirmed by the user clicking "Use", never applied
+// silently.
+function applyReuseOverlays() {
+  if (!_reuseCombos.length) return;
+  const overlays = _reuseCombos[0].overlays || [];
+  selectedModules = [];
+  selectedExternalOverlays = [];
+  overlays.forEach(o => {
+    const match = allOverlays.find(m => m.name === o || m.path === o);
+    if (match) selectedModules.push(match);
+    else selectedExternalOverlays.push(o);
+  });
+  renderModuleChips();
+  dismissReuseNotice();
+}
+
+function dismissReuseNotice() {
+  gid('reuse-notice')?.classList.remove('visible');
+}
 
 function _addExternalOverlay(path) {
   if (path && !selectedExternalOverlays.includes(path)) {
@@ -1453,6 +1511,7 @@ async function startHelper() {
 function renderModuleChips() {
   const list = gid('cfg-modules-list');
   if (!list) return;
+  if (selectedModules.length || selectedExternalOverlays.length) dismissReuseNotice();
 
   // Required overlays from the helper script — greyed out, not removable.
   // Resolve {KEY} tokens using current param values (or defaults).

@@ -12,6 +12,7 @@ import (
 
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/logging"
+	"github.com/Justype/condatainer/internal/project"
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
 )
@@ -274,8 +275,10 @@ func ExecutePlan(ctx context.Context, plan *RunPlan) (string, error) {
 			os.RemoveAll(stateDir)
 			return "", fmt.Errorf("job submission failed: %w — retry without scheduler submission (CLI: --no-submit; dashboard: run headless) to run it directly on this node", err)
 		}
-		_ = AppendHistory(newHelperRun(helperID, plan.Options.ScriptName, jobID, cwd, plan.Spec.Time,
-			plan.Options, plan.UserOverlays, plan.Spec, plan.Params, "pending", string(plan.Scheduler.GetType())))
+		run := newHelperRun(helperID, plan.Options.ScriptName, jobID, cwd, plan.Spec.Time,
+			plan.Options, plan.UserOverlays, plan.Spec, plan.Params, "pending", string(plan.Scheduler.GetType()))
+		_ = AppendHistory(run)
+		recordSharedUsage(cwd, plan.Options.ScriptName, run.Overlays)
 		logger.Info("Helper submitted", "id", helperID)
 		return helperID, nil
 	}
@@ -301,9 +304,26 @@ func ExecutePlan(ctx context.Context, plan *RunPlan) (string, error) {
 	if err := WriteHelperPid(helperID, cmd.Process.Pid); err != nil {
 		logger.Debug("helper: failed to write pid file", "id", helperID, "err", err)
 	}
-	_ = AppendHistory(newHelperRun(helperID, plan.Options.ScriptName, "", cwd, plan.Spec.Time,
-		plan.Options, plan.UserOverlays, plan.Spec, plan.Params, "starting", "local"))
+	run := newHelperRun(helperID, plan.Options.ScriptName, "", cwd, plan.Spec.Time,
+		plan.Options, plan.UserOverlays, plan.Spec, plan.Params, "starting", "local")
+	_ = AppendHistory(run)
+	recordSharedUsage(cwd, plan.Options.ScriptName, run.Overlays)
 	// Reap the child while the caller lives; init reaps it afterwards.
 	go func() { _ = cmd.Wait() }()
 	return helperID, nil
+}
+
+// recordSharedUsage records this launch's overlay combination in the
+// project's shared history when cwd stands inside one. Best-effort: a
+// launch that already started must not fail because of it.
+func recordSharedUsage(cwd, name string, overlays []string) {
+	standing, err := project.StandingAt(cwd)
+	if err != nil || standing == nil {
+		return
+	}
+	location, err := filepath.Rel(standing.Root, cwd)
+	if err != nil {
+		return
+	}
+	_ = RecordUsed(standing.Root, name, filepath.ToSlash(location), overlays)
 }

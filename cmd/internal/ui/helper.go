@@ -16,6 +16,7 @@ import (
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/helper"
 	"github.com/Justype/condatainer/internal/image/ext3"
+	"github.com/Justype/condatainer/internal/project"
 	cntexec "github.com/Justype/condatainer/internal/runtime/exec"
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
@@ -110,6 +111,47 @@ func OfferRecentSessions(ctx context.Context, name string,
 	}
 	e := entries[idx-1]
 	return e.run, e.isRunning, false, nil
+}
+
+// OfferProjectReuse looks up this project's shared overlay-combination
+// history for name at cwd's location and, if any exist, offers the newest
+// as a default for opts.Overlays — confirmed the same way OfferRecentSessions
+// offers a personal CWD match, never silently applied.
+//
+// A no-op when cwd stands outside a project (nothing shared to offer), or
+// opts.Overlays is already set — an explicit -o, or a personal history
+// match, already answered the question.
+func OfferProjectReuse(ctx context.Context, name string, opts *helper.RunOptions) error {
+	if len(opts.Overlays) > 0 {
+		return nil
+	}
+	cwd := opts.CWD
+	if cwd == "" {
+		cwd, _ = os.Getwd()
+	}
+	standing, err := project.StandingAt(cwd)
+	if err != nil || standing == nil {
+		return nil
+	}
+	location, err := filepath.Rel(standing.Root, cwd)
+	if err != nil {
+		return nil
+	}
+	used, err := helper.ListUsed(standing.Root, name, filepath.ToSlash(location))
+	if err != nil || len(used) == 0 {
+		return nil
+	}
+	newest := used[0]
+	fmt.Printf("A previous %s run in this project used: %s\n", utils.StyleName(name), strings.Join(newest.Overlays, ", "))
+	fmt.Print("[?] Reuse it? [Y/n]: ")
+	line, err := utils.ReadLineContext(ctx)
+	if err != nil {
+		return err
+	}
+	if line == "" || strings.ToLower(strings.TrimSpace(line)) == "y" {
+		opts.Overlays = append([]string(nil), newest.Overlays...)
+	}
+	return nil
 }
 
 // ApplyHistoryRun copies a previous run's settings into opts. All values are

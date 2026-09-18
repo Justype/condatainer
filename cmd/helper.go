@@ -621,6 +621,17 @@ func runHelper(cmd *cobra.Command, args []string) error {
 		opts.EnvImg = helper.ResolveEnvOverlayInDir(opts.EnvImg, resolvedCwd)
 	}
 
+	// Offer to reuse this project's shared overlay-combination history for
+	// this helper at this location, ahead of the settings prompt's own
+	// defaults resolution. A no-op outside a project or when -o already set
+	// opts.Overlays.
+	if err := ui.OfferProjectReuse(ctx, opts.ScriptName, &opts); err != nil {
+		if errors.Is(err, context.Canceled) {
+			return nil
+		}
+		return err
+	}
+
 	// Resolve params and resources together in one combined prompt.
 	scriptParams, _ := helper.ParseHelperParams(opts.ScriptPath)
 	if err := helper.ValidateHelperParamConflicts(scriptParams); err != nil {

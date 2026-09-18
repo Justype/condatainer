@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,10 +8,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Justype/condatainer/internal/artifact/key"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/logging"
+	"github.com/Justype/condatainer/internal/project"
 	"github.com/Justype/condatainer/internal/project/lock"
+	"github.com/Justype/condatainer/internal/project/orchestrate"
 	"github.com/Justype/condatainer/internal/project/publish"
 	"github.com/Justype/condatainer/internal/project/restore"
 	"github.com/Justype/condatainer/internal/registry"
@@ -40,7 +40,7 @@ A restore accepts an equivalent build unless you ask for the identity.`,
 func init() {
 	rootCmd.AddCommand(projectCmd)
 	projectCmd.PersistentFlags().StringVar(&projectDir, "project", "", "Project root (default: the current directory)")
-	projectCmd.AddCommand(newProjectLockCmd(), newProjectPinCmd(), newProjectUnpinCmd(),
+	projectCmd.AddCommand(newProjectLockCmd(), newProjectStatusCmd(), newProjectPinCmd(), newProjectUnpinCmd(),
 		newProjectSelectDistroCmd(), newProjectListCmd(), newProjectValidateCmd(),
 		newProjectRestoreCmd(), newProjectRegistryCmd(), newProjectPushCmd())
 }
@@ -115,45 +115,129 @@ builds of the same name are listed rather than pinned; pick one of those with
 			if err != nil {
 				return err
 			}
-			current, err := lock.Load(root)
+			result, err := orchestrate.Lock(cmd.Context(), root, orchestrate.LockOptions{})
 			if err != nil {
 				return err
 			}
-			scanned, err := lock.Scan(root, lock.ScanOptions{})
-			if err != nil {
-				return err
-			}
-			unpinned := lock.Reconcile(root, current, scanned)
-			if err := lock.Publish(root, current); err != nil {
-				return err
-			}
-			// Pinning is what makes this a lock rather than a scan: a
-			// declaration names what is needed, and the lock has to say which
-			// exact build answers it.
-			pinned, failed := lock.PinAll(root, current, unpinned, lock.PinOptions{})
-			for _, p := range pinned {
-				recordUpstream(cmd.Context(), root, current, p)
-			}
-			// Every project's root is pinned, unconditionally — there is no
-			// closure to walk deciding whether one is needed. A manual
-			// `project select-distro` override is left alone.
-			if basePinned, err := lock.DeriveBase(root, current, config.ResolvedDefaultDistro(), lock.PinOptions{}); err != nil {
-				failed = append(failed, err)
-			} else if basePinned != nil {
-				recordUpstream(cmd.Context(), root, current, basePinned)
-				pinned = append(pinned, basePinned)
-			}
-			noteUnpublished(current, pinned)
-			if len(pinned) > 0 {
-				if err := lock.Publish(root, current); err != nil {
-					return err
-				}
-			}
-			return reportLockState(root, current, scanned, pinned, failed, jsonOutput)
+			return reportLockState(result, jsonOutput)
 		},
 	}
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Print JSON")
 	return cmd
+}
+
+func newProjectStatusCmd() *cobra.Command {
+	var jsonOutput bool
+	cmd := &cobra.Command{
+		Use:   "status",
+		Short: "Show whether this directory is a project, and what it pins",
+		Long: `Reports whether the current directory (or --project DIR) is a project,
+how many artifacts it pins, and which #DEP: declarations have no pin yet.
+
+Read-only: it never scans-and-writes the way 'condatainer project lock' does.`,
+		Args:         cobra.NoArgs,
+		SilenceUsage: true,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			// Resolved the same non-walking way every other subcommand in
+			// this family resolves --project/ambient cwd (projectRoot →
+			// lock.RootFor → the strict lock.RootAt) — never project.Status's
+			// own StandingAt walk-up, which exists for an ambient caller with
+			// no --project concept at all (a helper's #REQUIRED_OVERLAYS:
+			// resolution, the dashboard's raw cwd field), not for this
+			// command. See internal/project/README.md, "Acting in a
+			// project": reaching an ancestor project from a --project
+			// directory that looks empty is a hazard an ambient read never
+			// is, and every sibling subcommand already refuses it.
+			root, err := projectRoot(false)
+			if err != nil && !errors.Is(err, lock.ErrNoProject) {
+				return err
+			}
+			if err != nil {
+				return printNoProjectStatus(jsonOutput)
+			}
+			// projectRoot's --project branch takes the directory as named
+			// without verifying cnt-lock/ is actually there (RootFor's own
+			// contract); StatusAt is what actually checks, so a --project
+			// pointing at a bare subdirectory still reports "no project"
+			// instead of walking up to an unrelated ancestor.
+			status, err := project.StatusAt(root)
+			if errors.Is(err, lock.ErrNoProject) {
+				return printNoProjectStatus(jsonOutput)
+			}
+			if err != nil {
+				return err
+			}
+			if jsonOutput {
+				return printJSON(status)
+			}
+			utils.PrintMessage("Project: %s", utils.StylePath(status.Root))
+			utils.PrintMessage("%d pin(s)", status.PinCount)
+			if len(status.Unpinned) > 0 {
+				utils.PrintWarning("%d declaration(s) not pinned:", len(status.Unpinned))
+				for _, key := range status.Unpinned {
+					utils.PrintMessage("  %s", key)
+				}
+				utils.PrintHint("Run %s to pin them.", utils.StyleAction("condatainer project lock"))
+			}
+			printUnpinnedHelperOverlays(status.UnpinnedHelperOverlays)
+			printManualPinUsage(status.ManualPinUsage)
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Print JSON")
+	return cmd
+}
+
+// printNoProjectStatus reports "no project" for `project status`, in
+// whichever format was asked for — shared by projectRoot's ambient
+// ErrNoProject and StatusAt's --project-directory ErrNoProject, so the two
+// ways of finding out there is no project here read identically.
+func printNoProjectStatus(jsonOutput bool) error {
+	if jsonOutput {
+		return printJSON(&project.ProjectStatus{})
+	}
+	utils.PrintMessage("No project here.")
+	utils.PrintHint("Run %s to create one.", utils.StyleAction("condatainer project lock"))
+	return nil
+}
+
+// printUnpinnedHelperOverlays prints the "used by helpers but not pinned"
+// section §1/§2 add to both `project status` and `project lock`'s report —
+// its own heading, kept out of the #DEP:-derived unpinned list so the two
+// are never read as carrying the same weight.
+func printUnpinnedHelperOverlays(names []string) {
+	if len(names) == 0 {
+		return
+	}
+	utils.PrintMessage("Overlays used by helpers but not pinned:")
+	for _, name := range names {
+		utils.PrintMessage("  %s", name)
+	}
+	utils.PrintHint("Run %s to pin one, if it should be locked.",
+		utils.StyleAction("condatainer project pin <name> <identity>"))
+}
+
+// printManualPinUsage prints, next to the manual pins report, which
+// helper(s) are recorded using each one — a fact, never a suggestion to
+// unpin. Shared between `project status` and `project lock`'s report.
+func printManualPinUsage(usage map[string][]string) {
+	if len(usage) == 0 {
+		return
+	}
+	keys := make([]string, 0, len(usage))
+	for key := range usage {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	utils.PrintMessage("Manual pin usage:")
+	for _, key := range keys {
+		names := usage[key]
+		if len(names) == 0 {
+			utils.PrintMessage("  %s: no recorded helper usage", key)
+			continue
+		}
+		utils.PrintMessage("  %s: used by %s", key, strings.Join(names, ", "))
+	}
 }
 
 func newProjectPinCmd() *cobra.Command {
@@ -191,7 +275,7 @@ takes none, since it already names the file it means.`,
 				return err
 			}
 			pinned.Manual = !declaredByAScript(root, pinned.Request)
-			upstream := recordUpstream(cmd.Context(), root, current, pinned)
+			upstream := orchestrate.RecordUpstream(cmd.Context(), root, current, pinned)
 			if err := lock.Apply(root, current, pinned); err != nil {
 				return err
 			}
@@ -209,7 +293,7 @@ takes none, since it already names the file it means.`,
 				}
 				utils.PrintMessage("%s", line)
 			}
-			noteUnpublished(current, []*lock.Pinned{pinned})
+			printUnpublishedNote(current, []*lock.Pinned{pinned})
 			return nil
 		},
 	}
@@ -252,7 +336,7 @@ immediately, rather than waiting for the next 'condatainer project lock'.`,
 			if err != nil {
 				return err
 			}
-			upstream := recordUpstream(cmd.Context(), root, current, pinned)
+			upstream := orchestrate.RecordUpstream(cmd.Context(), root, current, pinned)
 			if err := lock.Publish(root, current); err != nil {
 				return err
 			}
@@ -501,51 +585,17 @@ func declaredByAScript(root, request string) bool {
 	return false
 }
 
-// recordUpstream adds a fetch location for every artifact this pin
-// vendored that its own recipe collection already publishes at the exact same
-// identity, and reports which, for display.
-//
-// Free in both senses: the bytes are already there, so restore downloads instead
-// of rebuilding, and nothing was uploaded to make it so.
-//
-// It never fails the pin. No network, no configured source, no declared
-// endpoint and no match all record nothing — locking has to work offline, and an
-// absent remote costs a rebuild rather than an error.
-func recordUpstream(ctx context.Context, root string, l *lock.Lock, pinned *lock.Pinned) map[string]string {
-	cat, err := config.OpenCatalog(ctx)
-	if err != nil {
-		logging.FromContext(ctx).Debug("no catalog, so no upstream locations were recorded", "err", err)
-		return nil
+// printUnpublishedNote prints the same note `project lock`'s old
+// noteUnpublished did, once, when pinned left any frozen-environment
+// artifact without a recorded remote — the one case a pin cannot be rebuilt
+// from what it vendored, so a registry copy is the only route another
+// checkout has to obtain it.
+func printUnpublishedNote(l *lock.Lock, pinned []*lock.Pinned) {
+	if len(project.UnpublishedFrozenEnv(l, pinned)) == 0 {
+		return
 	}
-	found := publish.Upstream(ctx, root, pinned.Vendored, cat)
-	shown := make(map[string]string, len(found))
-	for artifact, remotes := range found {
-		for _, remote := range remotes {
-			if err := l.AddRemote(artifact, remote); err != nil {
-				logging.FromContext(ctx).Debug("could not record an upstream location", "artifact", artifact, "err", err)
-				continue
-			}
-			shown[artifact] = remote.Repository
-		}
-	}
-	return shown
-}
-
-// noteUnpublished notes that pins were made which no other checkout can obtain.
-// Only a frozen environment can be: everything else is rebuilt from what the pin
-// vendored, so a registry copy is an optimisation rather than the only route.
-//
-// Once for the run rather than once per artifact, because `project push`
-// publishes the whole project. The note stops once remotes are recorded, so it
-// is present exactly while the gap is.
-func noteUnpublished(l *lock.Lock, pinned []*lock.Pinned) {
-	for _, p := range pinned {
-		if p.Identity.Scheme == string(key.SnapshotEnvV1) && len(l.Remotes[p.Artifact]) == 0 {
-			utils.PrintNote("A frozen environment cannot be rebuilt; run %s so another checkout can restore this project",
-				utils.StyleAction("condatainer project push"))
-			return
-		}
-	}
+	utils.PrintNote("A frozen environment cannot be rebuilt; run %s so another checkout can restore this project",
+		utils.StyleAction("condatainer project push"))
 }
 
 func newProjectRegistryCmd() *cobra.Command {
@@ -977,16 +1027,19 @@ func validateReport(root string, l *lock.Lock, problems []lock.Problem, needPin 
 
 // reportLockState prints what a reconcile left behind and fails while anything
 // is needPin, so a partial lock is published but never reported as complete.
-func reportLockState(root string, l *lock.Lock, scanned *lock.ScanResult,
-	pinned []*lock.Pinned, failed []error, jsonOutput bool) error {
+func reportLockState(result *orchestrate.LockResult, jsonOutput bool) error {
+	root, l, scanned, pinned, failed := result.Root, result.Current, result.Scanned, result.Pinned, result.Failed
 	if jsonOutput {
 		report := struct {
-			Root     string          `json:"root"`
-			Base     string          `json:"base,omitempty"`
-			Requests []requestReport `json:"requests"`
-			Failed   []string        `json:"failed,omitempty"`
-			Findings []lock.Finding  `json:"findings,omitempty"`
-		}{Root: root, Findings: scanned.Findings}
+			Root                   string              `json:"root"`
+			Base                   string              `json:"base,omitempty"`
+			Requests               []requestReport     `json:"requests"`
+			Failed                 []string            `json:"failed,omitempty"`
+			Findings               []lock.Finding      `json:"findings,omitempty"`
+			UnpinnedHelperOverlays []string            `json:"unpinned_helper_overlays,omitempty"`
+			ManualPinUsage         map[string][]string `json:"manual_pin_usage,omitempty"`
+		}{Root: root, Findings: scanned.Findings,
+			UnpinnedHelperOverlays: result.UnpinnedHelperOverlays, ManualPinUsage: result.ManualPinUsage}
 		if pin, ok := l.Pins[lock.BaseKey]; ok {
 			report.Base = pin.Artifact
 		}
@@ -1033,6 +1086,9 @@ func reportLockState(root string, l *lock.Lock, scanned *lock.ScanResult,
 	for _, finding := range scanned.Findings {
 		utils.PrintWarning("%s:%d: %s", finding.Script, finding.Line, finding.Reason)
 	}
+	printUnpublishedNote(l, pinned)
+	printUnpinnedHelperOverlays(result.UnpinnedHelperOverlays)
+	printManualPinUsage(result.ManualPinUsage)
 	if len(failed) == 0 {
 		utils.PrintSuccess("Every declaration is pinned (%d).", len(l.Pins))
 		return nil

@@ -20,6 +20,7 @@ import (
 	"github.com/Justype/condatainer/internal/image/ext3"
 	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/logging/weblog"
+	"github.com/Justype/condatainer/internal/project"
 	"github.com/Justype/condatainer/internal/runtime/container"
 	cntexec "github.com/Justype/condatainer/internal/runtime/exec"
 	"github.com/Justype/condatainer/internal/scheduler"
@@ -191,6 +192,8 @@ func (s *srv) handleHelpersSub(w http.ResponseWriter, r *http.Request) {
 		s.handleHelperOverlay(w, r, id)
 	case "missing-params":
 		s.handleHelperMissingParams(w, r, id)
+	case "reuse":
+		s.handleHelperReuse(w, r, id)
 	case "running":
 		s.handleHelperRunning(w, r, id)
 	case "resources":
@@ -393,6 +396,40 @@ func (s *srv) handleHelperConfig(w http.ResponseWriter, r *http.Request, name st
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// handleHelperReuse serves GET /api/helpers/{name}/reuse?cwd=... — the
+// project's shared overlay-combination history for this helper at cwd's
+// location, newest first. Empty when cwd is outside a project or nothing
+// has been recorded there yet — the web start-helper panel's equivalent of
+// the CLI's fresh-start reuse lookup, one helper, one location, never a
+// cross-helper listing.
+func (s *srv) handleHelperReuse(w http.ResponseWriter, r *http.Request, name string) {
+	cwd := r.URL.Query().Get("cwd")
+	empty := []helper.UsedCombination{}
+	if cwd == "" {
+		writeJSON(w, empty)
+		return
+	}
+	standing, err := project.StandingAt(cwd)
+	if err != nil || standing == nil {
+		writeJSON(w, empty)
+		return
+	}
+	location, err := filepath.Rel(standing.Root, cwd)
+	if err != nil {
+		writeJSON(w, empty)
+		return
+	}
+	used, err := helper.ListUsed(standing.Root, name, filepath.ToSlash(location))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if used == nil {
+		used = []*helper.UsedCombination{}
+	}
+	writeJSON(w, used)
 }
 
 // handleHelperOverlay serves GET /api/helpers/{name}/find-env

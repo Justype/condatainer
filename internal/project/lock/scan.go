@@ -37,6 +37,10 @@ const (
 // pin, and an external .sqf is someone else's file — restore does not own that
 // path and must never write to it, so pinning one would record a promise it
 // could not keep.
+//
+// This same split is why internal/project's usageIndex classifies a helper's
+// recorded overlays into a pin key or nothing at all: an entry a scan could
+// never pin has nothing to suggest pinning it, either.
 func (k Kind) Pinnable() bool { return k == KindName || k == KindPath }
 
 // Request is one declaration a project makes, merged across every script that

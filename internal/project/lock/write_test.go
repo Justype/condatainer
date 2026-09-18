@@ -32,7 +32,7 @@ func TestPublishWritesTheLockAtomically(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, entry := range leftovers {
-		if strings.HasPrefix(entry.Name(), stagingPrefix) {
+		if entry.Name() != ignoreFile && strings.HasPrefix(entry.Name(), stagingPrefix) {
 			t.Errorf("staging file survived publication: %s", entry.Name())
 		}
 	}
@@ -227,5 +227,25 @@ func TestPublishKeepsRemotesItStillReaches(t *testing.T) {
 	}
 	if l.Remotes != nil {
 		t.Errorf("Publish invented a remotes map: %#v", l.Remotes)
+	}
+}
+
+func TestEnsureIgnoreWritesOnceAndKeepsEdits(t *testing.T) {
+	root := projectRoot(t)
+	path := filepath.Join(Dir(root), ignoreFile)
+	if err := EnsureIgnore(root); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(path); string(data) != "/.*/\n" {
+		t.Fatalf("got %q", data)
+	}
+	if err := os.WriteFile(path, []byte("edited\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureIgnore(root); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(path); string(data) != "edited\n" {
+		t.Fatalf("an existing file was overwritten: %q", data)
 	}
 }
