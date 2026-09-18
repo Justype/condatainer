@@ -180,13 +180,18 @@ func (s *srv) handleRemove(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleOverlaysList serves GET /api/overlays — lists module (.sqf) overlays.
+//
+// Scans directly rather than through container.InstalledOverlays: that map's
+// bare-name aliases exist for name-to-path resolution, and listing through it
+// would show every default-distro OS overlay twice, once under each key
+// pointing at the same file.
 func (s *srv) handleOverlaysList(w http.ResponseWriter, r *http.Request) {
-	container.InvalidateInstalledOverlaysCache()
-	installed, err := container.InstalledOverlays()
+	scan, err := image.ScanOverlays(image.ScanOptions{})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	installed := image.FirstPaths(scan)
 	// Type is what the payload is, Format is the file's container format. These
 	// were one field holding the extension, which conflated the two.
 	type overlayEntry struct {

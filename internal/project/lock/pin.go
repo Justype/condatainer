@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/artifact/capsule"
 	"github.com/Justype/condatainer/internal/artifact/compare"
 	"github.com/Justype/condatainer/internal/artifact/meta"
@@ -468,17 +469,42 @@ func joinProblems(problems []Problem) string {
 }
 
 // MatchPin finds the pin, if any, that already answers request — trying each
-// of its PathCandidates in order against l.Pins. Never touches the
-// filesystem, so this stays correct before anything has been restored.
-// Reconcile and project.Resolve both use this, so neither can disagree about
-// which pin a declaration means.
+// of its PathCandidates in order against l.Pins, then, for a name request
+// only, any existing pin whose name matches and whose version request.Dep
+// already admits (catalog.Dep.Satisfies's dot-prefix family match — the
+// newest such pin when more than one qualifies). This is what keeps a
+// project internally consistent for a loose declaration: if one script
+// already pinned a floating dependency, a different script's looser
+// reference to the same name means that pin, not an independent re-resolve
+// that might land on a different version the same day. An exact request
+// that found nothing via PathCandidates gains nothing here beyond what
+// Satisfies already treats as equivalent.
+// Never touches the filesystem, so this stays correct before anything has
+// been restored. Reconcile and project.Resolve both use this, so neither can
+// disagree about which pin a declaration means.
 func MatchPin(l *Lock, request Request) (key string, entry PinEntry, ok bool) {
 	for _, candidate := range request.PathCandidates() {
 		if entry, ok := l.Pins[candidate]; ok {
 			return candidate, entry, true
 		}
 	}
-	return "", PinEntry{}, false
+	if request.Kind != KindName {
+		return "", PinEntry{}, false
+	}
+	bestKey, bestEntry, bestVersion := "", PinEntry{}, ""
+	for key, entry := range l.Pins {
+		dep, err := catalog.ParseDep(key)
+		if err != nil || dep.Name != request.Dep.Name || !request.Dep.Satisfies(dep.Version) {
+			continue
+		}
+		if bestKey == "" || catalog.CompareVersions(dep.Version, bestVersion) > 0 {
+			bestKey, bestEntry, bestVersion = key, entry, dep.Version
+		}
+	}
+	if bestKey == "" {
+		return "", PinEntry{}, false
+	}
+	return bestKey, bestEntry, true
 }
 
 // Reconcile rescans a project and drops pins nothing requests any more,

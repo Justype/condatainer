@@ -1,6 +1,7 @@
 package project
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"github.com/Justype/condatainer/internal/artifact/capsule"
 	"github.com/Justype/condatainer/internal/artifact/key"
 	"github.com/Justype/condatainer/internal/artifact/meta"
+	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/project/lock"
 	"github.com/Justype/condatainer/internal/store"
 )
@@ -75,7 +77,7 @@ func TestResolveMountsALockedName(t *testing.T) {
 	l.Pins["star/2.7.11b"] = lock.PinEntry{Artifact: relative}
 	requests := []lock.Request{{Key: "star/2.7.11b", Kind: lock.KindName}}
 
-	got, err := Resolve(root, l, requests, ResolveOptions{lookup: present("star/2.7.11b", "/images/star.sqf")})
+	got, err := Resolve(context.Background(), root, l, requests, ResolveOptions{lookup: present("star/2.7.11b", "/images/star.sqf")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +101,7 @@ func TestResolveRefusesRatherThanFallingBackToTheName(t *testing.T) {
 	l.Pins["star/2.7.11b"] = lock.PinEntry{Artifact: relative}
 	requests := []lock.Request{{Key: "star/2.7.11b", Kind: lock.KindName}}
 
-	got, err := Resolve(root, l, requests, ResolveOptions{lookup: absent})
+	got, err := Resolve(context.Background(), root, l, requests, ResolveOptions{lookup: absent})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +122,7 @@ func TestResolveReportsAnUnpinnedDeclaration(t *testing.T) {
 	l := lock.New()
 	requests := []lock.Request{{Key: "star/2.7.11b", Kind: lock.KindName}}
 
-	got, err := Resolve(root, l, requests, ResolveOptions{lookup: absent})
+	got, err := Resolve(context.Background(), root, l, requests, ResolveOptions{lookup: absent})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,6 +131,66 @@ func TestResolveReportsAnUnpinnedDeclaration(t *testing.T) {
 	}
 	if !strings.Contains(got.Unresolved[0].Reason, "project pin") {
 		t.Errorf("reason does not name the remedy: %q", got.Unresolved[0].Reason)
+	}
+}
+
+// A bare name no pin answers resolves live when LiveResolve is set, the same
+// as it would outside a project — never claimed to be pinned, so nothing was
+// promised and broken.
+func TestResolveLiveResolvesALooseNameWhenEnabled(t *testing.T) {
+	root := projectRoot(t)
+	imagesDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(imagesDir, "samtools--1.22.1.sqf"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	prevSources := config.Global.Sources
+	config.Global.Sources = nil
+	config.ResetCatalog()
+	t.Cleanup(func() {
+		config.Global.Sources = prevSources
+		config.ResetCatalog()
+	})
+
+	l := lock.New()
+	requests := []lock.Request{{Key: "samtools", Kind: lock.KindName, Dep: catalog.Dep{Name: "samtools"}}}
+
+	got, err := Resolve(context.Background(), root, l, requests,
+		ResolveOptions{lookup: absent, LiveResolve: true, SearchDirs: []string{imagesDir}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Complete() {
+		t.Fatalf("unresolved: %#v", got.Unresolved)
+	}
+	want := filepath.Join(imagesDir, "samtools--1.22.1.sqf")
+	if len(got.Mounts) != 1 || got.Mounts[0].Path != want || got.Mounts[0].Name != "samtools/1.22.1" {
+		t.Fatalf("mounts = %#v, want a live mount at %s", got.Mounts, want)
+	}
+	if !got.Mounts[0].Live {
+		t.Error("Live was not set on a live-resolved mount")
+	}
+}
+
+// The same unpinned bare name still refuses without LiveResolve — the fixed
+// requirements a project resolves for (a helper's required overlays, the
+// project's own root) never opt into it.
+func TestResolveRefusesALooseNameWhenLiveResolveDisabled(t *testing.T) {
+	root := projectRoot(t)
+	imagesDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(imagesDir, "samtools--1.22.1.sqf"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	l := lock.New()
+	requests := []lock.Request{{Key: "samtools", Kind: lock.KindName, Dep: catalog.Dep{Name: "samtools"}}}
+
+	got, err := Resolve(context.Background(), root, l, requests,
+		ResolveOptions{lookup: absent, SearchDirs: []string{imagesDir}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Complete() {
+		t.Fatal("resolved live without LiveResolve set")
 	}
 }
 
@@ -149,7 +211,7 @@ func TestResolveAnchorsAPathSelectionOnTheProjectRoot(t *testing.T) {
 		return store.Candidate{Name: name, Path: path, Identity: keys.Identity, Equiv: keys.Equiv}, true
 	}
 
-	got, err := Resolve(root, l, requests, ResolveOptions{lookup: absent, lookupAt: lookupAt})
+	got, err := Resolve(context.Background(), root, l, requests, ResolveOptions{lookup: absent, lookupAt: lookupAt})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +243,7 @@ func TestResolveMountsAPathPinnedUnderAFallbackKey(t *testing.T) {
 		return store.Candidate{Name: name, Path: path, Identity: keys.Identity, Equiv: keys.Equiv}, true
 	}
 
-	got, err := Resolve(root, l, requests, ResolveOptions{lookup: absent, lookupAt: lookupAt})
+	got, err := Resolve(context.Background(), root, l, requests, ResolveOptions{lookup: absent, lookupAt: lookupAt})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +265,7 @@ func TestResolveMountsUnpinnableDeclarationsLiterally(t *testing.T) {
 		{Key: lock.PathPrefix + "/shared/genome.sqf", Kind: lock.KindExternal, Path: "/shared/genome.sqf"},
 	}
 
-	got, err := Resolve(root, l, requests, ResolveOptions{lookup: absent, lookupAt: absentAt})
+	got, err := Resolve(context.Background(), root, l, requests, ResolveOptions{lookup: absent, lookupAt: absentAt})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +291,7 @@ func TestResolveReturnsAbsolutePaths(t *testing.T) {
 	requests := []lock.Request{
 		{Key: lock.PathPrefix + "env.img", Kind: lock.KindWritable, Path: "env.img"},
 	}
-	got, err := Resolve(root, l, requests, ResolveOptions{lookup: absent, lookupAt: absentAt})
+	got, err := Resolve(context.Background(), root, l, requests, ResolveOptions{lookup: absent, lookupAt: absentAt})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,7 +309,7 @@ func TestResolveReportsAnInvalidLock(t *testing.T) {
 	l.Pins["star/2.7.11b"] = lock.PinEntry{Artifact: "provenance/star--2.7.11b@000000000000"}
 	requests := []lock.Request{{Key: "star/2.7.11b", Kind: lock.KindName}}
 
-	got, err := Resolve(root, l, requests, ResolveOptions{lookup: absent})
+	got, err := Resolve(context.Background(), root, l, requests, ResolveOptions{lookup: absent})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +331,7 @@ func TestResolveReportsASubstitution(t *testing.T) {
 		return store.Candidate{Name: name, Path: "/images/star.sqf", Identity: other, Equiv: keys.Equiv}, true
 	}
 
-	got, err := Resolve(root, l, requests, ResolveOptions{lookup: lookup})
+	got, err := Resolve(context.Background(), root, l, requests, ResolveOptions{lookup: lookup})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -290,7 +352,7 @@ func TestResolveRequiresAPinForAPinnablePath(t *testing.T) {
 		Key: lock.PathPrefix + "overlays/tool.sqf", Kind: lock.KindPath, Path: "overlays/tool.sqf",
 	}}
 
-	got, err := Resolve(root, l, requests, ResolveOptions{lookup: absent, lookupAt: absentAt})
+	got, err := Resolve(context.Background(), root, l, requests, ResolveOptions{lookup: absent, lookupAt: absentAt})
 	if err != nil {
 		t.Fatal(err)
 	}

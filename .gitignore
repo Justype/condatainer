@@ -58,6 +58,7 @@ logs/
 # Ignore content in image directories but keep the folder structure
 images
 /libexec*
+/.libexec*
 
 # Ignore the configuration files
 config.yaml
@@ -78,7 +79,7 @@ ref
 ref-modules
 
 # CondaTainer Recipe and Test
-recipe
+recipes
 cnt-test
 cnt-project-test
 

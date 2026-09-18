@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,7 +14,7 @@ import (
 func TestProjectOverlaysPassesThroughOutsideAProject(t *testing.T) {
 	t.Chdir(t.TempDir())
 
-	got, err := projectOverlays([]string{"star/2.7.11b", "env.img"})
+	got, err := projectOverlays(context.Background(), []string{"star/2.7.11b", "env.img"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +31,7 @@ func TestProjectOverlaysRefusesAnUnselectedName(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := projectOverlays([]string{"star/2.7.11b"})
+	_, err := projectOverlays(context.Background(), []string{"star/2.7.11b"})
 	if err == nil {
 		t.Fatal("an unlocked name was accepted inside a project")
 	}
@@ -50,7 +51,7 @@ func TestProjectOverlaysMountsAWritableImageLiterally(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := projectOverlays([]string{"env.img"})
+	got, err := projectOverlays(context.Background(), []string{"env.img"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +69,7 @@ func TestProjectOverlaysKeepsTheMountMode(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := projectOverlays([]string{"env.img:rw"})
+	got, err := projectOverlays(context.Background(), []string{"env.img:rw"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +87,7 @@ func TestProjectOverlaysRefusesAVersionConstraint(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := projectOverlays([]string{"star/2.7.11b>=2.7.0"})
+	_, err := projectOverlays(context.Background(), []string{"star/2.7.11b>=2.7.0"})
 	if err == nil {
 		t.Fatal("a constrained overlay was accepted inside a project")
 	}
@@ -104,7 +105,7 @@ func TestProjectOverlaysRefusesAnUnselectedProjectPath(t *testing.T) {
 	}
 	writeScript(t, root, "overlays/tool.sqf", "not really an overlay\n")
 
-	if _, err := projectOverlays([]string{"overlays/tool.sqf"}); err == nil {
+	if _, err := projectOverlays(context.Background(), []string{"overlays/tool.sqf"}); err == nil {
 		t.Fatal("an unlocked project path was mounted on sight")
 	}
 }
@@ -113,7 +114,7 @@ func TestProjectOverlaysRefusesAnUnselectedProjectPath(t *testing.T) {
 func TestProjectOverlaysIgnoresAnEmptyList(t *testing.T) {
 	newProject(t)
 
-	got, err := projectOverlays(nil)
+	got, err := projectOverlays(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +127,7 @@ func TestProjectOverlaysIgnoresAnEmptyList(t *testing.T) {
 func TestProjectBaseImagePassesThroughOutsideAProject(t *testing.T) {
 	t.Chdir(t.TempDir())
 
-	path, err := projectBaseImage()
+	path, err := projectBaseImage(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +145,7 @@ func TestProjectBaseImageEmptyWithNoBasePin(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	path, err := projectBaseImage()
+	path, err := projectBaseImage(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +166,7 @@ func TestProjectBaseImageRefusesAnUnresolvedBase(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := projectBaseImage()
+	_, err := projectBaseImage(context.Background())
 	if err == nil {
 		t.Fatal("an uninstalled root was accepted")
 	}

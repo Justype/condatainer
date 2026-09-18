@@ -89,10 +89,8 @@ func runList(cmd *cobra.Command, args []string) error {
 	for name := range installedMap {
 		lower := strings.ToLower(name)
 		installedLower[lower] = true
-		if distroLower != "" {
-			if alias, ok := strings.CutPrefix(lower, distroLower+"/"); ok {
-				installedLower[alias] = true
-			}
+		if alias := catalog.ShortForm(distroLower, lower); alias != lower {
+			installedLower[alias] = true
 		}
 	}
 	var listExactLookup func(string) bool
@@ -155,8 +153,8 @@ func runList(cmd *cobra.Command, args []string) error {
 			for i, name := range names {
 				plain[i] = name
 				styled[i] = name
-				if distroLower != "" {
-					if alias, ok := strings.CutPrefix(name, distroLower+"/"); ok {
+				if distro := projectDefaultDistro(); distro != "" {
+					if alias := catalog.ShortForm(distro, name); alias != name {
 						plain[i] += "  [" + alias + "]"
 						styled[i] += "  " + utils.StyleInfo("["+alias+"]")
 					}
@@ -252,7 +250,7 @@ func runList(cmd *cobra.Command, args []string) error {
 // scanOverlaysByDir scans each image directory independently and returns per-dir results.
 // Missing directories are skipped; empty directories are included with empty groups.
 func scanOverlaysByDir(dirs []string, query *SearchQuery) []DirOverlays {
-	distroPrefix := strings.ToLower(projectDefaultDistro()) + "/"
+	distroLower := strings.ToLower(projectDefaultDistro())
 	var result []DirOverlays
 	cacheBatch := artifactcache.Default().NewBatch()
 	defer cacheBatch.Flush()
@@ -299,7 +297,7 @@ func scanOverlaysByDir(dirs []string, query *SearchQuery) []DirOverlays {
 
 			// App overlay
 			if !query.Matches(normalized) {
-				alias := strings.TrimPrefix(normalized, distroPrefix)
+				alias := catalog.ShortForm(distroLower, normalized)
 				if alias == normalized || !query.Matches(alias) {
 					continue
 				}

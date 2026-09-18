@@ -68,7 +68,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	}
 
 	// A locked project answers per script and refuses -a; see check_project.go.
-	if handled, err := projectCheck(scriptPaths, metaDeps); handled {
+	if handled, err := projectCheck(cmd.Context(), scriptPaths, metaDeps); handled {
 		return err
 	}
 
@@ -82,12 +82,13 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Check which deps are installed and print status
-	installedOverlays, err := getInstalledOverlaysMap()
+	// Check which deps are installed and print status. A bare or partial name
+	// counts as installed when an installed overlay answers it, as it does for run.
+	solved, err := resolveOverlayValues(cmd.Context(), deps, nil, true)
 	if err != nil {
 		return err
 	}
-	missingDeps := checkDeps(deps, installedOverlays)
+	missingDeps := checkDeps(deps, solved)
 
 	if len(missingDeps) == 0 {
 		utils.PrintSuccess("All dependencies are installed.")
@@ -181,8 +182,10 @@ func collectDeps(scriptPaths []string, preSeededDeps []string) ([]string, error)
 }
 
 // checkDeps prints the status of each dependency grouped by type and returns the missing ones.
+// solved is deps with every installed name replaced by its overlay path (solveOverlayNames), so an
+// entry left unchanged is not installed.
 // Uses ✓/✗ symbols with colors. Paths are shown relative to cwd when possible.
-func checkDeps(deps []string, installedOverlays map[string]string) []string {
+func checkDeps(deps, solved []string) []string {
 	cwd, _ := os.Getwd()
 	depDisplay := func(p string) string {
 		if rel, err := filepath.Rel(cwd, p); err == nil && !strings.HasPrefix(rel, "..") {
@@ -195,11 +198,13 @@ func checkDeps(deps []string, installedOverlays map[string]string) []string {
 	cross := utils.StyleError("✗")
 
 	var overlays, packages []string
-	for _, dep := range deps {
+	resolved := map[string]string{}
+	for i, dep := range deps {
 		if utils.IsOverlay(dep) || utils.IsSif(dep) {
 			overlays = append(overlays, dep)
 		} else {
 			packages = append(packages, dep)
+			resolved[dep] = solved[i]
 		}
 	}
 
@@ -208,8 +213,7 @@ func checkDeps(deps []string, installedOverlays map[string]string) []string {
 	if len(packages) > 0 {
 		fmt.Fprintf(os.Stdout, "%s\n", utils.StyleTitle("Module Overlays:"))
 		for _, dep := range packages {
-			normalized := catalog.Normalize(dep)
-			if _, ok := installedOverlays[normalized]; ok {
+			if resolved[dep] != dep {
 				fmt.Fprintf(os.Stdout, "  %s %s\n", check, dep)
 			} else {
 				fmt.Fprintf(os.Stdout, "  %s %s\n", cross, dep)

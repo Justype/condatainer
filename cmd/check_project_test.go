@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,7 +15,7 @@ func TestProjectCheckIgnoresNonProjectScripts(t *testing.T) {
 	writeScript(t, dir, "run.sh", "#DEP: star/2.7.11b\nrun\n")
 	t.Chdir(dir)
 
-	handled, err := projectCheck([]string{filepath.Join(dir, "run.sh")}, nil)
+	handled, err := projectCheck(context.Background(), []string{filepath.Join(dir, "run.sh")}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +32,7 @@ func TestProjectCheckIgnoresAProjectScriptNamedFromOutside(t *testing.T) {
 	writeScript(t, root, "run.sh", "#DEP: star/2.7.11b\nrun\n")
 	t.Chdir(t.TempDir())
 
-	handled, err := projectCheck([]string{filepath.Join(root, "run.sh")}, nil)
+	handled, err := projectCheck(context.Background(), []string{filepath.Join(root, "run.sh")}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +52,7 @@ func TestProjectCheckFindsAProjectFromASubdirectory(t *testing.T) {
 	}
 	t.Chdir(filepath.Join(root, "scripts"))
 
-	handled, err := projectCheck([]string{"run.sh"}, nil)
+	handled, err := projectCheck(context.Background(), []string{"run.sh"}, nil)
 	if !handled {
 		t.Fatal("a subdirectory of a project was not recognized as standing in it")
 	}
@@ -70,7 +71,7 @@ func TestProjectCheckRefusesAutoInstallInsideAProject(t *testing.T) {
 	checkAutoInstall = true
 	t.Cleanup(func() { checkAutoInstall = false })
 
-	handled, err := projectCheck([]string{"run.sh"}, nil)
+	handled, err := projectCheck(context.Background(), []string{"run.sh"}, nil)
 	if !handled || err == nil {
 		t.Fatalf("-a was allowed inside a project (handled=%v, err=%v)", handled, err)
 	}
@@ -92,7 +93,7 @@ func TestProjectCheckRefusesAutoInstallWithAnEmptyLock(t *testing.T) {
 	checkAutoInstall = true
 	t.Cleanup(func() { checkAutoInstall = false })
 
-	if _, err := projectCheck([]string{"run.sh"}, nil); err == nil {
+	if _, err := projectCheck(context.Background(), []string{"run.sh"}, nil); err == nil {
 		t.Fatal("-a was allowed against an empty lock")
 	}
 }
@@ -105,7 +106,7 @@ func TestProjectCheckRefusesSeveralScriptsInOneProject(t *testing.T) {
 	writeScript(t, root, "b.sh", "#DEP: cutadapt/5.0\nrun\n")
 	t.Chdir(root)
 
-	_, err := projectCheck([]string{"a.sh", "b.sh"}, nil)
+	_, err := projectCheck(context.Background(), []string{"a.sh", "b.sh"}, nil)
 	if err == nil {
 		t.Fatal("two scripts in one project were checked together")
 	}
@@ -121,7 +122,7 @@ func TestProjectCheckRefusesMixingAProjectScriptWithANameArgument(t *testing.T) 
 	writeScript(t, root, "run.sh", "#DEP: star/2.7.11b\nrun\n")
 	t.Chdir(root)
 
-	_, err := projectCheck([]string{"run.sh"}, []string{"samtools/1.22"})
+	_, err := projectCheck(context.Background(), []string{"run.sh"}, []string{"samtools/1.22"})
 	if err == nil {
 		t.Fatal("a project script was merged with a name argument")
 	}
@@ -136,7 +137,7 @@ func TestProjectCheckIgnoresANameArgumentInsideAProject(t *testing.T) {
 	root := newProject(t)
 	t.Chdir(root)
 
-	handled, err := projectCheck(nil, []string{"samtools/1.22"})
+	handled, err := projectCheck(context.Background(), nil, []string{"samtools/1.22"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +155,7 @@ func TestProjectCheckReportsARunnableScript(t *testing.T) {
 	}
 	t.Chdir(root)
 
-	handled, err := projectCheck([]string{"run.sh"}, nil)
+	handled, err := projectCheck(context.Background(), []string{"run.sh"}, nil)
 	if !handled {
 		t.Fatal("a project script was not handled")
 	}
@@ -172,7 +173,7 @@ func TestProjectCheckFailsOnAnUnselectedDeclaration(t *testing.T) {
 	}
 	t.Chdir(root)
 
-	_, err := projectCheck([]string{"run.sh"}, nil)
+	_, err := projectCheck(context.Background(), []string{"run.sh"}, nil)
 	if err == nil {
 		t.Fatal("an needPin declaration was reported runnable")
 	}

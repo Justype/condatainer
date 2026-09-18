@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -18,7 +20,7 @@ func TestProjectRunContextIgnoresANonProjectScript(t *testing.T) {
 	writeScript(t, dir, "run.sh", "#DEP: star/2.7.11b\nrun\n")
 	t.Chdir(dir)
 
-	got, err := projectRunContext(script, specs())
+	got, err := projectRunContext(context.Background(), script, specs())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +37,7 @@ func TestProjectRunContextIgnoresAScriptNamedFromOutside(t *testing.T) {
 	writeScript(t, root, "run.sh", "#DEP: star/2.7.11b\nrun\n")
 	t.Chdir(t.TempDir())
 
-	got, err := projectRunContext(filepath.Join(root, "run.sh"), specs())
+	got, err := projectRunContext(context.Background(), filepath.Join(root, "run.sh"), specs())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +55,7 @@ func TestProjectRunContextFindsAProjectFromASubdirectory(t *testing.T) {
 	}
 	t.Chdir(filepath.Join(root, "scripts"))
 
-	got, err := projectRunContext("run.sh", specs())
+	got, err := projectRunContext(context.Background(), "run.sh", specs())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +74,7 @@ func TestProjectRunContextFailsWithTheRestoreRemedy(t *testing.T) {
 	writeScript(t, root, "run.sh", "#DEP: star/2.7.11b\nrun\n")
 	t.Chdir(root)
 
-	_, err := projectRunContext(filepath.Join(root, "run.sh"), specs())
+	_, err := projectRunContext(context.Background(), filepath.Join(root, "run.sh"), specs())
 	if err == nil {
 		t.Fatal("a project with nothing selected was allowed to run")
 	}
@@ -94,7 +96,7 @@ func TestProjectRunContextMountsUnpinnableDeclarations(t *testing.T) {
 	}
 	t.Chdir(root)
 
-	got, err := projectRunContext(filepath.Join(root, "run.sh"), specs())
+	got, err := projectRunContext(context.Background(), filepath.Join(root, "run.sh"), specs())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +121,7 @@ func TestProjectRunContextStatesTheRootAsTheWorkingDirectory(t *testing.T) {
 	t.Chdir(root)
 	script := filepath.Join(root, "run.sh")
 	scriptSpecs := specs()
-	if _, err := projectRunContext(script, scriptSpecs); err != nil {
+	if _, err := projectRunContext(context.Background(), script, scriptSpecs); err != nil {
 		t.Fatal(err)
 	}
 	if scriptSpecs.Control.WorkDir != mustEvalPath(t, root) && scriptSpecs.Control.WorkDir != root {
@@ -141,7 +143,7 @@ func TestProjectRunContextRefusesAForeignWorkingDirectory(t *testing.T) {
 	scriptSpecs := specs()
 	scriptSpecs.Control.WorkDir = elsewhere
 
-	_, err := projectRunContext(filepath.Join(root, "run.sh"), scriptSpecs)
+	_, err := projectRunContext(context.Background(), filepath.Join(root, "run.sh"), scriptSpecs)
 	if err == nil {
 		t.Fatal("a working directory outside the project was accepted")
 	}
@@ -160,7 +162,7 @@ func TestProjectRunContextAnchorsASubdirectoryScriptOnTheRoot(t *testing.T) {
 	}
 	t.Chdir(root)
 
-	got, err := projectRunContext(filepath.Join(root, "scripts", "align.sh"), specs())
+	got, err := projectRunContext(context.Background(), filepath.Join(root, "scripts", "align.sh"), specs())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,4 +182,13 @@ func mustEvalPath(t *testing.T, path string) string {
 		return path
 	}
 	return resolved
+}
+
+func TestResolveDepsRefusesAVersionConstraint(t *testing.T) {
+	dir := t.TempDir()
+	writeScript(t, dir, "run.sh", "#DEP: samtools>=1.20\nrun\n")
+
+	if _, err := resolveDeps(context.Background(), filepath.Join(dir, "run.sh"), "run.sh"); !errors.Is(err, errRunAborted) {
+		t.Fatalf("err = %v, want the run to abort on a constrained #DEP:", err)
+	}
 }

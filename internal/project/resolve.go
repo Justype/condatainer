@@ -1,6 +1,7 @@
 package project
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/artifact/compare"
 	"github.com/Justype/condatainer/internal/artifact/meta"
+	"github.com/Justype/condatainer/internal/image"
 	"github.com/Justype/condatainer/internal/project/lock"
 	"github.com/Justype/condatainer/internal/store"
 	"github.com/Justype/condatainer/internal/utils"
@@ -220,6 +222,11 @@ type Mount struct {
 	// Unpinned marks a declaration no pin can answer, mounted as the literal
 	// path it names.
 	Unpinned bool
+	// Live marks a name no pin answered, mounted from a live catalog/disk
+	// resolve instead — only ever set when ResolveOptions.LiveResolve asked
+	// for that fallback. Identity is empty: nothing was pinned, so there is
+	// nothing recorded to compare against.
+	Live bool
 }
 
 // Unresolved is one declaration that cannot be mounted, and why.
@@ -245,6 +252,17 @@ type ResolveOptions struct {
 	Match Match
 	// SearchDirs overrides the configured image roots.
 	SearchDirs []string
+	// LiveResolve allows a KindName request no pin answers to resolve through
+	// catalog.SolveName instead of refusing — the same fallback an unpinned
+	// name gets outside a project. Off by default: a caller resolving a fixed
+	// requirement (a helper's required overlays, the project's base) leaves
+	// this unset and keeps the ordinary refusal.
+	LiveResolve bool
+	// Distro is what SolveName retries a bare or partial name under when
+	// LiveResolve is set — the project's selected root, or the configured
+	// default. Supplied rather than derived, matching SolveName's own rule
+	// that have and distro are always given, never looked up internally.
+	Distro string
 	// lookup and lookupAt are injected for tests.
 	lookup   LookupFunc
 	lookupAt LookupAtFunc
@@ -265,18 +283,21 @@ func (o ResolveOptions) pathResolver() LookupAtFunc {
 }
 
 // Resolve turns one script's declarations into absolute paths to mount, using
-// the project's lock and nothing else.
+// the project's lock — and, for a name no pin answers, optionally a live
+// catalog/disk resolve.
 //
 // This is the single entry point execution and restore share, so they cannot
-// disagree about what a lock means. It acquires nothing: a declaration whose
-// artifact is absent is reported unresolved, never fetched or built. Compute
-// nodes routinely lack the network, credentials, build tools and writable
-// images directories that acquiring would need.
+// disagree about what a lock means. It acquires nothing in either case: a
+// declaration whose artifact is absent is reported unresolved, never fetched
+// or built. Compute nodes routinely lack the network, credentials, build
+// tools and writable images directories that acquiring would need.
 //
-// Inside a project an unsatisfiable declaration is always an error. There is no
-// falling back to whatever currently answers to the name — that is the failure
-// the lock exists to prevent.
-func Resolve(root string, l *lock.Lock, requests []lock.Request, opts ResolveOptions) (*Resolution, error) {
+// A path is a claim to be pinned, so one with no pin is always an error. A
+// name no pin answers — bare, partial or exact — resolves live when
+// opts.LiveResolve is set, exactly as it would outside a project, and is an
+// error only when nothing installed answers it. Pinning is where a name is
+// held to an exact identity; running is not.
+func Resolve(ctx context.Context, root string, l *lock.Lock, requests []lock.Request, opts ResolveOptions) (*Resolution, error) {
 	root, err := filepath.Abs(root)
 	if err != nil {
 		return nil, err
@@ -306,6 +327,16 @@ func Resolve(root string, l *lock.Lock, requests []lock.Request, opts ResolveOpt
 		}
 		matchedKey, pin, ok := lock.MatchPin(l, request)
 		if !ok {
+			if request.Kind == lock.KindName && opts.LiveResolve {
+				mount, resolved, err := resolveLive(ctx, opts, request)
+				if err != nil {
+					return nil, err
+				}
+				if resolved {
+					resolution.Mounts = append(resolution.Mounts, mount)
+					continue
+				}
+			}
 			resolution.Unresolved = append(resolution.Unresolved, Unresolved{Request: request.Key,
 				Reason: "declared but not pinned; run `condatainer project pin` to pin it"})
 			continue
@@ -343,6 +374,48 @@ func Resolve(root string, l *lock.Lock, requests []lock.Request, opts ResolveOpt
 		resolution.Mounts = append(resolution.Mounts, mount)
 	}
 	return resolution, nil
+}
+
+// ResolveUnlocked resolves declarations for a caller standing outside any
+// project: there is no lock, so a name resolves live exactly as it does inside
+// one when no pin answers it (installed first, never a build), and a path is
+// its own answer. It returns one Mount per request, in request order; a name
+// nothing installed answers has an empty Path, for the caller to report.
+func ResolveUnlocked(ctx context.Context, requests []lock.Request, opts ResolveOptions) ([]Mount, error) {
+	mounts := make([]Mount, 0, len(requests))
+	for _, request := range requests {
+		if request.Kind != lock.KindName {
+			mounts = append(mounts, Mount{Request: request.Key, Path: request.Path, Unpinned: true})
+			continue
+		}
+		mount, resolved, err := resolveLive(ctx, opts, request)
+		if err != nil {
+			return nil, err
+		}
+		if !resolved {
+			mount = Mount{Request: request.Key}
+		}
+		mounts = append(mounts, mount)
+	}
+	return mounts, nil
+}
+
+// resolveLive answers a KindName request no pin matched, through the same
+// catalog.SolveName an unpinned name resolves through outside a project — an
+// installed version first, the catalog's own candidates only once nothing is
+// installed. found is false, with no error, for everything short of "on disk
+// right now": a catalog-only hit has nothing to mount, so it is treated the
+// same as no hit at all rather than triggering a build.
+func resolveLive(ctx context.Context, opts ResolveOptions, request lock.Request) (Mount, bool, error) {
+	scan, err := image.ScanOverlays(image.ScanOptions{Dirs: opts.SearchDirs})
+	if err != nil {
+		return Mount{}, false, err
+	}
+	name, path, found, err := catalog.SolveInstalled(ctx, scan, opts.Distro, request.Dep.NameVersion())
+	if err != nil || !found {
+		return Mount{}, false, err
+	}
+	return Mount{Request: request.Key, Name: name, Path: path, Live: true}, true, nil
 }
 
 // literalPath is where an unpinnable declaration points. A project-relative one

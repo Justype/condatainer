@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 
@@ -25,7 +26,10 @@ type projectContext struct {
 // it. The script may live anywhere — `run scripts/align.sh` from the root is an
 // ordinary project run — because the root, not the script's directory, is what
 // relative declarations and the job's working directory resolve against.
-func projectRunContext(contentScript string, specs *scheduler.ScriptSpecs) (*projectContext, error) {
+//
+// A #DEP: with no matching pin resolves live, the same as it would outside a
+// project — see project.ResolveOptions.LiveResolve.
+func projectRunContext(ctx context.Context, contentScript string, specs *scheduler.ScriptSpecs) (*projectContext, error) {
 	if noProjectRequested {
 		return nil, nil
 	}
@@ -57,18 +61,23 @@ func projectRunContext(contentScript string, specs *scheduler.ScriptSpecs) (*pro
 	if err != nil {
 		return nil, err
 	}
-	resolution, err := standing.ResolveComplete(scanned.Requests, project.ResolveOptions{})
+	resolution, err := standing.ResolveComplete(ctx, scanned.Requests,
+		project.ResolveOptions{LiveResolve: true, Distro: projectDefaultDistro()})
 	if err != nil {
 		return nil, err
 	}
 
-	context := &projectContext{Root: standing.Root}
+	projectRun := &projectContext{Root: standing.Root}
 	for _, mount := range resolution.Mounts {
-		context.Overlays = append(context.Overlays, mount.Path)
-		if mount.Found != "" {
+		projectRun.Overlays = append(projectRun.Overlays, mount.Path)
+		switch {
+		case mount.Found != "":
 			utils.PrintNote("%s is mounted from an equivalent artifact, not %s",
 				utils.StyleName(mount.Name), short(mount.Identity))
+		case mount.Live:
+			utils.PrintNote("%s resolved to %s, not pinned — run `condatainer project pin %s` to lock it",
+				utils.StyleName(mount.Request), utils.StyleName(mount.Name), mount.Name)
 		}
 	}
-	return context, nil
+	return projectRun, nil
 }

@@ -12,7 +12,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func TestExpandBareNameExactThenBaseThenConda(t *testing.T) {
+func TestSolveCreateNameExactThenBaseThenConda(t *testing.T) {
 	root := t.TempDir()
 	write := func(rel string) {
 		path := filepath.Join(root, "recipes", filepath.FromSlash(rel))
@@ -29,11 +29,17 @@ func TestExpandBareNameExactThenBaseThenConda(t *testing.T) {
 	write("ubuntu24/versioned-os/1.0.def") // one-slash shortcut
 
 	oldSources, oldBase := config.Global.Sources, config.Global.DefaultDistro
+	oldChannels := config.Global.Build.Channels
 	config.Global.Sources = []catalog.Spec{{Name: "test", Base: root}}
 	config.Global.DefaultDistro = "ubuntu24"
+	// No channels: the Conda-search gate must not make network calls in a
+	// case it can already answer, or when nothing satisfiable to report is
+	// possible either way.
+	config.Global.Build.Channels = nil
 	config.ResetCatalog()
 	t.Cleanup(func() {
 		config.Global.Sources, config.Global.DefaultDistro = oldSources, oldBase
+		config.Global.Build.Channels = oldChannels
 		config.ResetCatalog()
 	})
 
@@ -48,11 +54,22 @@ func TestExpandBareNameExactThenBaseThenConda(t *testing.T) {
 		{"bioconda::samtools/1.21", "bioconda::samtools/1.21", false},
 		{"already/deep/1.0", "already/deep/1.0", false},
 	} {
-		got, expanded := expandBareName(context.Background(), tc.input)
+		got, expanded, err := solveCreateName(context.Background(), tc.input)
+		if err != nil {
+			t.Errorf("solveCreateName(%q) unexpected error: %v", tc.input, err)
+			continue
+		}
 		if got != tc.want || expanded != tc.expanded {
-			t.Errorf("expandBareName(%q) = (%q, %v), want (%q, %v)",
+			t.Errorf("solveCreateName(%q) = (%q, %v), want (%q, %v)",
 				tc.input, got, expanded, tc.want, tc.expanded)
 		}
+	}
+
+	// A bare name with no catalog entry and no channels configured to search
+	// can never produce a valid conda spec (setupCondaFields requires
+	// name/version) — the solver reports this before a build ever starts.
+	if _, _, err := solveCreateName(context.Background(), "nonexistent-bare-pkg"); err == nil {
+		t.Error("solveCreateName(bare, no catalog entry, no channels) should error, got nil")
 	}
 }
 

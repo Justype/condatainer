@@ -14,6 +14,7 @@ import (
 	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/build"
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/image"
 	"github.com/Justype/condatainer/internal/runtime/container"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
@@ -428,7 +429,7 @@ func ensureRootBaseImage(ctx context.Context, overlays []string) (string, error)
 	if container.HasRequestedRoot(overlays) {
 		return "", nil
 	}
-	if path, err := projectBaseImage(); path != "" || err != nil {
+	if path, err := projectBaseImage(ctx); path != "" || err != nil {
 		return path, err
 	}
 	return build.ResolveBase(ctx)
@@ -437,11 +438,11 @@ func ensureRootBaseImage(ctx context.Context, overlays []string) (string, error)
 // previewRootBaseImage is ensureRootBaseImage's read-only counterpart, for a
 // dry run that must report the root a real run would use without building
 // anything missing: config.GetBaseImage() only ever finds, never builds.
-func previewRootBaseImage(overlays []string) (string, error) {
+func previewRootBaseImage(ctx context.Context, overlays []string) (string, error) {
 	if container.HasRequestedRoot(overlays) {
 		return "", nil
 	}
-	if path, err := projectBaseImage(); path != "" || err != nil {
+	if path, err := projectBaseImage(ctx); path != "" || err != nil {
 		return path, err
 	}
 	return config.GetBaseImage()
@@ -484,11 +485,17 @@ func completeOverlayArg(cmd *cobra.Command, args []string, toComplete string) ([
 }
 
 // overlaySuggestions returns overlay suggestions including installed overlays and local files
+//
+// Scans unaliased, unlike container.InstalledOverlays: that map's bare-name
+// keys are tied to the ambient config default_distro, which is wrong to
+// suggest while standing in a project that selected a different one.
+// addDistroAliasChoices adds the project-aware aliases instead.
 func overlaySuggestions(includeData bool, includeImg bool, toComplete string) ([]string, cobra.ShellCompDirective) {
-	installed, err := container.InstalledOverlays()
+	scan, err := image.ScanOverlays(image.ScanOptions{})
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveError
 	}
+	installed := image.FirstPaths(scan)
 
 	choices := map[string]struct{}{}
 	for name, path := range installed {
@@ -591,19 +598,24 @@ func localOverlaySuggestions(toComplete string, includeImg bool) []string {
 	})
 }
 
-// addDistroAliasChoices adds shorthand aliases for OS overlays matching the default distro.
+// addDistroAliasChoices adds shorthand aliases for OS overlays matching
+// projectDefaultDistro — the project's selected root when standing in one,
+// else the configured default — so a suggestion never names a bare form for
+// the wrong distro's tools.
 // For each installed OS overlay named "<distro>/<name>", also suggests "<name>".
 func addDistroAliasChoices(installed map[string]string, choices map[string]struct{}, toComplete string) {
 	distro := projectDefaultDistro()
 	if distro == "" {
 		return
 	}
-	prefix := distro + "/"
 	for name, path := range installed {
-		if !strings.HasPrefix(name, prefix) || !isOSOverlay(path) {
+		if !isOSOverlay(path) {
 			continue
 		}
-		alias := strings.TrimPrefix(name, prefix)
+		alias := catalog.ShortForm(distro, name)
+		if alias == name {
+			continue
+		}
 		if toComplete == "" || strings.HasPrefix(alias, toComplete) {
 			choices[alias] = struct{}{}
 		}

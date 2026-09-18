@@ -179,7 +179,10 @@ Submitted build jobs exit with code 3 (useful for scripts).`,
 		if createName == "" && createPrefix == "" && createFrom == "" {
 			normalizedArgs = make([]string, len(args))
 			for i, arg := range args {
-				normalized, expanded := expandBareName(cmd.Context(), arg)
+				normalized, expanded, err := solveCreateName(cmd.Context(), arg)
+				if err != nil {
+					ExitWithError("%v", err)
+				}
 				if expanded {
 					utils.PrintNote("Expanding '%s' to '%s'", catalog.Normalize(arg), normalized)
 				}
@@ -516,34 +519,71 @@ func resolveTemplateInteractively(ctx context.Context, info *catalog.Entry) (str
 	return concrete, nil
 }
 
-// expandBareName first preserves an exact catalog name. If no exact entry
-// exists, a name with at most one slash is tried below the configured base, so
-// both "r" and "r/4.5.3" may find ubuntu24/r[/4.5.3]. If neither resolves, the
-// original name is returned for the normal Conda fallback.
-func expandBareName(ctx context.Context, nameVersion string) (string, bool) {
+// solveCreateName resolves a create argument the same way load resolves
+// #REQUIRED_OVERLAYS: catalog.SolveName against what's already installed,
+// then, only once the catalog has nothing, anaconda.org's package index —
+// so "r", "r/4.5.3", "rstudio-server", and a bare or partial Conda name
+// like "openjdk/17" all land on one concrete
+// module before a BuildObject is ever built. A channel-annotated
+// ("bioconda::samtools") or already fully-qualified multi-segment name that
+// resolves nowhere is returned unchanged for the normal Conda fallback to
+// attempt as literally typed.
+func solveCreateName(ctx context.Context, nameVersion string) (string, bool, error) {
 	normalized := catalog.Normalize(nameVersion)
 	if normalized == "" || strings.Contains(normalized, "::") {
-		return normalized, false
+		return normalized, false, nil
 	}
 	cat, err := config.OpenCatalog(ctx)
 	if err != nil {
-		return normalized, false
+		return normalized, false, nil
 	}
-	if _, found, err := cat.Lookup(ctx, normalized); err == nil && found {
-		return normalized, false
+	if res, found, err := cat.SolveName(ctx, build.InstalledVersions(nil), projectDefaultDistro(), normalized); err == nil && found {
+		return res.Name, res.Name != normalized, nil
 	}
-	if strings.Count(normalized, "/") > 1 {
-		return normalized, false
+
+	resolved, err := solveCondaName(normalized)
+	if err != nil {
+		return normalized, false, err
 	}
-	base := projectDefaultDistro()
-	if base == "" {
-		return normalized, false
+	if resolved != "" {
+		return resolved, true, nil
 	}
-	candidate := base + "/" + normalized
-	if _, found, err := cat.Lookup(ctx, candidate); err == nil && found {
-		return candidate, true
+	return normalized, false, nil
+}
+
+// solveCondaName resolves name against the first configured channel that
+// carries it, picking the newest version Dep.Satisfies admits — the same
+// family match a partial catalog version gets — so a bare or partial Conda
+// name lands on an exact, attributable version before
+// micromamba's own solve ever sees it. Returns "" when the search itself
+// fails (a network hiccup must not block an otherwise-workable install) or
+// when name already carries its own version and micromamba could still
+// attempt it directly; a miss on a name with no version of its own — one
+// micromamba could never resolve either — is reported as an error instead,
+// a fast, clear failure in place of an opaque solve failure.
+func solveCondaName(name string) (string, error) {
+	dep, err := catalog.ParseDep(name)
+	if err != nil {
+		return "", nil
 	}
-	return normalized, false
+	results, _, err := utils.SearchCondaPackages(dep.Name, config.Global.Build.Channels, false, 0)
+	if err != nil {
+		return "", nil
+	}
+	if len(results) > 0 {
+		for _, v := range results[0].Versions {
+			if dep.Satisfies(v) {
+				return dep.Name + "/" + v, nil
+			}
+		}
+	}
+	if dep.Version != "" {
+		return "", nil
+	}
+	if len(results) == 0 {
+		return "", fmt.Errorf("no conda package named %q found in %s", dep.Name, strings.Join(config.Global.Build.Channels, ", "))
+	}
+	return "", fmt.Errorf("no version of %q in channel %s satisfies %q", dep.Name, results[0].Channel, name)
 }
 
 // runCreatePackages creates separate sqf files for each package using BuildGraph

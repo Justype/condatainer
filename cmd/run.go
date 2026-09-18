@@ -269,14 +269,14 @@ func runScript(cmd *cobra.Command, args []string) error {
 	// A project's lock governs what this script mounts. Resolved before the dry
 	// run so a preview reports the identities the run would actually mount, not
 	// whatever currently answers to their names.
-	projectRun, err := projectRunContext(contentScript, scriptSpecs)
+	projectRun, err := projectRunContext(cmd.Context(), contentScript, scriptSpecs)
 	if err != nil {
 		return err
 	}
 
 	// Dry run: print summary and exit without executing
 	if runDryRun {
-		printDryRunSummary(contentScript, originScriptPath, scriptSpecs, scriptArgs, arraySpec, projectRun)
+		printDryRunSummary(cmd.Context(), contentScript, originScriptPath, scriptSpecs, scriptArgs, arraySpec, projectRun)
 		return nil
 	}
 
@@ -305,7 +305,7 @@ func runScript(cmd *cobra.Command, args []string) error {
 		// only the script's own directory is bound, and apptainer's automatic
 		// binds cover $HOME and the working directory alone.
 		runBindPaths = append(runBindPaths, projectRun.Root)
-	} else if overlays, err = resolveDeps(contentScript, originScriptPath); err != nil {
+	} else if overlays, err = resolveDeps(cmd.Context(), contentScript, originScriptPath); err != nil {
 		if errors.Is(err, errRunAborted) {
 			os.Exit(ExitCodeError)
 		}
@@ -398,7 +398,7 @@ func processEmbeddedArgs(scriptPath string) error {
 
 // resolveDeps parses #DEP dependencies, checks installed overlays, and returns resolved paths.
 // Returns errRunAborted (message already printed) if any dependencies are missing.
-func resolveDeps(contentScript, originScriptPath string) (overlays []string, err error) {
+func resolveDeps(ctx context.Context, contentScript, originScriptPath string) (overlays []string, err error) {
 	deps, err := utils.GetDependenciesFromScript(contentScript)
 	if err != nil {
 		utils.PrintError("Failed to parse dependencies: %v", err)
@@ -409,14 +409,21 @@ func resolveDeps(contentScript, originScriptPath string) (overlays []string, err
 	if err != nil {
 		return nil, err
 	}
+	// A bare or partial name becomes the installed overlay it means; anything
+	// the solver leaves unchanged is checked by exact name below.
+	solved, err := resolveOverlayValues(ctx, deps, nil, false)
+	if err != nil {
+		utils.PrintError("%v", err)
+		return nil, errRunAborted
+	}
 
 	missingDeps := []string{}
-	for _, dep := range deps {
+	for i, dep := range deps {
 		if utils.IsOverlay(dep) || utils.IsSif(dep) {
 			if !utils.FileExists(dep) {
 				missingDeps = append(missingDeps, dep)
 			}
-		} else {
+		} else if solved[i] == dep {
 			normalized := catalog.Normalize(dep)
 			if _, ok := installedOverlays[normalized]; !ok {
 				missingDeps = append(missingDeps, dep)
@@ -449,6 +456,8 @@ func resolveDeps(contentScript, originScriptPath string) (overlays []string, err
 	for i, dep := range deps {
 		if utils.IsOverlay(dep) || utils.IsSif(dep) {
 			overlays[i] = dep
+		} else if solved[i] != dep {
+			overlays[i] = solved[i]
 		} else {
 			normalized := catalog.Normalize(dep)
 			if path, ok := installedOverlays[normalized]; ok {
@@ -591,7 +600,7 @@ func printProjectDependencies(baseImg string, projectRun *projectContext) {
 	}
 }
 
-func printDryRunSummary(contentScript, originScript string, specs *scheduler.ScriptSpecs, scriptArgs []string, arraySpec *scheduler.ArraySpec, projectRun *projectContext) {
+func printDryRunSummary(ctx context.Context, contentScript, originScript string, specs *scheduler.ScriptSpecs, scriptArgs []string, arraySpec *scheduler.ArraySpec, projectRun *projectContext) {
 	fmt.Printf("%s %s\n", utils.StyleTitle("Dry run:"), specs.ScriptPath)
 
 	// Dependencies. A dry run reports the base rather than building it, so an
@@ -604,7 +613,7 @@ func printDryRunSummary(contentScript, originScript string, specs *scheduler.Scr
 		if projectRun != nil {
 			overlays = projectRun.Overlays
 		}
-		switch resolved, err := previewRootBaseImage(overlays); {
+		switch resolved, err := previewRootBaseImage(ctx, overlays); {
 		case err != nil:
 			baseImg = "(" + err.Error() + ")"
 		case resolved == "":

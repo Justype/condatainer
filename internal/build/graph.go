@@ -80,10 +80,11 @@ func NewBuildGraph(ctx context.Context, buildObjects []*BuildObject, imagesDir s
 	return bg, nil
 }
 
-// installedVersions reports the versions of name already built, as the Have the
-// catalog resolver asks with. The version is the last segment and nothing deeper
-// counts. hidden drops entries the graph intends to rebuild, as --update does.
-func installedVersions(hidden map[string]bool) catalog.Have {
+// InstalledVersions reports the versions of name already built, as the Have the
+// catalog resolver — and catalog.SolveName — asks with. The version is the
+// last segment and nothing deeper counts. hidden drops entries the graph
+// intends to rebuild, as --update does; pass nil outside a build graph.
+func InstalledVersions(hidden map[string]bool) catalog.Have {
 	return func(name string) []string {
 		prefix := name + "/"
 		var out []string
@@ -106,7 +107,7 @@ func (bg *BuildGraph) resolvePlan(ctx context.Context, roots []string, hidden ma
 	if err != nil {
 		return err
 	}
-	plan, err := cat.Resolve(ctx, roots, installedVersions(hidden))
+	plan, err := cat.Resolve(ctx, roots, InstalledVersions(hidden))
 	if err != nil {
 		return err
 	}

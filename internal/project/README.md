@@ -400,6 +400,17 @@ neither may check the other's:
   correctly before anything has been restored, and neither may invent an
   answer from files that are not there yet.
 
+For a `name:` request, `MatchPin` has one more fallback past its
+`PathCandidates`. With no pin under its own key, it matches an existing pin
+whose name agrees and whose version the request's `catalog.Dep` admits — a bare
+name admits any version, a partial one any version it is a dot-component prefix
+of — taking the newest when several qualify. This keeps a project consistent
+when two scripts name the same dependency at different precision: whichever
+one a prior `project lock` pinned is what the other means too, not an
+independent re-resolve that could land on a different version. It is
+filesystem-free. A name nothing in `l.Pins` matches is answered live — see
+**Live resolution of an unpinned name** in *Acting in a project*.
+
 Whichever candidate a real file answered to becomes the **stored** key —
 `path:steps1/xxx.sqf`, never the literal text as declared if that is not the
 one that matched. A `path:` pin is always root-relative once recorded; the
@@ -618,7 +629,11 @@ That means a version constraint is refused here too, and a project path
 answers to the lock rather than being mounted on sight: inside a project
 `overlays/tool.sqf` is a restore output, and `LookupAt` verifies the file there
 against the locked keys. A writable `.img` and an external `.sqf` stay unpinnable
-and are mounted as written.
+and are mounted as written. Both also set `ResolveOptions.LiveResolve` and
+`Distro: standing.SelectedDistro()` — see **Live resolution of an unpinned name**
+below for what that changes. `check` (`cmd.projectCheck`) sets the same two
+fields, calling `project.Resolve` directly, so it answers "can this script run"
+with exactly what `run` would do.
 
 `Standing` sits *above* `container.ResolveOverlayPaths` rather than inside it,
 even though that is the one place a name becomes a path. Five of its callers
@@ -626,11 +641,35 @@ resolve a build's own `#DEP:` or a base image, and none of them may pick up the
 lock of whatever directory the user happened to be standing in.
 
 Like `run`, every method resolves and never acquires: an absent artifact is an
-error naming `project restore`, never a fetch, a build, or a fallback to
-whatever currently answers to the name. That fallback is the failure a lock
-exists to prevent — `Standing.ResolveComplete`'s refusal is the one message
-every caller shares, so a `-o` typo, an unpinned helper overlay and an
-unresolved root all fail the same recognizable way.
+error naming `project restore`, never a fetch or a build, in every case and
+regardless of `LiveResolve`. Whether an *unpinned* name refuses is a separate
+question, answered per caller — see below. `Standing.ResolveComplete`'s
+refusal is the one message every caller shares when it does refuse, so a `-o`
+typo, an unpinned helper overlay and an unresolved root all fail the same
+recognizable way.
+
+### Live resolution of an unpinned name
+
+A `path:` declaration is a claim to be pinned, so one with no matching pin is
+always that refusal. A `name:` request — bare, partial or exact — is held to an
+exact identity when it is *pinned*, not when it runs: `ResolveOptions.LiveResolve`
+lets `Resolve` answer one no pin matches with `catalog.SolveInstalled`, exactly
+as an unpinned name resolves outside a project: an installed version first, the
+catalog's own candidates only once nothing is installed, and never a build.
+Nothing installed answering the name is the same "declared but not pinned"
+error, and a catalog-only hit with nothing on disk is still unresolved.
+
+`exec -o`, `run`'s script scan and `check` set `LiveResolve: true`, matching
+the fact that `-o` and `#DEP:` already classify through the identical grammar
+and are meant to behave alike whether or not a project happens to be standing.
+A helper's `#REQUIRED_OVERLAYS:` (`Standing.ResolveNames`) and the project's
+own root (`Standing.Base`) leave it unset: both are fixed requirements a
+project locks rather than lets float, and their own callers already document
+why — see **Manual pins** and **The project's root**. A resolved mount that
+came from `LiveResolve` carries `Mount.Live` rather than a recorded
+`Identity`, since nothing was pinned to compare against; every caller that
+sets `LiveResolve` prints a note naming what it resolved to, so the outcome is
+visible without needing to be reconstructed.
 
 ## Verification
 

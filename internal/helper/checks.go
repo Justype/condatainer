@@ -140,7 +140,7 @@ func CheckRequiredOverlays(ctx context.Context, cwd, requiredTemplate string, pa
 		}
 		if standing != nil {
 			logger.Info("Checking required overlays", "project", standing.Root)
-			return standing.ResolveNames(names)
+			return standing.ResolveNames(ctx, names)
 		}
 	}
 	logger.Info("Checking required overlays")

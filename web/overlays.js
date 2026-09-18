@@ -164,7 +164,8 @@ async function openOverlayCreate() {
   gid('oc-modal').classList.add('open');
   gid('oc-list').innerHTML = '<div class="modal-empty">Loading…</div>';
   try {
-    const r = await fetch('/api/avail');
+    const cwd = gid('cfg-cwd')?.value.trim();
+    const r = await fetch('/api/avail' + (cwd ? '?cwd=' + encodeURIComponent(cwd) : ''));
     _ocAvail = (await r.json()) || [];
   } catch { _ocAvail = []; }
   ocFilter(gid('oc-search').value);

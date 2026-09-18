@@ -16,6 +16,7 @@ import (
 
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/image"
 	"github.com/Justype/condatainer/internal/image/ext3"
 	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/runtime/container"
@@ -263,8 +264,13 @@ func resolveOverlayTemplate(template string, params map[string]string) []string 
 	return strings.Fields(result)
 }
 
-// checkAndInstallNamedOverlays ensures each named condatainer overlay image exists,
-// building it automatically via "condatainer create <name>" if missing.
+// checkAndInstallNamedOverlays ensures each named overlay exists: resolving a
+// bare, partial, or distro-unprefixed name (catalog.SolveName) against what's
+// already installed first, no network call — then building via "condatainer
+// create <name>", passed the name exactly as declared, only once nothing
+// local satisfies it. That subprocess runs the same solver plus its
+// Conda-search fallback, so a name nothing could ever satisfy fails there
+// with a clear message before any build starts.
 // Unlike guided overlay creation (#IMG_PACKAGES:), no prompt is shown — named
 // overlays are fixed requirements, not user-configurable.
 // Returns the resolved absolute paths to be prepended to opts.Overlays.
@@ -273,25 +279,42 @@ func checkAndInstallNamedOverlays(ctx context.Context, names []string) ([]string
 	if err != nil {
 		condaBin = "condatainer"
 	}
+	logger := logging.FromContext(ctx)
 
-	// Invalidate cache so removals since process start are reflected.
-	container.InvalidateInstalledOverlaysCache()
+	distro := config.ResolvedDefaultDistro()
 
-	// First pass: resolve already-present overlays and collect missing names.
-	resolved := make(map[string][]string, len(names))
-	var missing []string
-	for _, name := range names {
-		paths, lookupErr := container.ResolveOverlayPaths([]string{name})
-		if lookupErr != nil {
-			missing = append(missing, name)
-		} else {
-			resolved[name] = paths
+	resolveAll := func(pending []string, installed map[string][]string) (map[string][]string, []string, error) {
+		found := make(map[string][]string, len(pending))
+		var stillMissing []string
+		for _, name := range pending {
+			resolvedName, path, ok, err := catalog.SolveInstalled(ctx, installed, distro, name)
+			if err != nil {
+				return nil, nil, err
+			}
+			if !ok {
+				stillMissing = append(stillMissing, name)
+				continue
+			}
+			if resolvedName != catalog.Normalize(name) {
+				logger.Info(fmt.Sprintf("%s -> %s", name, resolvedName), "kind", "note")
+			}
+			found[name] = []string{path}
 		}
+		return found, stillMissing, nil
+	}
+
+	installed, err := image.ScanOverlays(image.ScanOptions{})
+	if err != nil {
+		return nil, err
+	}
+	resolved, missing, err := resolveAll(names, installed)
+	if err != nil {
+		return nil, err
 	}
 
 	// Second pass: build all missing overlays in one condatainer create call.
 	if len(missing) > 0 {
-		logging.FromContext(ctx).Info("required overlays not found, building now", "overlays", strings.Join(missing, " "))
+		logger.Info("required overlays not found, building now", "overlays", strings.Join(missing, " "))
 		args := append([]string{"create"}, missing...)
 		cmd := exec.CommandContext(ctx, condaBin, args...)
 		cmdOut := logging.WriterFromCtx(ctx)
@@ -309,21 +332,28 @@ func checkAndInstallNamedOverlays(ctx context.Context, names []string) ([]string
 			return nil, fmt.Errorf("condatainer create %s failed: %w", strings.Join(missing, " "), err)
 		}
 		container.InvalidateInstalledOverlaysCache()
-		for _, name := range missing {
-			paths, err := container.ResolveOverlayPaths([]string{name})
-			if err != nil {
-				return nil, fmt.Errorf("overlay %q not found after build: %w", name, err)
-			}
-			resolved[name] = paths
+		installed, err = image.ScanOverlays(image.ScanOptions{})
+		if err != nil {
+			return nil, err
+		}
+		built, stillMissing, err := resolveAll(missing, installed)
+		if err != nil {
+			return nil, err
+		}
+		if len(stillMissing) > 0 {
+			return nil, fmt.Errorf("overlay(s) not found after build: %s", strings.Join(stillMissing, ", "))
+		}
+		for name, p := range built {
+			resolved[name] = p
 		}
 	}
 
 	// Reconstruct in original order so overlay precedence matches #REQUIRED_OVERLAYS.
-	var paths []string
+	var out []string
 	for _, name := range names {
-		paths = append(paths, resolved[name]...)
+		out = append(out, resolved[name]...)
 	}
-	return paths, nil
+	return out, nil
 }
 
 // checkPackages verifies that every package declared in meta.ImgPackages is

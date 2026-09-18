@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,9 +17,10 @@ import (
 // This is the question neither project command answers. `project validate` is
 // checkout-only and never looks at an installed image; `project restore
 // --dry-run` answers for the whole project. This answers "can I run *this
-// script*", through the same resolution and the same anchor `run` uses, so the
-// two cannot disagree about whether a script is runnable.
-func projectCheck(scriptPaths []string, metaDeps []string) (handled bool, err error) {
+// script*", through the same resolution and the same anchor `run` uses —
+// including its live resolve of an unpinned #DEP: name — so the two cannot
+// disagree about whether a script is runnable.
+func projectCheck(ctx context.Context, scriptPaths []string, metaDeps []string) (handled bool, err error) {
 	// A `<name>` addresses a recipe and belongs to no project, so checking one
 	// stays ordinary wherever it is typed.
 	if len(scriptPaths) == 0 || noProjectRequested {
@@ -55,7 +57,8 @@ func projectCheck(scriptPaths []string, metaDeps []string) (handled bool, err er
 	if err != nil {
 		return true, err
 	}
-	resolution, err := project.Resolve(root, standing.Lock, scanned.Requests, project.ResolveOptions{})
+	resolution, err := project.Resolve(ctx, root, standing.Lock, scanned.Requests,
+		project.ResolveOptions{LiveResolve: true, Distro: projectDefaultDistro()})
 	if err != nil {
 		return true, err
 	}

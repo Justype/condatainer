@@ -47,6 +47,15 @@ func getInstalledOverlays() map[string]bool {
 }
 
 func invalidateInstalledOverlays() {
+	InvalidateInstalledOverlays()
+}
+
+// InvalidateInstalledOverlays clears the cached installed-overlay set built by
+// getInstalledOverlays/InstalledVersions, and the runtime container package's
+// own cache alongside it. Exported so a caller that builds outside this
+// package — a "condatainer create" subprocess launched by internal/helper —
+// can force the next InstalledVersions call to rescan.
+func InvalidateInstalledOverlays() {
 	cachedInstalledOverlays = nil
 	container.InvalidateInstalledOverlaysCache()
 }

@@ -81,6 +81,7 @@ Like text editors, IDEs, build-essential tools, etc.
 * **Format:** `<distro>/<name>`
 * **Example:** `ubuntu22/rstudio-server`, `ubuntu24/code-server`
 * **Shortcut:** when `<distro>` is the configured `default_distro` (`ubuntu24`), it can be omitted — `code-server` resolves to `ubuntu24/code-server`. Standing in a project, its own pinned root takes over instead — see [Project Select-Distro](#project-select-distro).
+* **Version:** `exec -o`, `e`, `create` and helper `#REQUIRED_OVERLAYS:` also accept a name without a version or with a partial one — `samtools` or `samtools/1.22` picks the newest matching version already installed, and only then the newest the recipes offer.
 
 ### Custom Environments (Bundle/Environment)
 
@@ -1242,6 +1243,8 @@ External Overlays:
 Executes a script inside the **CondaTainer** environment, mounting dependencies defined in the script. Autosolves dependencies based on `#DEP:` tags within the script.
 
 The `#DEP:` tags read here are **your script's** — they name the overlays to mount for this run. An overlay does not carry dependencies of its own: a recipe's `#DEP:` is a build-time edge and is never re-expanded at run time.
+
+A `#DEP:` may be a full `name/version`, a partial version (`samtools/1.22`) or a bare name (`samtools`); a bare or partial name uses the newest matching version already installed. A version range (`samtools>=1.20`) is for build recipes only and aborts the run.
 
 ```
 condatainer run [OPTIONS] SCRIPT [SCRIPT_ARGS...]

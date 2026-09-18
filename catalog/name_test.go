@@ -71,10 +71,27 @@ func TestDepSatisfies(t *testing.T) {
 		}
 	}
 
-	// Unconstrained: only the preferred version will do.
+	// Unconstrained, full version: only the preferred version will do.
 	pinned, _ := ParseDep("star/2.7.11b")
 	if !pinned.Satisfies("2.7.11b") || pinned.Satisfies("2.7.11a") {
 		t.Error("unconstrained dep should admit only its preferred version")
+	}
+
+	// Unconstrained, partial version: a dot-component prefix family match.
+	partial, _ := ParseDep("openjdk/17")
+	for _, tt := range []struct {
+		version string
+		want    bool
+	}{
+		{"17.0.18", true},
+		{"17", true},
+		{"170.0.0", false},
+		{"17a.0.0", false},
+		{"16.0.0", false},
+	} {
+		if got := partial.Satisfies(tt.version); got != tt.want {
+			t.Errorf("%s.Satisfies(%q) = %v, want %v", partial, tt.version, got, tt.want)
+		}
 	}
 }
 

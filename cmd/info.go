@@ -57,20 +57,10 @@ func runInfoOverlay(cmd *cobra.Command, args []string) error {
 	overlayArg := args[0]
 	normalized := catalog.Normalize(overlayArg)
 
-	// Try to find as installed overlay first
-	installedOverlays, err := getInstalledOverlaysMap()
+	// Try to find as installed overlay first: an exact, bare or partial name.
+	overlayPath, _, err := installedOverlayPath(normalized)
 	if err != nil {
 		return err
-	}
-
-	var overlayPath string
-	if path, ok := installedOverlays[normalized]; ok {
-		overlayPath = path
-	} else if !strings.Contains(normalized, "/") && projectDefaultDistro() != "" {
-		// Bare name not found: try <base>/<name> (e.g. "build-essential" → "ubuntu24/build-essential", "base_image" → "ubuntu24/base_image")
-		if path, ok := installedOverlays[projectDefaultDistro()+"/"+normalized]; ok {
-			overlayPath = path
-		}
 	}
 
 	// The base is not in the installed-overlay map — that map drives `remove`, and

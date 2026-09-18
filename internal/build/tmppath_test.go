@@ -12,6 +12,22 @@ import (
 	"github.com/Justype/condatainer/internal/utils"
 )
 
+// TestMain confines every test's build workspace to a scratch dir removed at
+// the end of the run. A constructor test that builds no farther than the
+// manifest still resolves its workspace through tmpRootForType/tmpRootForDef,
+// which fall back to the real host tmp when nothing overrides them — without
+// this, every such test leaves an orphaned build_<name> dir in /tmp/cnt-$USER.
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "condatainer-build-test-")
+	if err != nil {
+		panic(err)
+	}
+	os.Setenv("CNT_TMPDIR", dir)
+	code := m.Run()
+	os.RemoveAll(dir)
+	os.Exit(code)
+}
+
 // Test that CreateTmpOverlay creates parent directory when it does not exist
 // even if overlay creation fails (system tools may not be present in test env).
 func TestCreateTmpOverlay_CreatesParentDir(t *testing.T) {

@@ -69,10 +69,12 @@ func splitConstraint(raw string) (nameVersion, op, min string) {
 }
 
 // Satisfies reports whether version falls in the range the dep admits: at or
-// above Min per Op, never above Version. Unconstrained admits only Version.
+// above Min per Op, never above Version. Unconstrained admits any version
+// sharing Version as a dot-component prefix — "17" admits "17.0.18" the same
+// family match Conda's own MatchSpec syntax gives a bare "=17".
 func (d Dep) Satisfies(version string) bool {
 	if d.Op == "" {
-		return d.Version == "" || version == d.Version
+		return d.Version == "" || versionHasPrefix(version, d.Version)
 	}
 	switch cmp := CompareVersions(version, d.Min); d.Op {
 	case ">=":
@@ -87,4 +89,22 @@ func (d Dep) Satisfies(version string) bool {
 		return false
 	}
 	return d.Version == "" || CompareVersions(version, d.Version) <= 0
+}
+
+// versionHasPrefix reports whether every dot-separated component of prefix
+// equals the corresponding component of version, in order. A full version is
+// trivially its own prefix, so this subsumes equality rather than replacing
+// it — only a genuinely shorter spec ("17", "17.0") gains new matches.
+func versionHasPrefix(version, prefix string) bool {
+	vParts := strings.Split(version, ".")
+	pParts := strings.Split(prefix, ".")
+	if len(pParts) > len(vParts) {
+		return false
+	}
+	for i, p := range pParts {
+		if vParts[i] != p {
+			return false
+		}
+	}
+	return true
 }

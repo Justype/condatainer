@@ -127,7 +127,7 @@ func runE(cmd *cobra.Command, args []string) error {
 	commands, hidePrompt := PrepareCommandAndHidePrompt(commands)
 
 	// Resolve overlays
-	overlays, err = projectOverlays(overlays)
+	overlays, err = projectOverlays(cmd.Context(), overlays)
 	if err != nil {
 		return err
 	}

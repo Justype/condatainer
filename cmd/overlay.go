@@ -455,22 +455,15 @@ func init() {
 }
 
 // resolveOverlayArg resolves an overlay argument to an absolute path. It first
-// tries an installed overlay by name (with the <base>/<name> fallback
-// for a bare name), then falls back to treating the argument as a file or
+// tries an installed overlay by name (exact, bare or partial), then falls back to treating the argument as a file or
 // directory path. Mirrors the resolution used by `overlay info`.
 func resolveOverlayArg(arg string) (string, error) {
-	normalized := catalog.Normalize(arg)
-	installed, err := getInstalledOverlaysMap()
+	path, found, err := installedOverlayPath(catalog.Normalize(arg))
 	if err != nil {
 		return "", err
 	}
-	if path, ok := installed[normalized]; ok {
+	if found {
 		return path, nil
-	}
-	if !strings.Contains(normalized, "/") && projectDefaultDistro() != "" {
-		if path, ok := installed[projectDefaultDistro()+"/"+normalized]; ok {
-			return path, nil
-		}
 	}
 	abs, _ := filepath.Abs(arg)
 	if !utils.FileExists(abs) && !utils.DirExists(abs) {

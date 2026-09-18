@@ -1,6 +1,7 @@
 package project
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -42,11 +43,11 @@ func StandingAt(cwd string) (*Standing, error) {
 // error naming `project restore` when anything comes back unresolved.
 //
 // Every caller reaching for this resolves rather than acquires: an absent
-// artifact is an error naming the remedy, never a fetch, a build, or a
-// fallback to whatever currently answers to the name — the failure a lock
-// exists to prevent.
-func (s *Standing) ResolveComplete(requests []lock.Request, opts ResolveOptions) (*Resolution, error) {
-	resolution, err := Resolve(s.Root, s.Lock, requests, opts)
+// artifact is an error naming the remedy, never a fetch or a build. Whether
+// an unpinned name may fall back to whatever currently answers to it is
+// opts.LiveResolve's call, made by the caller — see Resolve's own comment.
+func (s *Standing) ResolveComplete(ctx context.Context, requests []lock.Request, opts ResolveOptions) (*Resolution, error) {
+	resolution, err := Resolve(ctx, s.Root, s.Lock, requests, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -64,7 +65,7 @@ func (s *Standing) ResolveComplete(requests []lock.Request, opts ResolveOptions)
 // manual pins (see README, "Manual pins"). An unresolved name is therefore an
 // error naming `project restore`, never a fall back to whatever currently
 // answers to the name.
-func (s *Standing) ResolveNames(names []string) ([]string, error) {
+func (s *Standing) ResolveNames(ctx context.Context, names []string) ([]string, error) {
 	if len(names) == 0 {
 		return nil, nil
 	}
@@ -76,7 +77,7 @@ func (s *Standing) ResolveNames(names []string) ([]string, error) {
 		}
 		requests = append(requests, request)
 	}
-	resolution, err := s.ResolveComplete(requests, ResolveOptions{})
+	resolution, err := s.ResolveComplete(ctx, requests, ResolveOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -95,11 +96,11 @@ func (s *Standing) ResolveNames(names []string) ([]string, error) {
 // Strict otherwise, like ResolveNames: an unresolved pin refuses naming
 // `project restore` rather than silently falling back to this machine's
 // configured default_distro. See README, "The project's root".
-func (s *Standing) Base() (string, error) {
+func (s *Standing) Base(ctx context.Context) (string, error) {
 	if _, ok := s.Lock.Pins[lock.BaseKey]; !ok {
 		return "", nil
 	}
-	resolution, err := s.ResolveComplete(
+	resolution, err := s.ResolveComplete(ctx,
 		[]lock.Request{{Key: lock.BaseKey, Kind: lock.KindName}}, ResolveOptions{})
 	if err != nil {
 		return "", err

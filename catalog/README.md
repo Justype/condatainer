@@ -23,6 +23,86 @@ Likewise absent: the scheduler. Recipes read normalized `$NCPUS`/`$MEM`, which t
 scheduler package produces. The edge runs from each tool to both packages, never
 between them.
 
+## `SolveName`: a raw name to a concrete module
+
+`Lookup` and `Resolve` require an exact index key or a fully filled template
+target; `SolveName` is the same boundary (conda absent, not-found an outcome)
+extended to a name that is bare, carries a partial version, or is missing its
+distro prefix — what a person actually types, or what `#REQUIRED_OVERLAYS:`
+names.
+
+Two attempts, in order: `raw` exactly as given, then, only once that comes up
+empty and `raw` has at most one slash, the same attempt under `distro/raw`.
+Trying the literal name first is not a guess; prepending a distro is, so it
+only happens after the unprefixed form has already failed.
+
+Each attempt is itself three steps, tried in order and stopping at the first
+hit:
+
+1. **A complete module, no splitting at all.** `Lookup(raw)` directly — an
+   exact index key, or a template with its placeholder already filled. A hit
+   on a *bare* template (the key exists, nothing filled its axis) does not
+   count here; that names a family, not a module, and falls through to the
+   next step. This alone resolves anything already fully specified, of any
+   type — `star/2.7.11b`, `ubuntu24/xfce4`, `grch38/genome/ucsc` — with no
+   name/version guessing at all.
+2. **App pool**, only tried when `raw` has at most one slash: split at the
+   one possible `/` (`name`, or `name/version`). `have` is checked first,
+   and if it already answers, the catalog is never consulted at all —
+   installed beats a catalog lookup entirely, not just beats a newer
+   version, the same "check what's already installed first, no network
+   call" rule the load side follows. Only once nothing is installed does the
+   catalog decide: a flat sibling one segment below `name`, or a `#PH:` axis
+   on a template named exactly `name`. Always safe to pick newest here,
+   because an app's candidates, flat or templated, are the same tool at
+   different points in time by construction, never a different tool sharing
+   a name prefix.
+3. **OS pool**, only tried when `raw` has at most two slashes: the first
+   segment is `distro`, the rest is `name` or `name/version`. Same
+   have-first order as the app pool; only once nothing is installed does the
+   entry at `distro/name` have to exist and declare the `#PH:` axis a
+   version query is checked against — never a scan of the distro's other
+   children. The catalog side of this is a direct, exact-key lookup, not a
+   scan, so it costs the same whether the catalog holds a dozen entries or a
+   hundred thousand.
+
+An installed overlay resolves through either pool even when the catalog has
+nothing backing it — an empty source, or a recipe that has since moved or
+been dropped. `Resolved.Entry` is nil in that case; there is simply nothing
+to attach.
+
+**Data gets no third step of its own — and that omission is what "no autofill
+for data" means in practice.** `grch38/genome` (bare) fails step 1 (not a
+literal key), fails step 2 (`grch38` matches no `TypeApp` candidate), and
+fails step 3 (`grch38` is not a distro, so no entry sits at `grch38/genome`)
+— it simply runs out of steps, with no scan of `grch38/genome`'s own flat
+children (`ucsc`, `ensembl`) ever happening. That scan would be unsound
+regardless: those are alternative sources, not versions of one another, and
+comparing them via `CompareVersions` would be comparing two arbitrary
+strings. `grch38/genome/ucsc` typed in full still resolves normally, via step
+1 — only the *choice* among data siblings is refused, never a name that
+already names one exactly.
+
+**A bare distro name has no versions of its own**, for the same reason:
+`"ubuntu24"` alone is one segment, so step 2 finds no app named that and step
+3 has no `/` to split into distro+name — it is not "matched too many
+candidates and picked wrong," there is no candidate step it can even reach.
+`condatainer create ubuntu24` means nothing on its own and reports not found
+rather than guessing. A misparsed multi-segment bare name recovers the same
+way any other bare name does: `"ubuntu24/rstudio-server"` fails step 1 (bare
+template) and step 2 (not app-shaped, more than one slash), then step 3 finds
+the one entry at `ubuntu24/rstudio-server` and its `#PH:` axis directly — no
+separate "is this actually a distro" check needed, because step 3 never scans
+for what a distro's children *are*, it only ever looks up the one address it
+was given.
+
+`have` and `distro` are always parameters, never derived from ambient state.
+That is what lets `SolveName` mean the same thing regardless of which package
+calls it — `cmd` (a project's selected root, or config `default_distro`),
+`internal/helper`, `internal/project/lock` — without any of them needing to
+import back into `catalog` to supply it, and without the name resolving to a
+different artifact depending on whose machine typed it.
+
 ## The header boundary
 
 `ScanAnnotations` is the one place a `#KEY: value ## note` line is tokenized.

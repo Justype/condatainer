@@ -1,25 +1,19 @@
 package cmd
 
 import (
-	"fmt"
+	"context"
 	"os"
 	"strings"
 
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/project"
-	"github.com/Justype/condatainer/internal/project/lock"
-	"github.com/Justype/condatainer/internal/utils"
 )
 
-// projectOverlays resolves `-o` arguments through the lock of the project the
-// caller is standing in, returning them unchanged when there is no project.
-//
-// `exec` and `e` share it, so both act *in* whatever project the caller is
-// standing in. There is no flag either way: `--project DIR` belongs to the
-// commands that act *on* a project, and standing somewhere else is the opt-out.
-func projectOverlays(overlays []string) ([]string, error) {
-	if len(overlays) == 0 || noProjectRequested {
-		return overlays, nil
+// standingProject reports the project the caller is standing in, or nil when
+// there is none or --no-project was given.
+func standingProject() (*project.Standing, error) {
+	if noProjectRequested {
+		return nil, nil
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -27,42 +21,25 @@ func projectOverlays(overlays []string) ([]string, error) {
 	}
 	standing, err := project.StandingAt(cwd)
 	if err != nil || standing == nil {
-		return overlays, err
+		return nil, err
 	}
 	announceProject(standing.Root)
+	return standing, nil
+}
 
-	// The suffix is a mount mode, not part of the name, and it has to survive
-	// resolution to reach the runtime.
-	requests := make([]lock.Request, 0, len(overlays))
-	suffixes := make([]string, 0, len(overlays))
-	for _, overlay := range overlays {
-		value, suffix := splitOverlayMode(overlay)
-		request, reason := lock.ParseDeclaration(value)
-		if reason != "" {
-			return nil, fmt.Errorf("-o %s: %s", overlay, reason)
-		}
-		requests = append(requests, request)
-		suffixes = append(suffixes, suffix)
+// projectOverlays resolves `-o` arguments: through the lock of the project the
+// caller is standing in, else against what is installed. `exec` and `e` share
+// it. There is no flag either way: `--project DIR` belongs to the commands
+// that act *on* a project, and standing somewhere else is the opt-out.
+func projectOverlays(ctx context.Context, overlays []string) ([]string, error) {
+	if len(overlays) == 0 {
+		return overlays, nil
 	}
-
-	resolution, err := standing.ResolveComplete(requests, project.ResolveOptions{})
+	standing, err := standingProject()
 	if err != nil {
 		return nil, err
 	}
-	// One mount per request, in request order, so the suffixes line up.
-	if len(resolution.Mounts) != len(suffixes) {
-		return nil, fmt.Errorf("resolved %d of %d overlays", len(resolution.Mounts), len(suffixes))
-	}
-
-	resolved := make([]string, 0, len(resolution.Mounts))
-	for i, mount := range resolution.Mounts {
-		resolved = append(resolved, mount.Path+suffixes[i])
-		if mount.Found != "" {
-			utils.PrintNote("%s is mounted from an equivalent artifact, not %s",
-				utils.StyleName(mount.Name), short(mount.Identity))
-		}
-	}
-	return resolved, nil
+	return resolveOverlayValues(ctx, overlays, standing, false)
 }
 
 // projectDefaultDistro reports the distro every bare-name alias expands
@@ -99,10 +76,11 @@ func projectSelectedDistro() string {
 // error otherwise, so ensureRootBaseImage falls through to the ordinary
 // configured default.
 //
-// Strict like projectOverlays: an unresolved pin is a refusal naming
-// `project restore`, never a silent fall back to this machine's
-// default_distro. See internal/project/README.md, "The project's root".
-func projectBaseImage() (string, error) {
+// Strict, unlike projectOverlays: the root is never a bare or partial name,
+// so there is nothing for LiveResolve to apply to. An unresolved pin is a
+// refusal naming `project restore`, never a silent fall back to this
+// machine's default_distro. See internal/project/README.md, "The project's root".
+func projectBaseImage(ctx context.Context) (string, error) {
 	if noProjectRequested {
 		return "", nil
 	}
@@ -115,7 +93,7 @@ func projectBaseImage() (string, error) {
 		return "", err
 	}
 	announceProject(standing.Root)
-	return standing.Base()
+	return standing.Base(ctx)
 }
 
 // splitOverlayMode separates a `:ro`/`:rw` mount mode from what it applies to.

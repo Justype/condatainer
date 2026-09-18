@@ -383,6 +383,44 @@ func TestMatchPinHasOneCandidateForAName(t *testing.T) {
 	}
 }
 
+// A loose name request (no pin under its own key) matches an existing pin
+// whose name agrees and whose version the request's Dep admits — the newest
+// one, when more than one qualifies — so a second script's looser reference
+// to an already-pinned floating dependency reuses that pin instead of
+// reporting unpinned.
+func TestMatchPinLooseNameMatchesExistingSatisfyingPin(t *testing.T) {
+	l := New()
+	l.Pins["openjdk/17.0.15"] = PinEntry{Artifact: "provenance/openjdk--17.0.15@abc"}
+	l.Pins["openjdk/17.0.18"] = PinEntry{Artifact: "provenance/openjdk--17.0.18@def"}
+	l.Pins["openjdk/16.0.2"] = PinEntry{Artifact: "provenance/openjdk--16.0.2@ghi"}
+	dep, err := catalog.ParseDep("openjdk/17")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := Request{Key: "openjdk/17", Kind: KindName, Dep: dep}
+
+	key, entry, ok := MatchPin(l, request)
+	if !ok || key != "openjdk/17.0.18" || entry.Artifact != "provenance/openjdk--17.0.18@def" {
+		t.Errorf("MatchPin = (%q, %#v, %v), want the newest satisfying pin openjdk/17.0.18", key, entry, ok)
+	}
+}
+
+// An exact name request with nothing pinned under its own key gains nothing
+// from a same-named pin at a different, non-admitted version.
+func TestMatchPinExactNameDoesNotMatchADifferentVersion(t *testing.T) {
+	l := New()
+	l.Pins["star/2.7.10"] = PinEntry{Artifact: "provenance/star--2.7.10@abc"}
+	dep, err := catalog.ParseDep("star/2.7.11b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := Request{Key: "star/2.7.11b", Kind: KindName, Dep: dep}
+
+	if _, _, ok := MatchPin(l, request); ok {
+		t.Error("MatchPin should not match an exact request against an unrelated version")
+	}
+}
+
 // pinFirstCandidate resolves a script-relative file when the root-relative
 // one does not exist, and records the resolved key, not the one as scanned.
 func TestPinFirstCandidateFallsBackToADeclaringScriptsDirectory(t *testing.T) {

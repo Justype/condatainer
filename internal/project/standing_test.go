@@ -1,6 +1,7 @@
 package project
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -25,7 +26,7 @@ func TestStandingAtNilOutsideAProject(t *testing.T) {
 func TestStandingResolveNamesEmptyWithNoNames(t *testing.T) {
 	standing := &Standing{Root: projectRoot(t), Lock: lock.New()}
 
-	if paths, err := standing.ResolveNames(nil); paths != nil || err != nil {
+	if paths, err := standing.ResolveNames(context.Background(), nil); paths != nil || err != nil {
 		t.Fatalf("paths = %v, err = %v, want nil and no error with no names", paths, err)
 	}
 }
@@ -43,7 +44,7 @@ func TestStandingResolveNamesRefusesAnUnpinnedName(t *testing.T) {
 		t.Fatalf("StandingAt: standing = %v, err = %v", standing, err)
 	}
 
-	_, err = standing.ResolveNames([]string{"ubuntu24/build-essential"})
+	_, err = standing.ResolveNames(context.Background(), []string{"ubuntu24/build-essential"})
 	if err == nil {
 		t.Fatal("an unpinned required overlay was accepted")
 	}
@@ -66,7 +67,7 @@ func TestStandingResolveNamesRefusesAMissingArtifact(t *testing.T) {
 		t.Fatalf("StandingAt: standing = %v, err = %v", standing, err)
 	}
 
-	if _, err := standing.ResolveNames([]string{"ubuntu24/build-essential"}); err == nil {
+	if _, err := standing.ResolveNames(context.Background(), []string{"ubuntu24/build-essential"}); err == nil {
 		t.Fatal("a pin with no vendored artifact was accepted")
 	}
 }
@@ -77,7 +78,7 @@ func TestStandingResolveNamesRefusesAMissingArtifact(t *testing.T) {
 func TestStandingBaseEmptyWithNoBasePin(t *testing.T) {
 	standing := &Standing{Root: projectRoot(t), Lock: lock.New()}
 
-	path, err := standing.Base()
+	path, err := standing.Base(context.Background())
 	if path != "" || err != nil {
 		t.Fatalf("path = %q, err = %v, want empty and no error with no base pin", path, err)
 	}
@@ -97,7 +98,7 @@ func TestStandingBaseRefusesAnUnresolvedBase(t *testing.T) {
 		t.Fatalf("StandingAt: standing = %v, err = %v", standing, err)
 	}
 
-	if _, err := standing.Base(); err == nil {
+	if _, err := standing.Base(context.Background()); err == nil {
 		t.Fatal("an unresolved base pin was accepted")
 	}
 }

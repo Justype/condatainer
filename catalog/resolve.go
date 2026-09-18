@@ -159,10 +159,17 @@ func (r *resolver) resolveOne(ctx context.Context, dep Dep) (Node, error) {
 
 // installed returns the newest version the caller has that the dep admits.
 func (r *resolver) installed(dep Dep) string {
-	if r.have == nil {
+	return installedVersion(r.have, dep)
+}
+
+// installedVersion returns the newest version have reports for dep.Name that
+// dep admits — shared by resolveOne's graph walk and SolveName's own attempt
+// order, so "installed beats newer" is one rule, not two.
+func installedVersion(have Have, dep Dep) string {
+	if have == nil {
 		return ""
 	}
-	candidates := slices.Clone(r.have(dep.Name))
+	candidates := slices.Clone(have(dep.Name))
 	slices.SortStableFunc(candidates, func(a, b string) int { return CompareVersions(b, a) })
 	for _, v := range candidates {
 		if dep.Satisfies(v) {

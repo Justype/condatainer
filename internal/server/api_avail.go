@@ -7,12 +7,13 @@ import (
 
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/project"
 	"github.com/Justype/condatainer/internal/runtime/container"
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
-// handleAvail serves GET /api/avail — lists available build scripts (local and
+// handleAvail serves GET /api/avail[?cwd=dir] — lists available build scripts (local and
 // remote, local wins on duplicates, mirroring `condatainer avail`). Template
 // scripts are returned collapsed as a single entry carrying their placeholder
 // metadata; expanded variants are suppressed.
@@ -37,9 +38,14 @@ func (s *srv) handleAvail(w http.ResponseWriter, r *http.Request) {
 
 	// Scripts under the default distro can be addressed by their bare name
 	// (e.g. ubuntu24/build-essential → build-essential), matching `condatainer avail`.
-	distroPrefix := ""
-	if d := config.ResolvedDefaultDistro(); d != "" {
-		distroPrefix = d + "/"
+	// A cwd standing in a project uses that project's selected root instead.
+	distro := config.ResolvedDefaultDistro()
+	if cwd := r.URL.Query().Get("cwd"); cwd != "" {
+		if standing, err := project.StandingAt(cwd); err == nil && standing != nil {
+			if selected := standing.SelectedDistro(); selected != "" {
+				distro = selected
+			}
+		}
 	}
 
 	entries := []availEntry{}
@@ -61,10 +67,8 @@ func (s *srv) handleAvail(w http.ResponseWriter, r *http.Request) {
 			seen[name] = true
 			_, isInstalled := installed[name]
 			alias := ""
-			if distroPrefix != "" {
-				if a, ok := strings.CutPrefix(name, distroPrefix); ok && a != "" {
-					alias = a
-				}
+			if a := catalog.ShortForm(distro, name); a != name {
+				alias = a
 			}
 			var phNames []string
 			if e.IsTemplate {
