@@ -309,7 +309,7 @@ func runSelfUpdate(cmd *cobra.Command, args []string) error {
 	utils.PrintMessage("Downloading condatainer %s for %s/%s...", utils.StyleNumber(release.TagName), osName, arch)
 
 	// Download to temporary file
-	tempPath := exePath + ".tmp"
+	tempPath := fmt.Sprintf("%s.tmp.%d", exePath, os.Getpid())
 	if err := downloadFile(downloadURL, tempPath); err != nil {
 		return fmt.Errorf("failed to download latest version: %w", err)
 	}
