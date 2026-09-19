@@ -12,102 +12,113 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/libexec"
+	"github.com/Justype/condatainer/internal/toolpath"
 )
 
-// apptainerCmd holds the resolved, absolute path to the binary.
-var apptainerCmd string
+// Bin is one resolved apptainer (or singularity) binary. A launch carries the
+// Bin its caller resolved, so nothing about which binary runs is package state.
+type Bin struct {
+	Path    string
+	Libexec bool // the self-provisioned copy in libexec/
+}
 
-// cachedVersion holds the cached apptainer version to avoid repeated calls
-var cachedVersion string
+// ErrNeedsHost reports an action that needs the host's apptainer: a container
+// has no setuid starter to escalate with.
+var ErrNeedsHost = errors.New("needs a host apptainer, which is not available inside a container")
 
-// SetBin configures and validates the Apptainer binary path.
-// If already set to the same path, this is a no-op.
-// When path is empty, tries "apptainer" then "singularity" in PATH order.
-func SetBin(path string) error {
+// insideContainer is config.IsInsideContainer, replaceable by tests.
+var insideContainer = config.IsInsideContainer
+
+// last is the Bin the latest resolver returned, kept only so Current can report
+// it: a build runs its container through exec.Run, which does not hand the Bin back.
+var (
+	lastMu sync.Mutex
+	last   Bin
+)
+
+func remember(b Bin) Bin {
+	lastMu.Lock()
+	last = b
+	lastMu.Unlock()
+	return b
+}
+
+// systemBin returns the system/module apptainer: build.system_apptainer, which
+// startup filled from PATH when unset.
+func systemBin() (Bin, error) {
+	path := config.Global.Build.SystemApptainer
 	if path == "" {
-		// Try apptainer first, then singularity as fallback
-		for _, name := range []string{"apptainer", "singularity"} {
-			if fullPath, err := exec.LookPath(name); err == nil {
-				if apptainerCmd == fullPath {
-					return nil
-				}
-				apptainerCmd = fullPath
-				cachedVersion = ""
-				return nil
-			}
-		}
-		return &ApptainerNotFoundError{Path: "apptainer/singularity"}
+		return Bin{}, &ApptainerNotFoundError{Path: "apptainer/singularity"}
 	}
-
-	fullPath, err := exec.LookPath(path)
+	full, err := exec.LookPath(path)
 	if err != nil {
-		// Return structured error without hints - let caller decide what to suggest
-		return &ApptainerNotFoundError{Path: path}
+		return Bin{}, &ApptainerNotFoundError{Path: path}
 	}
-
-	// Skip if already set to the same path
-	if apptainerCmd == fullPath {
-		return nil
-	}
-
-	apptainerCmd = fullPath
-	cachedVersion = "" // Clear cached version when binary changes
-	return nil
+	return Bin{Path: full}, nil
 }
 
-// EnsureApptainer checks if apptainer binary is available and configured.
-// Returns an error if apptainer cannot be found.
-func EnsureApptainer() error {
-	return SetBin(config.Global.Build.SystemApptainer)
-}
-
-// ResolveBin configures the Apptainer binary for one exec invocation.
-// Fakeroot — whether an explicit or auto-enabled --fakeroot — always uses the
-// system/module apptainer: only its setuid starter (or a module's) can
-// escalate privilege. Everything else uses an apptainer installed in the
-// libexec toolchain when there is one, otherwise the system/module apptainer.
-// Either way it must support zstd, since every overlay condatainer mounts is
-// unconditionally zstd-compressed.
-//
-// A .def build's own `apptainer build --fakeroot` does not go through this —
-// it resolves the system binary directly (EnsureApptainer) with no zstd
-// check, because its output is a sandbox: it never mounts a zstd-compressed
-// artifact during the build itself (CLAUDE.md, Recipes: #DEP: is data-only).
-func ResolveBin(fakeroot bool) error {
-	if fakeroot {
-		return useSystemBin("fakeroot exec")
-	}
+// Normal returns the apptainer for an ordinary launch: the one installed in
+// libexec, else the system/module one, which must be apptainer >= 1.4.
+func Normal() (Bin, error) {
 	if path, ok := libexec.ApptainerPath(); ok {
-		return SetBin(path)
+		return remember(Bin{Path: path, Libexec: true}), nil
 	}
-	if err := useSystemBin("exec"); err != nil {
-		return fmt.Errorf("no usable apptainer: %w; install one with `condatainer update --libexec apptainer`, or load an apptainer module (>= 1.4)", err)
+	bin, err := systemBin()
+	if err == nil {
+		err = bin.requireZstd("exec")
 	}
-	return nil
+	if err != nil {
+		if insideContainer() {
+			return Bin{}, fmt.Errorf("no usable apptainer in this container: %w; nested running needs the apptainer from libexec/ or an apptainer overlay (see nested_run)", err)
+		}
+		return Bin{}, fmt.Errorf("no usable apptainer: %w; install one with `condatainer update --libexec apptainer`, or load an apptainer module (>= 1.4)", err)
+	}
+	return remember(bin), nil
 }
 
-// CheckSystemBin configures the system/module binary and reports why it cannot
-// be used, or nil when it can.
-func CheckSystemBin() error {
-	return useSystemBin("exec")
+// Fakeroot returns the apptainer for a fakeroot exec: the system/module one,
+// apptainer >= 1.4, since only its setuid starter can escalate. Never libexec's.
+func Fakeroot() (Bin, error) {
+	if insideContainer() {
+		return Bin{}, fmt.Errorf("fakeroot exec %w", ErrNeedsHost)
+	}
+	bin, err := systemBin()
+	if err == nil {
+		err = bin.requireZstd("fakeroot exec")
+	}
+	if err != nil {
+		return Bin{}, err
+	}
+	return remember(bin), nil
 }
 
-// useSystemBin configures the system/module binary, refusing one that cannot
-// mount condatainer's zstd-compressed overlays. what names the caller in the
-// message.
-func useSystemBin(what string) error {
-	if err := SetBin(config.Global.Build.SystemApptainer); err != nil {
-		return err
+// ForBuild returns the apptainer for a .def build: the system/module one, with
+// no version check, since the output is a sandbox and no zstd overlay is
+// mounted during the build.
+func ForBuild() (Bin, error) {
+	if insideContainer() {
+		return Bin{}, fmt.Errorf("a definition build %w", ErrNeedsHost)
 	}
-	if IsSingularity() {
+	bin, err := systemBin()
+	if err != nil {
+		return Bin{}, err
+	}
+	return remember(bin), nil
+}
+
+// requireZstd refuses singularity and an apptainer that cannot mount
+// condatainer's zstd-compressed overlays. what names the caller in the message.
+func (b Bin) requireZstd(what string) error {
+	if b.IsSingularity() {
 		return fmt.Errorf("%s requires apptainer (found singularity), which cannot mount condatainer's zstd-compressed overlays", what)
 	}
-	version, err := GetVersion()
+	version, err := b.Version()
 	if err != nil {
 		return fmt.Errorf("could not determine the system apptainer's version: %w", err)
 	}
@@ -117,70 +128,80 @@ func useSystemBin(what string) error {
 	return nil
 }
 
-// ErrNotResolved reports that no apptainer binary has been resolved yet, so
-// Current has nothing to read back.
+// ErrNotResolved reports that no apptainer binary has been resolved yet.
 var ErrNotResolved = errors.New("no apptainer binary has been resolved yet")
 
-// Current reports the implementation and version of whichever binary is
-// already resolved (by SetBin, EnsureApptainer, or ResolveBin), performing no
-// resolution of its own. A caller that already ran one of those to launch a
-// container reads the result back through this rather than deciding it again.
+// Current reports the implementation and version of the binary the latest
+// resolver returned, performing no resolution of its own. A caller that already
+// resolved one to launch a container reads the result back through this rather
+// than deciding it again.
 func Current() (implementation, version string, err error) {
-	if apptainerCmd == "" {
+	lastMu.Lock()
+	bin := last
+	lastMu.Unlock()
+	if bin.Path == "" {
 		return "", "", ErrNotResolved
 	}
-	version, err = GetVersion()
-	return Implementation(), version, err
+	version, err = bin.Version()
+	return bin.Implementation(), version, err
 }
 
-// IsSingularity returns true if the configured binary is Singularity (not Apptainer).
+// IsSingularity returns true if the binary is Singularity (not Apptainer).
 // Singularity defaults to gzip compression for SquashFS images.
-func IsSingularity() bool {
-	return strings.Contains(strings.ToLower(filepath.Base(apptainerCmd)), "singularity")
+func (b Bin) IsSingularity() bool {
+	return strings.Contains(strings.ToLower(filepath.Base(b.Path)), "singularity")
 }
 
-// Implementation returns the configured compatible implementation name. The
-// manifest needs this beside the version because Apptainer and Singularity can
-// use overlapping version numbers.
-func Implementation() string {
-	if IsSingularity() {
+// Implementation returns the compatible implementation name. The manifest needs
+// this beside the version because Apptainer and Singularity can use overlapping
+// version numbers.
+func (b Bin) Implementation() string {
+	if b.IsSingularity() {
 		return "singularity"
 	}
 	return "apptainer"
 }
 
-// GetVersion returns the version of the currently loaded Apptainer binary.
-// Results are cached to avoid repeated calls.
-func GetVersion() (string, error) {
-	// Return cached version if available
-	if cachedVersion != "" {
-		return cachedVersion, nil
+// versions caches each binary's version for the process, by path.
+var versions sync.Map
+
+var versionPattern = regexp.MustCompile(`(\d+\.\d+(\.\d+)?)`)
+
+// Version returns the binary's version. It runs the binary only when this
+// process and the per-user cache (unchanged size and modification time) have
+// no answer for its path.
+func (b Bin) Version() (string, error) {
+	if cached, ok := versions.Load(b.Path); ok {
+		return cached.(string), nil
 	}
-
-	// We use exec.Command directly here because we need the output string
-	// and runApptainer (below) is designed for void/error returns.
-	cmd := exec.Command(apptainerCmd, "--version")
-	output, err := cmd.Output()
-
+	version, err := toolpath.Remember("version", b.Path, b.runVersion)
 	if err != nil {
-		// Use the new ApptainerError struct with Op/Cmd
+		return "", err
+	}
+	versions.Store(b.Path, version)
+	return version, nil
+}
+
+// runVersion runs the binary's --version and parses the number out.
+func (b Bin) runVersion() (string, error) {
+	// exec.Command directly: we need the output string, and runApptainer
+	// (below) is designed for void/error returns.
+	cmd := exec.Command(b.Path, "--version")
+	output, err := cmd.Output()
+	if err != nil {
 		return "", &ApptainerError{
 			Op:      "check version",
-			Cmd:     fmt.Sprintf("%s --version", apptainerCmd),
+			Cmd:     fmt.Sprintf("%s --version", b.Path),
 			Output:  "", // Output is often empty on binary execution failure
 			BaseErr: err,
 		}
 	}
 
 	outStr := strings.TrimSpace(string(output))
-	re := regexp.MustCompile(`(\d+\.\d+(\.\d+)?)`)
-	match := re.FindString(outStr)
-
+	match := versionPattern.FindString(outStr)
 	if match == "" {
 		return "", fmt.Errorf("could not parse version from output: %s", outStr)
 	}
-
-	cachedVersion = match
 	return match, nil
 }
 
@@ -219,15 +240,12 @@ func CheckZstdSupport(currentVersion string) bool {
 //
 // procEnv: extra KEY=VALUE settings for apptainer's own environment, on top of
 // the parent's. This is how APPTAINERENV_* vars reach the container.
-func runApptainerWithOutput(ctx context.Context, op string, imagePath string, capture bool, stdin io.Reader, stdout, stderr io.Writer, procEnv []string, args ...string) error {
-	libPath, isLibexecBin := libexec.ApptainerPath()
-	isLibexecBin = isLibexecBin && apptainerCmd == libPath
-
+func runApptainerWithOutput(ctx context.Context, bin Bin, op string, imagePath string, capture bool, stdin io.Reader, stdout, stderr io.Writer, procEnv []string, args ...string) error {
 	var cmd *exec.Cmd
-	if dir, ok := libexec.Dir(); isLibexecBin && ok {
-		cmd = exec.CommandContext(ctx, "bash", append([]string{"-c", libexecActivationScript(dir), apptainerCmd}, args...)...)
+	if dir, ok := libexec.Dir(); bin.Libexec && ok {
+		cmd = exec.CommandContext(ctx, "bash", append([]string{"-c", libexecActivationScript(dir), bin.Path}, args...)...)
 	} else {
-		cmd = exec.CommandContext(ctx, apptainerCmd, args...)
+		cmd = exec.CommandContext(ctx, bin.Path, args...)
 	}
 
 	cmd.Stdin = stdin
@@ -247,10 +265,10 @@ func runApptainerWithOutput(ctx context.Context, op string, imagePath string, ca
 	}
 
 	// Apptainer needs unsquashfs/mksquashfs in PATH (e.g. to extract a .sqf
-	// into a sandbox). When apptainerCmd is the self-provisioned libexec copy,
+	// into a sandbox). When the binary is the self-provisioned libexec copy,
 	// add its bin/ to PATH so it finds them there.
-	if isLibexecBin {
-		env = append(env, "PATH="+filepath.Dir(apptainerCmd)+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if bin.Libexec {
+		env = append(env, "PATH="+filepath.Dir(bin.Path)+string(os.PathListSeparator)+os.Getenv("PATH"))
 	}
 
 	cmd.Env = append(env, procEnv...)
@@ -298,7 +316,7 @@ func runApptainerWithOutput(ctx context.Context, op string, imagePath string, ca
 
 	err := cmd.Run()
 	if err != nil {
-		fullCmd := fmt.Sprintf("%s %s", apptainerCmd, strings.Join(args, " "))
+		fullCmd := fmt.Sprintf("%s %s", bin.Path, strings.Join(args, " "))
 		return &ApptainerError{
 			Op:         op,
 			Cmd:        fullCmd,

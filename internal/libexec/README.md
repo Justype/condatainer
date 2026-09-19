@@ -124,7 +124,7 @@ container root*), an ordinary `.sqf` read — has no bind mount to construct, so
 runnable path, and reaches one a different way: see below.
 
 `ApptainerPath()` is the one remaining container-bound accessor with a caller
-(`internal/runtime/apptainer.ResolveBin`), and it is a partial exception to "absolute path, not a
+(`internal/runtime/apptainer.Normal`), and it is a partial exception to "absolute path, not a
 `PATH` prepend": Apptainer needs `unsquashfs`/`mksquashfs` in `PATH` for some of its own operations,
 so `runApptainerWithOutput` also adds `BinDir()` to `PATH` for the Apptainer subprocess itself — a
 different environment than the one a script running inside the container it launches sees (see
@@ -142,7 +142,7 @@ and `squashfuse_ll`.
 
 `ErrNotProvisioned` and `NotProvisionedMessage` report a missing tool to different consumers.
 `ErrNotProvisioned` is the Go sentinel for a caller that fails before starting a container
-(`apptainer.ResolveBin`, `conda.go`'s `micromambaCmd`/`condaExecOpts`); `NotInstalledError(name)`
+(`apptainer.Normal`, `conda.go`'s `micromambaCmd`/`condaExecOpts`); `NotInstalledError(name)`
 returns it when no tier is provisioned and otherwise an error naming the package that installs
 `name`, since the bare `update --libexec` no longer installs it. `NotProvisionedMessage(name)` is a
 plain string for anything else that needs the wording without a Go error to carry it — a host-side

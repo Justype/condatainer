@@ -321,6 +321,12 @@ func runScript(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Before submitting, so a nested_run build happens here and not on a node
+	// that may have no network.
+	if err := ensureNestedProvider(cmd.Context()); err != nil {
+		return err
+	}
+
 	// 3. In-job or in-container: always run locally (no nested submission)
 	if scheduler.IsInsideJob() || config.IsInsideContainer() {
 		return runLocally(cmd.Context(), contentScript, overlays, scriptSpecs, scriptArgs)
@@ -732,6 +738,10 @@ func printDryRunSummary(ctx context.Context, contentScript, originScript string,
 				fmt.Printf("  %s %s  %s\n", cross, e.dep, suffix)
 			}
 		}
+	}
+
+	if nested := describeNested(); nested != "" {
+		fmt.Printf("%s %s\n", utils.StyleTitle("Nested run:"), nested)
 	}
 
 	// Scheduler specs

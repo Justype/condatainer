@@ -22,8 +22,8 @@ type nestedPlan struct {
 // planNested applies nested_run: libexec's apptainer wins and is bound; else the
 // newest installed apptainer overlay is mounted; else "true" builds one and
 // "auto" does nothing.
-func planNested(mode string, insideContainer, libexecHasApptainer bool, installed []string) nestedPlan {
-	if mode == config.NestedRunFalse || insideContainer {
+func planNested(mode string, libexecHasApptainer bool, installed []string) nestedPlan {
+	if mode == config.NestedRunFalse {
 		return nestedPlan{}
 	}
 	if libexecHasApptainer {
@@ -35,32 +35,56 @@ func planNested(mode string, insideContainer, libexecHasApptainer bool, installe
 	return nestedPlan{Build: mode == config.NestedRunTrue}
 }
 
-// insideContainer is config.IsInsideContainer, replaceable by tests.
-var insideContainer = config.IsInsideContainer
-
 // currentNestedPlan gathers the plan's inputs from the running system.
 func currentNestedPlan() nestedPlan {
-	return planNested(config.Global.NestedRun, insideContainer(),
+	return planNested(config.Global.NestedRun,
 		libexec.Installed("apptainer"), build.InstalledVersions(nil)("apptainer"))
 }
 
-// nestedRun adds what nested running needs to one e/exec/run launch: the
-// overlays to mount, and whether to bind libexec. When nested_run is "true"
-// and nothing provides apptainer, it builds the overlay first, like the base
-// image, and fails if it cannot.
-func nestedRun(ctx context.Context, overlays []string) ([]string, bool, error) {
+// describeNested says how a launch would get apptainer for nested running,
+// without building anything; "" when nested running is off or unavailable.
+func describeNested() string {
 	plan := currentNestedPlan()
-	if plan.Build {
-		utils.PrintNote("Building the apptainer overlay for nested running (nested_run: true)")
-		err := buildNestedApptainer(ctx)
-		build.InvalidateInstalledOverlays()
-		if err != nil {
-			return nil, false, fmt.Errorf("nested_run is true but apptainer cannot be provided for nested running: %w; install it with `condatainer install apptainer`, or set nested_run to auto", err)
-		}
-		if plan = currentNestedPlan(); plan.Overlay == "" && !plan.BindLibexec {
-			return nil, false, fmt.Errorf("nested_run is true but the apptainer overlay build installed nothing")
-		}
+	switch {
+	case plan.BindLibexec:
+		return "libexec apptainer (bound)"
+	case plan.Overlay != "":
+		return "apptainer/" + plan.Overlay + " overlay"
+	case plan.Build:
+		return "apptainer overlay (would be built)"
 	}
+	return ""
+}
+
+// ensureNestedProvider builds the apptainer overlay when nested_run is "true"
+// and nothing provides apptainer, like the base image, and fails if it cannot.
+// Callers that submit a job run it first, so the build happens where the
+// network is and before the job is queued.
+func ensureNestedProvider(ctx context.Context) error {
+	if !currentNestedPlan().Build {
+		return nil
+	}
+	utils.PrintNote("Building the apptainer overlay for nested running (nested_run: true)")
+	err := buildNestedApptainer(ctx)
+	build.InvalidateInstalledOverlays()
+	container.InvalidateInstalledOverlaysCache()
+	if err != nil {
+		return fmt.Errorf("nested_run is true but apptainer cannot be provided for nested running: %w; install it with `condatainer install apptainer`, or set nested_run to auto", err)
+	}
+	if plan := currentNestedPlan(); plan.Overlay == "" && !plan.BindLibexec {
+		return fmt.Errorf("nested_run is true but the apptainer overlay build installed nothing")
+	}
+	return nil
+}
+
+// nestedRun adds what nested running needs to one e/exec/run launch: the
+// overlays to mount, and whether to bind libexec. It builds a missing overlay
+// first when ensureNestedProvider has not.
+func nestedRun(ctx context.Context, overlays []string) ([]string, bool, error) {
+	if err := ensureNestedProvider(ctx); err != nil {
+		return nil, false, err
+	}
+	plan := currentNestedPlan()
 	if plan.Overlay != "" {
 		found, err := container.ResolveOverlayPaths([]string{"apptainer/" + plan.Overlay})
 		if err != nil {

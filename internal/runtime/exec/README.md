@@ -80,8 +80,8 @@ exec.Run(ctx, opts)
 3. **Resolve base image** - `Root` from step 2 wins if present, else the
    caller's `BaseImage`, else `config.GetBaseImage()`
 4. **Auto-enable fakeroot** - If writable .img overlay
-5. **Resolve the apptainer binary** - `apptainer.ResolveBin(fakeroot)`, now
-   that fakeroot is final — see that package's README for which binary and why
+5. **Resolve the apptainer binary** - `apptainer.Fakeroot()` or
+   `apptainer.Normal()`, now that fakeroot is final — see that package's README for which binary and why
 6. **Debug output** - Print configuration if debug mode
 7. **Print environment** - Show overlay environments (if interactive and not hidden)
 8. **Acquire file locks** - Hold shared locks on all `.sqf` overlays and the base image for the duration of execution. `.img` overlays are skipped — Apptainer flocks them itself and our lock would conflict. Prevents concurrent `remove` or `build --update` from deleting files in use.
@@ -110,7 +110,7 @@ Missing fields are filled from config:
 
 There is no `ApptainerBin` field at all: which binary runs is never
 caller-configurable, only decided from the final `Fakeroot` value, by
-`apptainer.ResolveBin` — see that package's README.
+`apptainer.Fakeroot` / `apptainer.Normal` — see that package's README.
 
 The base image is required: there is no overlay-only execution, so a container
 with no root cannot start, and `Prepare` fails rather than letting Apptainer

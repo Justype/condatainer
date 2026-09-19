@@ -18,23 +18,22 @@ func TestPlanNested(t *testing.T) {
 		off  = config.NestedRunFalse
 	)
 	cases := []struct {
-		name            string
-		mode            string
-		inside, libexec bool
-		installed       []string
-		want            nestedPlan
+		name      string
+		mode      string
+		libexec   bool
+		installed []string
+		want      nestedPlan
 	}{
-		{"false does nothing", off, false, true, []string{"1.5.3"}, nestedPlan{}},
-		{"inside a container does nothing", on, true, true, nil, nestedPlan{}},
-		{"libexec apptainer is bound", auto, false, true, []string{"1.5.3"}, nestedPlan{BindLibexec: true}},
-		{"libexec apptainer wins under true too", on, false, true, nil, nestedPlan{BindLibexec: true}},
-		{"newest installed overlay is mounted", auto, false, false, []string{"1.4.0", "1.5.3", "1.5.10"}, nestedPlan{Overlay: "1.5.10"}},
-		{"auto builds nothing", auto, false, false, nil, nestedPlan{}},
-		{"true builds when none installed", on, false, false, nil, nestedPlan{Build: true}},
-		{"true mounts an installed one instead of building", on, false, false, []string{"1.5.3"}, nestedPlan{Overlay: "1.5.3"}},
+		{"false does nothing", off, true, []string{"1.5.3"}, nestedPlan{}},
+		{"libexec apptainer is bound", auto, true, []string{"1.5.3"}, nestedPlan{BindLibexec: true}},
+		{"libexec apptainer wins under true too", on, true, nil, nestedPlan{BindLibexec: true}},
+		{"newest installed overlay is mounted", auto, false, []string{"1.4.0", "1.5.3", "1.5.10"}, nestedPlan{Overlay: "1.5.10"}},
+		{"auto builds nothing", auto, false, nil, nestedPlan{}},
+		{"true builds when none installed", on, false, nil, nestedPlan{Build: true}},
+		{"true mounts an installed one instead of building", on, false, []string{"1.5.3"}, nestedPlan{Overlay: "1.5.3"}},
 	}
 	for _, c := range cases {
-		if got := planNested(c.mode, c.inside, c.libexec, c.installed); got.BindLibexec != c.want.BindLibexec ||
+		if got := planNested(c.mode, c.libexec, c.installed); got.BindLibexec != c.want.BindLibexec ||
 			got.Overlay != c.want.Overlay || got.Build != c.want.Build {
 			t.Errorf("%s: planNested = %+v, want %+v", c.name, got, c.want)
 		}
@@ -63,12 +62,10 @@ func TestNestedRunMountsTheInstalledOverlay(t *testing.T) {
 	prevPaths, prevMode := config.GlobalDataPaths, config.Global.NestedRun
 	config.GlobalDataPaths.ImagesDirs = []string{dir}
 	config.GlobalDataPaths.LibexecDirs = []string{filepath.Join(dir, "libexec")}
-	prevInside := insideContainer
-	insideContainer = func() bool { return false }
 	build.InvalidateInstalledOverlays()
 	container.InvalidateInstalledOverlaysCache()
 	t.Cleanup(func() {
-		config.GlobalDataPaths, config.Global.NestedRun, insideContainer = prevPaths, prevMode, prevInside
+		config.GlobalDataPaths, config.Global.NestedRun = prevPaths, prevMode
 		build.InvalidateInstalledOverlays()
 		container.InvalidateInstalledOverlaysCache()
 	})

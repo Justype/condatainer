@@ -10,6 +10,7 @@ import (
 
 // ExecOptions contains options for executing commands in a container
 type ExecOptions struct {
+	Bin        Bin       // The apptainer to run, from Normal or Fakeroot
 	Bind       []string  // Bind mounts (format: "/host/path:/container/path")
 	Overlay    []string  // Overlay images to use
 	Fakeroot   bool      // Run with fakeroot
@@ -25,6 +26,9 @@ type ExecOptions struct {
 func Exec(ctx context.Context, imagePath string, command []string, opts *ExecOptions) error {
 	if opts == nil {
 		opts = &ExecOptions{}
+	}
+	if opts.Bin.Path == "" {
+		return ErrNotResolved
 	}
 
 	args := []string{"exec"}
@@ -47,7 +51,7 @@ func Exec(ctx context.Context, imagePath string, command []string, opts *ExecOpt
 
 	logging.FromContext(ctx).Debug("executing in container", "image", imagePath, "command", strings.Join(command, " "))
 
-	return runApptainerWithOutput(ctx, "exec", imagePath, false, opts.Stdin, opts.Stdout, opts.Stderr, envPrefixed(opts.Env), args...)
+	return runApptainerWithOutput(ctx, opts.Bin, "exec", imagePath, false, opts.Stdin, opts.Stdout, opts.Stderr, envPrefixed(opts.Bin, opts.Env), args...)
 }
 
 // envPrefixed rewrites KEY=VALUE settings as APPTAINERENV_KEY=VALUE for the
@@ -57,12 +61,12 @@ func Exec(ctx context.Context, imagePath string, command []string, opts *ExecOpt
 // value — routine in the signed download URL an #INPUT: asks for — fails the
 // launch outright. The prefixed form passes values through verbatim, and keeps
 // them out of the command line where any user's ps would see them.
-func envPrefixed(settings []string) []string {
+func envPrefixed(bin Bin, settings []string) []string {
 	if len(settings) == 0 {
 		return nil
 	}
 	prefix := "APPTAINERENV_"
-	if IsSingularity() {
+	if bin.IsSingularity() {
 		prefix = "SINGULARITYENV_"
 	}
 	out := make([]string, 0, len(settings))

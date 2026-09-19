@@ -1288,7 +1288,7 @@ These override the script's scheduler directives (`#SBATCH`, `#PBS`, `#BSUB`) fo
 * `--afterany IDS`: Submit job that runs after all listed jobs finish **regardless of outcome**. Colon-separated IDs.
 * `--array FILE`: Input file for an array job — one subjob per line, tokens become positional args.
 * `--array-limit N`: Max concurrently running subjobs (0 = unlimited).
-* `--dry-run`: Preview what would be submitted without executing anything.
+* `--dry-run`: Preview what would be submitted without executing anything, including the base, dependencies, and how nested running would get apptainer (`nested_run`).
 * `--no-submit`: Disable job submission; run the script locally even if it has scheduler directives.
 
 **Script Tags:**

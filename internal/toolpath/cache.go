@@ -10,7 +10,8 @@ import (
 
 // A small per-user file remembers what Resolve worked out about host binaries,
 // so a new process does not run them again: where an apptainer's bundled tools
-// live, and whether a tool cleared its version floor. Each entry records the
+// live, whether a tool cleared its version floor, and an apptainer's version
+// (Remember). Each entry records the
 // size and modification time of the binary it describes and is ignored when
 // they differ, so an unloaded module, an upgrade or another node's binary
 // simply misses. The file is never read or written for correctness; any
@@ -80,6 +81,21 @@ func cacheGet(kind, path string) (string, bool) {
 		return "", false
 	}
 	return e.Value, true
+}
+
+// Remember returns what compute says about the binary at path, running it only
+// when the binary is new or has changed since it was last stored. An error is
+// never stored.
+func Remember(kind, path string, compute func() (string, error)) (string, error) {
+	if value, ok := cacheGet(kind, path); ok {
+		return value, nil
+	}
+	value, err := compute()
+	if err != nil {
+		return "", err
+	}
+	cachePut(kind, path, value)
+	return value, nil
 }
 
 // cachePut stores value under kind for the binary at path. Best effort.

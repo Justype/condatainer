@@ -569,23 +569,21 @@ func ValidateBinary(binPath string) bool {
 	return err == nil
 }
 
-// DetectApptainerBin attempts to find apptainer binary
-// Returns the full absolute path if found, empty string otherwise
-func DetectApptainerBin() string {
-	// Try common names in PATH (returns full path)
-	candidates := []string{"apptainer", "singularity"}
-	for _, candidate := range candidates {
-		if path, err := exec.LookPath(candidate); err == nil {
-			// exec.LookPath already returns the full path
-			return path
-		}
-	}
-
-	// Try module systems as fallback (e.g., HPC environments where binaries are not in PATH)
-	if path := detectApptainerFromModules(); path != "" {
+// FindApptainerBin returns the apptainer (or singularity) on PATH, else the
+// newest one a module provides. "" when there is none.
+func FindApptainerBin() string {
+	if path := apptainerOnPath(); path != "" {
 		return path
 	}
+	return detectApptainerFromModules()
+}
 
+// InvalidSystemApptainer returns the configured build.system_apptainer when it
+// is set but not a usable binary, "" otherwise.
+func InvalidSystemApptainer() string {
+	if bin := layerString("build.system_apptainer"); bin != "" && !ValidateBinary(bin) {
+		return bin
+	}
 	return ""
 }
 
@@ -896,15 +894,9 @@ func layerInt(key string) (int, bool) {
 
 // LoadFromViper loads config from Viper into Global struct
 func LoadFromViper() {
-	// Update binary paths from Viper, with fallback to detection
+	// A valid configured apptainer overrides the one LoadDefaults found on PATH.
 	if bin := layerString("build.system_apptainer"); bin != "" && ValidateBinary(bin) {
 		Global.Build.SystemApptainer = bin
-	} else if bin == "" || !ValidateBinary(bin) {
-		// Fallback to detection if config value is empty or invalid
-		detected := detectApptainerBin()
-		if detected != "" {
-			Global.Build.SystemApptainer = detected
-		}
 	}
 
 	if bin := layerString("scheduler.bin"); bin != "" {

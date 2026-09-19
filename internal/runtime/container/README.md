@@ -354,7 +354,29 @@ binds `libexec.Dir()` — the resolved self-provisioned toolchain directory, sam
 host-path-equals-container-path convention as everywhere else `libexec` is bound. This is what lets
 `internal/conda`'s in-container `mm`/`env` commands resolve `micromamba` via `toolpath.Resolve` once
 running (see `internal/conda/README.md`) instead of assuming the base image carries one. Gated on
-`EnvMounted`, not unconditional, because nothing else in an ordinary exec/run needs it.
+`EnvMounted`, not unconditional, because nothing else in an ordinary exec/run needs it. The one
+other trigger is `SetupConfig.BindLibexec`, set by the caller when `nested_run` is providing apptainer
+from `libexec/` (see `cmd/nested.go`): a container that runs apptainer needs its binary and libraries
+at the host path.
+
+## Nested Running
+
+`nested_run` (`auto`, `true`, `false`) decides whether a container can start containers of its own.
+The decision is made by `cmd/nested.go`, not `Setup`: the caller adds the provider to the overlay
+list and sets `SetupConfig.BindLibexec`, and `Setup` treats both like any other input.
+
+Providers, in order: the apptainer installed in `libexec/` (bound, never an overlay), else the newest
+installed `apptainer/<version>` overlay, else — only under `true` — an overlay built on the spot.
+`auto` builds nothing and stays silent when there is no provider. It is the same at any depth: each
+launch is a fresh container, so one started from inside a container is provided for like any other.
+
+- **The overlay goes first in the list.** `BuildPathEnv` prepends each overlay's `bin/` in list
+  order, so the first overlay ends up last on `PATH`. The overlay is a full conda prefix (`jq`,
+  `openssl`, `bsdtar`, …); anywhere else in the list it would shadow the same-named tools of the
+  overlays the user asked for.
+- **The build runs before a job is submitted.** `run` builds a missing overlay ahead of the scheduler
+  block, on the host that ran the command, where the network is; the job only looks the overlay up.
+  It builds locally whatever `build.always_submit` says, as the default base image does.
 
 ## GPU Detection
 

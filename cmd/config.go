@@ -916,7 +916,7 @@ Without -l, the layer is chosen from the install layout:
 		// build.compress_args is not detected — every artifact is always
 		// zstd-medium, unconditionally (config.LoadDefaults) — but is still
 		// written explicitly so it shows plainly in the generated file.
-		detectedApptainerBin := config.DetectApptainerBin()
+		detectedApptainerBin := config.FindApptainerBin()
 		if detectedApptainerBin == "" {
 			ExitWithError("Neither 'apptainer' nor 'singularity' binary found (checked PATH and 'module avail').")
 		}

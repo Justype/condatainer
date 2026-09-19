@@ -350,3 +350,33 @@ func TestNoOnDiskCacheInsideAContainer(t *testing.T) {
 		t.Errorf("defaultCachePath() on a host = %q, want the personal cache file", got)
 	}
 }
+
+// Remember runs compute once per unchanged binary, and never stores an error.
+func TestRememberComputesOnceAndNotErrors(t *testing.T) {
+	cache := filepath.Join(t.TempDir(), cacheFileName)
+	cachePath = func() string { return cache }
+	t.Cleanup(func() { cachePath = func() string { return "" } })
+	bin := writeFakeExecutable(t, t.TempDir(), "tool")
+
+	runs := 0
+	compute := func() (string, error) { runs++; return "1.5.3", nil }
+	for i := 0; i < 2; i++ {
+		if got, err := Remember("version", bin, compute); err != nil || got != "1.5.3" {
+			t.Fatalf("Remember = %q, %v", got, err)
+		}
+	}
+	if runs != 1 {
+		t.Errorf("compute ran %d times, want 1", runs)
+	}
+
+	failed := errors.New("boom")
+	other := writeFakeExecutable(t, t.TempDir(), "tool")
+	for i := 0; i < 2; i++ {
+		if _, err := Remember("version", other, func() (string, error) { runs++; return "", failed }); !errors.Is(err, failed) {
+			t.Fatalf("err = %v, want %v", err, failed)
+		}
+	}
+	if runs != 3 {
+		t.Errorf("a failure was stored: compute ran %d times in total, want 3", runs)
+	}
+}

@@ -78,7 +78,8 @@ func (b *BuildObject) buildDef(ctx context.Context) error {
 	// apptainer build regardless, always against the system/module binary
 	// (never libexec's), so this is a hard prerequisite rather than a
 	// best-effort diagnostic.
-	if err := apptainer.EnsureApptainer(); err != nil {
+	bin, err := apptainer.ForBuild()
+	if err != nil {
 		b.Cleanup(true) //nolint:errcheck
 		return err
 	}
@@ -115,6 +116,7 @@ func (b *BuildObject) buildDef(ctx context.Context) error {
 	log.Info("running apptainer build", "source", b.buildSource)
 
 	buildOpts := &apptainer.BuildOptions{
+		Bin:       bin,
 		Force:     false,
 		NoCleanup: false,
 		Sandbox:   true,

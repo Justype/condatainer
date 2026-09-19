@@ -5,14 +5,13 @@ import (
 	"fmt"
 
 	"github.com/Justype/condatainer/internal/image/freeze"
-	"github.com/Justype/condatainer/internal/libexec"
 	"github.com/Justype/condatainer/internal/runtime/apptainer"
 	"github.com/Justype/condatainer/internal/toolpath"
 )
 
 // systemProbe is what the host offers for condatainer's own tools.
 type systemProbe struct {
-	ApptainerErr error  // nil when a usable apptainer exists outside libexec
+	ApptainerErr error  // nil when a usable apptainer exists, in libexec or on the host
 	Apptainer    string // its version, for the report
 	Squashfs     bool   // mksquashfs and unsquashfs both resolve
 	Squashfuse   bool   // squashfuse or squashfuse_ll resolves
@@ -58,12 +57,15 @@ func planToolchain(p systemProbe) (install, report, warnings []string) {
 
 // probeSystem asks the same resolvers the tools themselves use.
 func probeSystem(ctx context.Context) systemProbe {
-	p := systemProbe{SystemApptainerErr: apptainer.EnsureApptainer()}
-	if libexec.Installed("apptainer") {
+	p := systemProbe{}
+	_, p.SystemApptainerErr = apptainer.ForBuild()
+	if bin, err := apptainer.Normal(); err != nil {
+		p.ApptainerErr = err
+	} else if bin.Libexec {
 		p.Apptainer = "installed in libexec"
-	} else if p.ApptainerErr = apptainer.CheckSystemBin(); p.ApptainerErr == nil {
+	} else {
 		p.Apptainer = "found"
-		if _, v, err := apptainer.Current(); err == nil {
+		if v, err := bin.Version(); err == nil {
 			p.Apptainer = v
 		}
 	}

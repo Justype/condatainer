@@ -5,9 +5,8 @@ import (
 	"testing"
 )
 
-// Current reads back whatever SetBin/ResolveBin/EnsureApptainer already
-// decided; it must never resolve on its own, so with nothing configured it
-// refuses rather than falling back to PATH.
+// Current reads back what the latest resolver returned; it must never resolve
+// on its own, so with nothing resolved it refuses rather than searching PATH.
 func TestCurrentRefusesWithNothingResolved(t *testing.T) {
 	resetApptainerState(t)
 
@@ -20,11 +19,9 @@ func TestCurrentRefusesWithNothingResolved(t *testing.T) {
 // which one that should be.
 func TestCurrentReadsBackTheResolvedBinary(t *testing.T) {
 	resetApptainerState(t)
-	dir := t.TempDir()
-	binPath := writeFakeBin(t, dir, "singularity", "singularity-ce version 4.1.1")
-
-	if err := SetBin(binPath); err != nil {
-		t.Fatalf("SetBin: %v", err)
+	systemApptainer(t, writeFakeBin(t, t.TempDir(), "singularity", "singularity-ce version 4.1.1"))
+	if _, err := ForBuild(); err != nil {
+		t.Fatalf("ForBuild: %v", err)
 	}
 
 	implementation, version, err := Current()

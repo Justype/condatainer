@@ -79,7 +79,15 @@ var rootCmd = &cobra.Command{
 		// inspect/repair config without seeing contradictory warnings before
 		// re-detection runs.
 		isConfigCommand := strings.HasPrefix(cmd.CommandPath(), "condatainer config")
-		if !isCompleteRequest && !isConfigCommand && !libexec.Installed("apptainer") &&
+		if bad := config.InvalidSystemApptainer(); bad != "" && !isCompleteRequest && !isConfigCommand &&
+			!config.IsInsideContainer() {
+			if fallback := config.Global.Build.SystemApptainer; fallback != "" {
+				utils.PrintWarning("build.system_apptainer %q is not usable; using %s from PATH instead.", bad, fallback)
+			} else {
+				utils.PrintWarning("build.system_apptainer %q is not usable, and no apptainer was found on PATH.", bad)
+			}
+			utils.PrintHint("Run: %s", utils.StyleAction("condatainer config init"))
+		} else if !isCompleteRequest && !isConfigCommand && !libexec.Installed("apptainer") &&
 			!config.ValidateBinary(config.Global.Build.SystemApptainer) {
 			utils.PrintWarning("Apptainer not accessible. The module may have been unloaded or removed.")
 			utils.PrintHint("Run: %s", utils.StyleAction("condatainer config init"))

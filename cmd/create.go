@@ -127,7 +127,7 @@ Submitted build jobs exit with code 3 (useful for scripts).`,
 		// 2. Apptainer runs every build, so fail here rather than after
 		// resolution has already fetched recipes. The base image is not checked:
 		// it is an implicit prerequisite of the plan, built with everything else.
-		if err := apptainer.EnsureApptainer(); err != nil {
+		if _, err := apptainer.Normal(); err != nil {
 			ExitWithError("%v", err)
 		}
 

@@ -9,6 +9,7 @@ import (
 
 // BuildOptions contains options for building a container image
 type BuildOptions struct {
+	Bin        Bin      // The apptainer to run, from ForBuild
 	Force      bool     // Force overwrite of existing image
 	NoCleanup  bool     // Do not clean up bundle after failed build
 	Sandbox    bool     // Write a sandbox directory instead of a SIF
@@ -21,6 +22,9 @@ type BuildOptions struct {
 func Build(ctx context.Context, imagePath, defFile string, opts *BuildOptions) error {
 	if opts == nil {
 		opts = &BuildOptions{}
+	}
+	if opts.Bin.Path == "" {
+		return ErrNotResolved
 	}
 
 	args := []string{"build"}
@@ -56,5 +60,5 @@ func Build(ctx context.Context, imagePath, defFile string, opts *BuildOptions) e
 		procEnv = append(procEnv, "APPTAINER_TMPDIR="+opts.TmpDir)
 	}
 
-	return runApptainerWithOutput(ctx, "build", imagePath, false, os.Stdin, os.Stdout, os.Stderr, procEnv, args...)
+	return runApptainerWithOutput(ctx, opts.Bin, "build", imagePath, false, os.Stdin, os.Stdout, os.Stderr, procEnv, args...)
 }

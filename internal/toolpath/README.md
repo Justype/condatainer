@@ -91,7 +91,7 @@ caller doing its own type assertion out of a generic wrapper.
 
 ## What deliberately does not go through this package
 
-Apptainer's own binary choice (`internal/runtime/apptainer.ResolveBin`) is a
+Apptainer's own binary choice (`internal/runtime/apptainer`'s `Normal`, `Fakeroot` and `ForBuild`) is a
 policy decision between exactly two named candidates — system/module for
 fakeroot, `libexec`'s own otherwise — gated by fakeroot and a zstd version
 floor, not a `PATH` walk; `Resolve` has nothing to offer it. Scheduler

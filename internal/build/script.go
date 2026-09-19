@@ -97,7 +97,7 @@ func (b *BuildObject) buildScript(ctx context.Context, buildDeps bool) error {
 		b.Cleanup(true)
 		return err
 	}
-	// After the recipe's container has run, so apptainer.ResolveBin has
+	// After the recipe's container has run, so the apptainer resolver has
 	// already decided which binary that used and captureCommonBuildTools can
 	// read it back rather than resolving a possibly different one.
 	b.captureCommonBuildTools(ctx)

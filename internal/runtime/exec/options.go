@@ -71,8 +71,8 @@ func (ioStreams IO) IsZero() bool {
 // ensureDefaults fills in what the caller left blank: a command to run.
 // BaseImage is resolved separately, after overlay setup — see Prepare —
 // since the exec root may come from the requested overlays. The apptainer
-// binary is not caller-configurable at all: apptainer.ResolveBin decides it
-// from whether this invocation ends up needing fakeroot.
+// binary is not caller-configurable at all: Prepare picks apptainer.Fakeroot or
+// apptainer.Normal from whether this invocation ends up needing fakeroot.
 func (o Options) ensureDefaults() (Options, error) {
 	if len(o.Command) == 0 {
 		o.Command = []string{"bash"}

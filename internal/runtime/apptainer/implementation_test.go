@@ -3,16 +3,10 @@ package apptainer
 import "testing"
 
 func TestImplementation(t *testing.T) {
-	previous := apptainerCmd
-	t.Cleanup(func() { apptainerCmd = previous })
-
-	apptainerCmd = "/usr/bin/apptainer"
-	if got := Implementation(); got != "apptainer" {
+	if got := (Bin{Path: "/usr/bin/apptainer"}).Implementation(); got != "apptainer" {
 		t.Errorf("Apptainer implementation = %q", got)
 	}
-
-	apptainerCmd = "/opt/singularity/bin/singularity"
-	if got := Implementation(); got != "singularity" {
+	if got := (Bin{Path: "/opt/singularity/bin/singularity"}).Implementation(); got != "singularity" {
 		t.Errorf("Singularity implementation = %q", got)
 	}
 }

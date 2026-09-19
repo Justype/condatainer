@@ -72,10 +72,14 @@ func Prepare(ctx context.Context, options Options) (*Plan, error) {
 	fakeroot, fakerootDiagnostics := container.AutoEnableFakeroot(setupResult.LastImg, options.WritableImg, setupResult.Fakeroot)
 
 	// Resolved last, once fakeroot is final: fakeroot (explicit or
-	// auto-enabled) always needs the system apptainer, everything else uses
-	// libexec's apptainer when installed and the system one otherwise (see
-	// apptainer.ResolveBin).
-	if err := apptainer.ResolveBin(fakeroot); err != nil {
+	// auto-enabled) needs the system apptainer, everything else uses libexec's
+	// when installed and the system one otherwise.
+	resolve := apptainer.Normal
+	if fakeroot {
+		resolve = apptainer.Fakeroot
+	}
+	bin, err := resolve()
+	if err != nil {
 		return nil, err
 	}
 
@@ -159,6 +163,7 @@ func Prepare(ctx context.Context, options Options) (*Plan, error) {
 	}
 
 	opts := &apptainer.ExecOptions{
+		Bin:        bin,
 		Bind:       setupResult.BindPaths,
 		Overlay:    setupResult.OverlayArgs,
 		Env:        envList,

@@ -21,7 +21,7 @@ const maxRecordedToolVersion = 256
 //
 // Apptainer is read back through apptainer.Current(), never resolved here: by
 // the time this runs, whichever binary this build's own container step needed
-// (EnsureApptainer for a def build, ResolveBin for a conda/script one) has
+// (ForBuild for a def build, Normal or Fakeroot for a conda/script one) has
 // already been decided, and re-resolving independently would risk recording a
 // different binary than the one that actually ran.
 func (b *BuildObject) captureCommonBuildTools(ctx context.Context) {

@@ -242,14 +242,14 @@ func LoadDefaults(executablePath string) {
 			},
 			AppTmpOverlaySizeMB: DefaultAppTmpOverlaySizeMB,
 			// Every reader is >= 1.4: libexec's apptainer (verified at provision
-			// time) or a version-checked system apptainer (apptainer.ResolveBin).
+			// time) or a version-checked system apptainer (apptainer.Normal).
 			// A registry consumer outside condatainer's own exec/run is
 			// responsible for having a compatible apptainer themselves.
 			CompressArgs:    ArgsForCompress("zstd-medium"),
 			BlockSize:       DefaultBlockSize,
 			DataBlockSize:   DefaultDataBlockSize,
 			Channels:        DefaultChannels(),
-			SystemApptainer: detectApptainerBin(),
+			SystemApptainer: apptainerOnPath(),
 		},
 
 		Scheduler: SchedulerConfig{
@@ -287,34 +287,13 @@ func IsInsideContainer() bool {
 	return false
 }
 
-// detectApptainerBin tries to find the apptainer (or singularity) binary, with special handling
-// for containers. Returns the full path when found, or "" when neither binary is available.
-func detectApptainerBin() string {
-	// If we're inside a container, apptainer might be in a different location
-	// or might not be available at all
-	if IsInsideContainer() {
-		// Try common container paths first
-		containerPaths := []string{
-			"/usr/local/bin/apptainer",
-			"/usr/bin/apptainer",
-			"/opt/apptainer/bin/apptainer",
-		}
-
-		for _, path := range containerPaths {
-			if _, err := os.Stat(path); err == nil {
-				return path
-			}
-		}
-	}
-
-	// Try both names in PATH order: apptainer first, singularity as fallback
+// apptainerOnPath returns the apptainer (or singularity) found on PATH, "" when neither is.
+func apptainerOnPath() string {
 	for _, name := range []string{"apptainer", "singularity"} {
 		if binPath, err := exec.LookPath(name); err == nil {
 			return binPath
 		}
 	}
-
-	// Neither found; callers treat "" as "no binary available"
 	return ""
 }
 

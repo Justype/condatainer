@@ -45,7 +45,7 @@ func (b *BuildObject) resolveBase(ctx context.Context) error {
 // catalog/build path every other name takes: it is an ordinary os recipe,
 // not a special build type.
 func buildConfiguredRoot(ctx context.Context) error {
-	if err := apptainer.EnsureApptainer(); err != nil {
+	if _, err := apptainer.ForBuild(); err != nil {
 		return err
 	}
 
