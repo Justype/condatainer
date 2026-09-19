@@ -145,6 +145,7 @@ which CondaTainer never reads or changes. See
 |-----|---------|-------------|
 | `submit_job` | `true` | Submit builds as scheduler jobs (disabled if no scheduler found) |
 | `autoload_gpu` | `true` | Pass `--nv` / `--rocm` when the host has the device node. Set `false` if the driver is present but unusable |
+| `nested_run` | `auto` | Provide apptainer inside `e`, `exec` and `run` containers, so containers can be started from within one. `auto` uses the apptainer installed by `condatainer update --libexec apptainer`, otherwise an installed `apptainer/<version>` overlay, and builds nothing. `true` also builds that overlay when it is missing, and stops with an error if apptainer cannot be provided. `false` turns it off |
 | `default_distro` | first source's `default_distro` | Default distro for the container root, e.g. `ubuntu24` → `ubuntu24/base` |
 | `notification` | `web` | Alert when a helper job starts: `web`, `terminal`, `both`, `none` |
 | `metadata_cache_ttl` | `7` | Days to cache remote recipe metadata. `0` always fetches |
@@ -156,7 +157,7 @@ which CondaTainer never reads or changes. See
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `build.system_apptainer` | Auto-detected | Path to apptainer or singularity binary — used only where fakeroot is needed (a fakeroot `exec`, and an `os` `.def` build's own `apptainer build`). Ordinary `exec`/`run` and conda/script builds always use condatainer's own self-provisioned apptainer instead (`condatainer update --libexec`). |
+| `build.system_apptainer` | Auto-detected | Path to apptainer or singularity binary. Used for a fakeroot `exec`, an `os` `.def` build's own `apptainer build`, and any other `exec`/`run` or conda/script build when no apptainer is installed in condatainer's own toolchain (`condatainer update --libexec apptainer`), which is used first when present. It must be apptainer 1.4 or newer. |
 | `build.ncpus` | `4` | CPUs for build jobs |
 | `build.mem` | `8192` | Memory for build jobs (supports units: `8g`, `8192`) |
 | `build.time` | `2h` | Time limit for builds |
@@ -300,6 +301,7 @@ mapping is consistent for every key handled by the CLI:
 | `CNT_BUILD_SYSTEM_APPTAINER`| `build.system_apptainer` |
 | `CNT_SUBMIT_JOB`           | `submit_job`           |
 | `CNT_AUTOLOAD_GPU`         | `autoload_gpu`         |
+| `CNT_NESTED_RUN`           | `nested_run`           |
 | `CNT_DEFAULT_DISTRO`       | `default_distro`       |
 | `CNT_BUILD_MEM`            | `build.mem`            |
 | `CNT_BUILD_ALWAYS_SUBMIT`  | `build.always_submit`  |
@@ -399,6 +401,9 @@ sources:
 # Pass --nv / --rocm when the host has the matching device node (default: true)
 # Set false on a node whose driver is installed but unusable
 autoload_gpu: true
+
+# Provide apptainer inside e/exec/run containers: auto, true (also build the overlay), false
+nested_run: auto
 
 # Default distro for the container root (default: the first source's default_distro)
 default_distro: ubuntu24

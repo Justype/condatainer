@@ -53,22 +53,61 @@ func resetApptainerState(t *testing.T) {
 	t.Cleanup(func() { apptainerCmd, cachedVersion = prevCmd, prevVersion })
 }
 
-// Without a provisioned toolchain, a non-fakeroot resolution refuses rather
-// than silently falling back to a system binary — there is no fallback by
-// design (see the container README, Root selection).
-func TestResolveBinNonFakerootRequiresLibexec(t *testing.T) {
+// systemApptainer points the configured system/module binary at path.
+func systemApptainer(t *testing.T, path string) {
+	t.Helper()
+	prev := config.Global.Build.SystemApptainer
+	config.Global.Build.SystemApptainer = path
+	t.Cleanup(func() { config.Global.Build.SystemApptainer = prev })
+}
+
+// With no installed libexec apptainer and no usable system one, a
+// non-fakeroot resolution refuses and names both ways out.
+func TestResolveBinNonFakerootRefusesWithNothingUsable(t *testing.T) {
 	withLibexecTier(t)
 	resetApptainerState(t)
+	systemApptainer(t, filepath.Join(t.TempDir(), "no-apptainer"))
 
-	if err := ResolveBin(false); err == nil {
-		t.Fatal("ResolveBin(false) succeeded with no toolchain provisioned")
-	} else if !strings.Contains(err.Error(), "update --libexec") {
-		t.Errorf("err = %v, want it to name the fix", err)
+	err := ResolveBin(false)
+	if err == nil {
+		t.Fatal("ResolveBin(false) succeeded with no apptainer anywhere")
+	}
+	for _, want := range []string{"update --libexec apptainer", "module"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %v, want it to mention %q", err, want)
+		}
 	}
 }
 
-// A provisioned toolchain is what a non-fakeroot resolution configures,
-// never the system binary.
+// Without libexec's apptainer, a system one that clears the floor is used.
+func TestResolveBinNonFakerootFallsBackToSystem(t *testing.T) {
+	withLibexecTier(t)
+	resetApptainerState(t)
+	sysBin := writeFakeBin(t, t.TempDir(), "apptainer", "apptainer version 1.5.3")
+	systemApptainer(t, sysBin)
+
+	if err := ResolveBin(false); err != nil {
+		t.Fatalf("ResolveBin(false): %v", err)
+	}
+	if apptainerCmd != sysBin {
+		t.Errorf("configured binary = %q, want the system one %q", apptainerCmd, sysBin)
+	}
+}
+
+// A system apptainer below the zstd floor is refused for a non-fakeroot exec
+// too, with the reason.
+func TestResolveBinNonFakerootRefusesOldSystemApptainer(t *testing.T) {
+	withLibexecTier(t)
+	resetApptainerState(t)
+	systemApptainer(t, writeFakeBin(t, t.TempDir(), "apptainer", "apptainer version 1.3.9"))
+
+	err := ResolveBin(false)
+	if err == nil || !strings.Contains(err.Error(), "zstd") {
+		t.Fatalf("ResolveBin(false) error = %v, want it to name zstd", err)
+	}
+}
+
+// An apptainer installed in libexec wins over the system binary.
 func TestResolveBinNonFakerootUsesLibexec(t *testing.T) {
 	dir := withLibexecTier(t)
 	resetApptainerState(t)

@@ -14,6 +14,7 @@ import (
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/build"
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/image"
 	"github.com/Justype/condatainer/internal/runtime/apptainer"
 	"github.com/Justype/condatainer/internal/runtime/container"
 	"github.com/Justype/condatainer/internal/utils"
@@ -728,8 +729,10 @@ func runCreateWithName(ctx context.Context, packages []string) {
 	// --store is asking for a build filed under its own identity, so an installed
 	// artifact of that name is what it expects to find, not a reason to stop.
 	if !createUpdate && !createStore {
-		searchName := strings.ReplaceAll(normalizedName, "/", "--") + ".sqf"
-		if existingPath, err := config.FindImage(searchName); err == nil {
+		// Exact names only: an alias would make a bare name look installed when
+		// only <base>/<name> is.
+		scan, _ := image.ScanOverlays(image.ScanOptions{})
+		if existingPath := image.FirstPaths(scan)[normalizedName]; existingPath != "" {
 			utils.PrintMessage("Overlay %s already exists at %s. Skipping creation.",
 				utils.StyleName(filepath.Base(existingPath)), utils.StylePath(existingPath))
 			return

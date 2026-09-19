@@ -556,8 +556,16 @@ export -f module ml
 	rs := effectiveResourceSpec(specs)
 	gpuRequested := rs.Gpu != nil && rs.Gpu.Count > 0
 
+	// Resolved here, at the real launch, so a submitted job provides nested
+	// running from the node it actually runs on.
+	overlays, bindLibexec, err := nestedRun(ctx, overlays)
+	if err != nil {
+		return err
+	}
+
 	options := execpkg.Options{
 		Overlays:     overlays,
+		BindLibexec:  bindLibexec,
 		Command:      append([]string{"/bin/bash", "-c", executionScript, contentScript}, scriptArgs...),
 		WritableImg:  runWritableImg,
 		EnvSettings:  append(resourceEnvSettings(specs), runEnvSettings...),

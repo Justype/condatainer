@@ -73,6 +73,12 @@ type Config struct {
 	// still exist, so detection fires and the container then fails to start.
 	AutoloadGPU bool
 
+	// NestedRun says whether an apptainer is provided inside a container so
+	// containers can be launched from within one: "auto" (default) uses what
+	// exists and builds nothing, "true" also builds the apptainer overlay when it
+	// is missing and fails if it cannot be provided, "false" turns it off.
+	NestedRun string
+
 	// Notification method when a helper job starts running (default: "web").
 	// Values: "web" (browser notification via dashboard), "terminal" (bell ×2, 1.1 s apart),
 	// "both" (terminal + web), "" or "none" (silent).
@@ -159,6 +165,7 @@ const (
 	DefaultCacheTTLDay         = 7     // remote recipe metadata cache, 1 week
 	DefaultGCGraceDay          = 30    // store gc: age below which an entry is never collectable
 	DefaultNotification        = "web"
+	DefaultNestedRun           = NestedRunAuto
 
 	DefaultSchedulerNcpus = 1    // CPUs for a job with no script directives
 	DefaultSchedulerMemMB = 2048 // memory for a job with no script directives
@@ -217,6 +224,7 @@ func LoadDefaults(executablePath string) {
 		Debug:       false,
 		SubmitJob:   true,
 		AutoloadGPU: true,
+		NestedRun:   DefaultNestedRun,
 		Version:     VERSION,
 
 		ProgramDir: programDir,
@@ -233,9 +241,8 @@ func LoadDefaults(executablePath string) {
 				Time:         DefaultBuildDuration,
 			},
 			AppTmpOverlaySizeMB: DefaultAppTmpOverlaySizeMB,
-			// Every reader is the same binary: libexec's own, always >= 1.4
-			// (verified at provision time) for ordinary exec/run, and a
-			// version-checked system apptainer for fakeroot (apptainer.ResolveBin).
+			// Every reader is >= 1.4: libexec's apptainer (verified at provision
+			// time) or a version-checked system apptainer (apptainer.ResolveBin).
 			// A registry consumer outside condatainer's own exec/run is
 			// responsible for having a compatible apptainer themselves.
 			CompressArgs:    ArgsForCompress("zstd-medium"),
@@ -369,4 +376,25 @@ func GetWritableTmpDir() string {
 	// No writable data dir at all: fall back to the fast root rather than a
 	// relative path, which would put the workspace wherever the caller stood.
 	return utils.GetTmpDir()
+}
+
+// NestedRun values.
+const (
+	NestedRunAuto  = "auto"
+	NestedRunTrue  = "true"
+	NestedRunFalse = "false"
+)
+
+// NestedRunValues lists the accepted values of the nested_run key.
+var NestedRunValues = []string{NestedRunAuto, NestedRunTrue, NestedRunFalse}
+
+// ParseNestedRun normalizes a nested_run value and reports whether it is valid.
+func ParseNestedRun(v string) (string, bool) {
+	v = strings.ToLower(strings.TrimSpace(v))
+	for _, ok := range NestedRunValues {
+		if v == ok {
+			return v, true
+		}
+	}
+	return "", false
 }

@@ -30,6 +30,10 @@ type Options struct {
 	// for a command that explicitly declared a GPU requirement.
 	GpuRequested bool
 
+	// BindLibexec binds the libexec toolchain into the container, so a nested
+	// condatainer reaches the apptainer installed there.
+	BindLibexec bool
+
 	BaseImage string
 
 	// PassThruStdin is retained for callers that track whether stdin is expected.

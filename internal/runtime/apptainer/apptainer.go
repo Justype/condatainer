@@ -69,36 +69,50 @@ func EnsureApptainer() error {
 // ResolveBin configures the Apptainer binary for one exec invocation.
 // Fakeroot — whether an explicit or auto-enabled --fakeroot — always uses the
 // system/module apptainer: only its setuid starter (or a module's) can
-// escalate privilege, and it must support zstd, since every overlay
-// condatainer mounts is unconditionally zstd-compressed. Everything else
-// uses the self-provisioned libexec toolchain exclusively, with no system
-// fallback.
+// escalate privilege. Everything else uses an apptainer installed in the
+// libexec toolchain when there is one, otherwise the system/module apptainer.
+// Either way it must support zstd, since every overlay condatainer mounts is
+// unconditionally zstd-compressed.
 //
 // A .def build's own `apptainer build --fakeroot` does not go through this —
 // it resolves the system binary directly (EnsureApptainer) with no zstd
 // check, because its output is a sandbox: it never mounts a zstd-compressed
 // artifact during the build itself (CLAUDE.md, Recipes: #DEP: is data-only).
 func ResolveBin(fakeroot bool) error {
-	if !fakeroot {
-		path, ok := libexec.ApptainerPath()
-		if !ok {
-			return libexec.NotInstalledError("apptainer")
-		}
+	if fakeroot {
+		return useSystemBin("fakeroot exec")
+	}
+	if path, ok := libexec.ApptainerPath(); ok {
 		return SetBin(path)
 	}
+	if err := useSystemBin("exec"); err != nil {
+		return fmt.Errorf("no usable apptainer: %w; install one with `condatainer update --libexec apptainer`, or load an apptainer module (>= 1.4)", err)
+	}
+	return nil
+}
 
+// CheckSystemBin configures the system/module binary and reports why it cannot
+// be used, or nil when it can.
+func CheckSystemBin() error {
+	return useSystemBin("exec")
+}
+
+// useSystemBin configures the system/module binary, refusing one that cannot
+// mount condatainer's zstd-compressed overlays. what names the caller in the
+// message.
+func useSystemBin(what string) error {
 	if err := SetBin(config.Global.Build.SystemApptainer); err != nil {
 		return err
 	}
 	if IsSingularity() {
-		return fmt.Errorf("fakeroot exec requires apptainer (found singularity), which cannot mount condatainer's zstd-compressed overlays")
+		return fmt.Errorf("%s requires apptainer (found singularity), which cannot mount condatainer's zstd-compressed overlays", what)
 	}
 	version, err := GetVersion()
 	if err != nil {
 		return fmt.Errorf("could not determine the system apptainer's version: %w", err)
 	}
 	if !CheckZstdSupport(version) {
-		return fmt.Errorf("system apptainer %s does not support zstd (>= 1.4 required); a fakeroot exec must mount condatainer's zstd-compressed overlays with this binary — upgrade apptainer or the loaded module", version)
+		return fmt.Errorf("system apptainer %s does not support zstd (>= 1.4 required); a %s must mount condatainer's zstd-compressed overlays with this binary — upgrade apptainer or the loaded module", version, what)
 	}
 	return nil
 }

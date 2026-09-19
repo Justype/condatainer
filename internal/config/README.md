@@ -136,7 +136,6 @@ config.InitViper()                           // load config files
 
 config.GetBaseImage()                        // base image path (search all)
 config.GetWritableImagesDir()                // writable images directory
-config.FindImage("cellranger--9.0.1.sqf")   // search all image paths
 config.FindHelperScript("jupyter")           // search helper script paths
 
 config.GlobalDataPaths.ImagesDirs           // ordered image search paths

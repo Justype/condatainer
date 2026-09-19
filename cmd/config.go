@@ -32,6 +32,7 @@ var configKeyDefs = map[string]bool{
 	"submit_job":                 false,
 	"sources":                    true,
 	"autoload_gpu":               false,
+	"nested_run":                 false,
 	"notification":               false,
 	"metadata_cache_ttl":         false,
 	"store_gc_grace":             false,
@@ -215,6 +216,8 @@ func configValueCompletion(key string) []string {
 		return []string{"true", "false"}
 	case "autoload_gpu":
 		return []string{"true", "false"}
+	case "nested_run":
+		return config.NestedRunValues
 	case "build.ncpus":
 		return []string{"4", "8", "16", "32"}
 	case "build.mem":
@@ -457,6 +460,8 @@ var configShowCmd = &cobra.Command{
 		printOverridden("                      ", "submit_job")
 		fmt.Printf("  %-19s %v%s\n", "autoload_gpu:", config.Global.AutoloadGPU, srcTag("autoload_gpu"))
 		printOverridden("                      ", "autoload_gpu")
+		fmt.Printf("  %-19s %v%s\n", "nested_run:", config.Global.NestedRun, srcTag("nested_run"))
+		printOverridden("                      ", "nested_run")
 		if config.Global.MetadataCacheTTL == 0 {
 			fmt.Printf("  %-19s 0 (disabled)%s\n", "metadata_cache_ttl:", srcTag("metadata_cache_ttl"))
 		} else {
@@ -539,13 +544,13 @@ var configShowCmd = &cobra.Command{
 		printOverridden("             ", "scheduler.timeout")
 		account := config.Global.Scheduler.Account
 		if account == "" {
-			account = utils.StyleInfo("(scheduler default)")
+			account = "(scheduler default)"
 		}
 		fmt.Printf("  %-12s %s%s\n", "account:", account, srcTag("scheduler.account"))
 		printOverridden("             ", "scheduler.account")
 		partition := config.Global.Scheduler.Partition
 		if partition == "" {
-			partition = utils.StyleInfo("(scheduler default)")
+			partition = "(scheduler default)"
 		}
 		fmt.Printf("  %-12s %s%s\n", "partition:", partition, srcTag("scheduler.partition"))
 		printOverridden("             ", "scheduler.partition")
@@ -705,6 +710,15 @@ Time duration format (for build.time):
 			}
 		}
 
+		if key == "nested_run" {
+			normalized, valid := config.ParseNestedRun(value)
+			if !valid {
+				utils.PrintError("Invalid value for nested_run: %q (valid values: auto, true, false)", value)
+				os.Exit(ExitCodeError)
+			}
+			value = normalized
+		}
+
 		if key == "notification" {
 			v := strings.ToLower(value)
 			if v != "" && v != "none" && v != "terminal" && v != "web" && v != "both" {
@@ -820,6 +834,12 @@ Without -l, the layer is chosen from the install layout:
 	Example: `  condatainer config init -l app-root  # write to a specific layer
   condatainer config init -l r         # via shortcut (r = app-root)`,
 	Run: func(cmd *cobra.Command, args []string) {
+		// Before anything is asked or resolved, so a container never gets as far as
+		// an overwrite prompt.
+		if config.IsInsideContainer() {
+			ExitWithError("Cannot initialize config inside a container. Please run this command on the host system.")
+		}
+
 		var configPath string
 		var err error
 		var layerType string
@@ -876,11 +896,6 @@ Without -l, the layer is chosen from the install layout:
 				utils.PrintNote("Cancelled")
 				return
 			}
-		}
-
-		// Warn if inside container
-		if config.IsInsideContainer() {
-			ExitWithError("Cannot initialize config inside a container. Please run this command on the host system.")
 		}
 
 		// lowerLayersFor returns loaded config layers that are lower priority than loc.

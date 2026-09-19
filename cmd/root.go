@@ -13,6 +13,7 @@ import (
 	"github.com/Justype/condatainer/cmd/internal/clilog"
 	"github.com/Justype/condatainer/internal/build"
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/libexec"
 	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/runtime/apptainer"
 	execpkg "github.com/Justype/condatainer/internal/runtime/exec"
@@ -73,11 +74,13 @@ var rootCmd = &cobra.Command{
 		// Step 3: Load config values into Global (with runtime detection fallback)
 		config.LoadFromViper()
 
-		// Warn if apptainer is still not accessible after auto-detection.
-		// Skip for all `config` commands so users can inspect/repair config
-		// without seeing contradictory warnings before re-detection runs.
+		// Warn if apptainer is still not accessible after auto-detection, unless
+		// the toolchain has its own. Skip for all `config` commands so users can
+		// inspect/repair config without seeing contradictory warnings before
+		// re-detection runs.
 		isConfigCommand := strings.HasPrefix(cmd.CommandPath(), "condatainer config")
-		if !isCompleteRequest && !isConfigCommand && !config.ValidateBinary(config.Global.Build.SystemApptainer) {
+		if !isCompleteRequest && !isConfigCommand && !libexec.Installed("apptainer") &&
+			!config.ValidateBinary(config.Global.Build.SystemApptainer) {
 			utils.PrintWarning("Apptainer not accessible. The module may have been unloaded or removed.")
 			utils.PrintHint("Run: %s", utils.StyleAction("condatainer config init"))
 		}

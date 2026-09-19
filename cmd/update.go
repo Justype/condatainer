@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -34,13 +35,14 @@ var updateCmd = &cobra.Command{
 
 With no flags, refreshes both the build and helper script metadata caches.
 
-With --libexec, updates the tools installed in the toolchain, or creates it with
-micromamba when there is none. Name packages after it to install them too:
-apptainer, squashfs-tools, squashfuse.`,
+With --libexec, which must run on the host, checks which of apptainer, squashfs-tools and squashfuse this
+system already has, installs only what is missing (with micromamba when there is
+no toolchain yet), and updates what is installed. Name packages after it to
+install and update just those regardless: apptainer, squashfs-tools, squashfuse.`,
 	Example: `  condatainer update                 # Refresh build + helper metadata (default)
   condatainer update --build         # Build script metadata only
   condatainer update --helper        # Helper script metadata only
-  condatainer update --libexec       # Update the installed toolchain
+  condatainer update --libexec       # Install what the system lacks, update the rest
   condatainer update --libexec apptainer squashfs-tools  # Install and update these`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) > 0 && !updateLibexec {
@@ -59,7 +61,24 @@ func init() {
 	updateCmd.Flags().BoolVar(&updateLibexec, "libexec", false, "Update the self-provisioned toolchain; name packages to install them")
 }
 
+// errLibexecInContainer is why --libexec does nothing inside a container.
+var errLibexecInContainer = errors.New("--libexec must be run on the host, not inside a container")
+
+// libexecHostError refuses --libexec inside a container.
+func libexecHostError(insideContainer bool) error {
+	if insideContainer {
+		return errLibexecInContainer
+	}
+	return nil
+}
+
 func runUpdate(cmd *cobra.Command, args []string) error {
+	if updateLibexec {
+		if err := libexecHostError(config.IsInsideContainer()); err != nil {
+			return err
+		}
+	}
+
 	// Default: both --build and --help-scripts when no content flags given
 	if !updateBuild && !updateHelpScripts && !updateLibexec {
 		updateBuild = true
@@ -93,8 +112,20 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	if updateLibexec {
 		// libexec.Update holds its own lock and refuses internally if the
 		// toolchain is in use; no separate check needed here.
+		update := func() error { return libexec.Update(cmd.Context(), args...) }
+		if len(args) == 0 {
+			// Install what the system lacks, and update what is installed.
+			plan, report, warnings := planToolchain(probeSystem(cmd.Context()))
+			for _, line := range report {
+				utils.PrintMessage("  %s", line)
+			}
+			for _, line := range warnings {
+				utils.PrintWarning("%s", line)
+			}
+			update = func() error { return libexec.Sync(cmd.Context(), plan...) }
+		}
 		utils.PrintMessage("Updating the self-provisioned toolchain...")
-		if err := libexec.Update(cmd.Context(), args...); err != nil {
+		if err := update(); err != nil {
 			return fmt.Errorf("failed to update the toolchain: %w", err)
 		}
 		utils.PrintSuccess("Toolchain updated successfully.")

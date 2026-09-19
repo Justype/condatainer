@@ -57,6 +57,7 @@ func Prepare(ctx context.Context, options Options) (*Plan, error) {
 		Fakeroot:       options.Fakeroot,
 		ApptainerFlags: options.ApptainerFlags,
 		GpuRequested:   options.GpuRequested,
+		BindLibexec:    options.BindLibexec,
 	})
 	if err != nil {
 		return nil, err
@@ -72,7 +73,7 @@ func Prepare(ctx context.Context, options Options) (*Plan, error) {
 
 	// Resolved last, once fakeroot is final: fakeroot (explicit or
 	// auto-enabled) always needs the system apptainer, everything else uses
-	// the self-provisioned libexec toolchain exclusively (see
+	// libexec's apptainer when installed and the system one otherwise (see
 	// apptainer.ResolveBin).
 	if err := apptainer.ResolveBin(fakeroot); err != nil {
 		return nil, err

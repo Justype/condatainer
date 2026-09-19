@@ -95,6 +95,11 @@ func runExec(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	resolvedOverlays, bindLibexec, err := nestedRun(cmd.Context(), resolvedOverlays)
+	if err != nil {
+		return err
+	}
+
 	activation, err := parseActivation(execActivation)
 	if err != nil {
 		return err
@@ -102,6 +107,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 
 	options := exec.Options{
 		Overlays:       resolvedOverlays,
+		BindLibexec:    bindLibexec,
 		Command:        commandFinal,
 		WritableImg:    execFlags.WritableImg,                                          // Default false, unless -w specified
 		EnvSettings:    append(liveJobResourceEnvSettings(), execFlags.EnvSettings...), // Inject live job resources, then user env vars

@@ -141,6 +141,11 @@ func runE(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	resolvedOverlays, bindLibexec, err := nestedRun(cmd.Context(), resolvedOverlays)
+	if err != nil {
+		return err
+	}
+
 	activation, err := parseActivation(eActivation)
 	if err != nil {
 		return err
@@ -149,6 +154,7 @@ func runE(cmd *cobra.Command, args []string) error {
 	// Build options
 	options := exec.Options{
 		Overlays:       resolvedOverlays,
+		BindLibexec:    bindLibexec,
 		Command:        commands,
 		WritableImg:    !eReadOnly,                                            // Default writable unless -r specified
 		EnvSettings:    append(liveJobResourceEnvSettings(), eEnvSettings...), // Inject live job resources, then user env vars

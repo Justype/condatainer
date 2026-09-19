@@ -57,12 +57,12 @@ writable `.img` with root-owned files):
   (assumed zstd-incapable regardless of version) is refused outright, with a
   message naming the requirement — rather than failing later, unrecognizably,
   inside Apptainer's own mount step.
-- **Everything else** — `ResolveBin(false)` — always
-  `internal/libexec.ApptainerPath()`, condatainer's self-provisioned,
-  managed, always-current apptainer. No system fallback: if the toolchain
-  isn't installed, `ResolveBin` refuses and names the fix
-  (`condatainer update --libexec`), rather than silently reaching for
-  whatever `apptainer` happens to be on `PATH`.
+- **Everything else** — `ResolveBin(false)` — `internal/libexec.ApptainerPath()`
+  when an apptainer is installed there, so installing one is the user's way to
+  choose it over the host's. Otherwise the system/module binary, under the same
+  zstd-floor and Singularity checks as fakeroot. When neither works,
+  `ResolveBin` refuses and names both ways out: `condatainer update --libexec
+  apptainer`, or loading an apptainer module.
 
 A `.def` (`os`) build's own `apptainer build --fakeroot` does not go
 through `ResolveBin` at all — `internal/build/def.go` resolves the system

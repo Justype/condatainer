@@ -248,3 +248,26 @@ func writeFakeVersionBin(t *testing.T, bin, name, output string) {
 		t.Fatalf("failed to write stub %s: %v", name, err)
 	}
 }
+
+// unsquashfs prints its version and exits 1; the floor check reads the output.
+func TestCheckFloorIgnoresExitStatus(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "unsquashfs")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\necho 'unsquashfs version 4.6.1 (2023/03/25)'\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckFloor(context.Background(), path, "unsquashfs"); err != nil {
+		t.Errorf("CheckFloor = %v, want nil for 4.6.1", err)
+	}
+	if err := CheckFloor(context.Background(), path, "debugfs"); err != nil {
+		t.Errorf("CheckFloor for a name with no floor = %v, want nil", err)
+	}
+}
+
+func TestSyncRejectsAnUnknownPackage(t *testing.T) {
+	withScratchTier(t)
+	err := Sync(context.Background(), "e2fsprogs")
+	if err == nil || !strings.Contains(err.Error(), "unknown toolchain package") {
+		t.Errorf("Sync(e2fsprogs) error = %v, want an unknown-package error", err)
+	}
+}

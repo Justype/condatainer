@@ -140,6 +140,7 @@ func setDefaults() {
 
 	viper.SetDefault("channels", DefaultChannels())
 	viper.SetDefault("autoload_gpu", true)
+	viper.SetDefault("nested_run", DefaultNestedRun)
 	// "web" = browser notification via dashboard; "terminal" = bell; "both" = terminal + web; "" or "none" = silent
 	viper.SetDefault("notification", DefaultNotification)
 	viper.SetDefault("metadata_cache_ttl", DefaultCacheTTLDay) // days
@@ -1024,6 +1025,15 @@ func LoadFromViper() {
 
 	if autoloadGPU, ok := layerBool("autoload_gpu"); ok {
 		Global.AutoloadGPU = autoloadGPU
+	}
+
+	if v, ok := layerStringSet("nested_run"); ok {
+		if normalized, valid := ParseNestedRun(v); valid {
+			Global.NestedRun = normalized
+		} else {
+			fmt.Fprintf(os.Stderr, "[WARN] Unknown nested_run value %q. Valid values: auto, true, false. Using auto.\n", v)
+			Global.NestedRun = DefaultNestedRun
+		}
 	}
 
 	// Only when set: "" means silent, so an unset key must keep DefaultNotification.

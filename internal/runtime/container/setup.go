@@ -37,6 +37,7 @@ type SetupConfig struct {
 	Fakeroot       bool     // Whether to use fakeroot
 	ApptainerFlags []string // Additional apptainer flags to pass through
 	GpuRequested   bool     // A script explicitly requires a GPU; forces detection past autoload_gpu:false
+	BindLibexec    bool     // Bind the libexec toolchain even with no conda environment mounted
 }
 
 // SetupResult contains all the processed configuration ready for container execution
@@ -136,9 +137,10 @@ func Setup(cfg SetupConfig) (*SetupResult, error) {
 	}
 	// A mounted conda env needs micromamba reachable in-container (mm/env
 	// commands resolve it via toolpath.Resolve, internal/conda/environment.go)
-	// — bound only when one is actually mounted, matching buildEnvironment's
-	// own envMounted-gated CNT_CONDA_ROOT block below.
-	if envMounted {
+	// — bound when one is mounted, matching buildEnvironment's own
+	// envMounted-gated CNT_CONDA_ROOT block below — and nested running binds it
+	// for the apptainer installed there.
+	if envMounted || cfg.BindLibexec {
 		if dir, ok := libexec.Dir(); ok {
 			bindPaths = append(bindPaths, dir)
 		}

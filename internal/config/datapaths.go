@@ -583,25 +583,6 @@ func GetWritableCacheDir() (string, error) {
 // Finders
 // =============================================================================
 
-// FindImage searches all image paths for an image by name.
-// Returns the full path to the image if found.
-func FindImage(name string) (string, error) {
-	baseName := strings.TrimSuffix(name, ".sqf")
-
-	for _, dir := range GetImageSearchPaths() {
-		candidate := filepath.Join(dir, name)
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate, nil
-		}
-		candidate = filepath.Join(dir, baseName+".sqf")
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate, nil
-		}
-	}
-
-	return "", fmt.Errorf("image not found: %s (searched: %v)", name, GetImageSearchPaths())
-}
-
 // FindHelperScript searches all helper script paths for a script by name.
 // Returns the full path to the script if found.
 func FindHelperScript(name string) (string, error) {

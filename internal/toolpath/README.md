@@ -35,7 +35,22 @@ opinion about `PATH`, the FHS fallback, or which source should win — that
 would give a provisioning package an opinion about the host it has no
 business holding. This package is what actually decides "which binary do we
 run": `libexec.Path(name)` first — required, wins even over a same-named
-binary already on `PATH` — then `PATH`, then the FHS fallback directories.
+binary already on `PATH`, and only when the tool is installed there — then
+every `PATH` entry, then the tools bundled with the host apptainer
+(`<LIBEXECDIR>/apptainer/bin`, read from `apptainer buildcfg` once per
+process), then the FHS fallback directories. A host `mksquashfs` or
+`unsquashfs` below the squashfs-tools floor (4.4) is skipped with the reason
+kept for the error, so a good copy later in the order can still win.
+
+Running those host binaries (`apptainer buildcfg`, a tool's version flag) is
+remembered in a per-user file, `toolpath.json` in the personal cache directory,
+so a new process does not repeat it. Each entry records the size and
+modification time of the binary it describes and is ignored when they differ,
+which is why an unloaded module, an upgrade, or another node's different
+binary just misses. Inside a container there is no on-disk cache at all, since the same
+path there can name a different binary than on the host. Config is not used for this: a config file can be a group
+layer read on hosts with different modules. The cache is never needed for
+correctness, and deleting it is harmless.
 Nothing this package provisions (`mksquashfs`, `unsquashfs`, `squashfuse`,
 `apptainer`) is special-cased; a name libexec never provisions (`debugfs`,
 `e2fsck`, `tune2fs`, `mke2fs`, `resize2fs`, `fuse2fs`, all e2fsprogs, host-

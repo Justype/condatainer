@@ -422,3 +422,41 @@ func TestIsRootEligibleAcceptsAForeignSif(t *testing.T) {
 		t.Error("a .sif with no condatainer metadata is not root-eligible")
 	}
 }
+
+// libexec/ is bound for nested running with no conda environment mounted, and
+// only when asked.
+func TestSetupBindsLibexecOnlyForNestedRunning(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "libexec")
+	if err := os.MkdirAll(filepath.Join(dir, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "bin", "micromamba"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	prev := config.GlobalDataPaths
+	config.GlobalDataPaths.LibexecDirs = []string{dir}
+	t.Cleanup(func() { config.GlobalDataPaths = prev })
+	real, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	bound := func(cfg SetupConfig) bool {
+		res, err := Setup(cfg)
+		if err != nil {
+			t.Fatalf("Setup: %v", err)
+		}
+		for _, p := range res.BindPaths {
+			if strings.Contains(p, real) {
+				return true
+			}
+		}
+		return false
+	}
+	if bound(SetupConfig{}) {
+		t.Error("libexec bound with no environment and no nested running")
+	}
+	if !bound(SetupConfig{BindLibexec: true}) {
+		t.Error("libexec not bound for nested running")
+	}
+}

@@ -127,6 +127,19 @@ func resolveTools(names []string) ([]pkg, error) {
 // micromamba on a tier with none; naming tools also installs any that are
 // missing. A prefix without conda-meta/ is recreated.
 func Update(ctx context.Context, tools ...string) error {
+	return run(ctx, tools, false)
+}
+
+// Sync completes the toolchain: it creates the prefix if there is none, and
+// otherwise installs any package in install that is missing and updates every
+// installed package.
+func Sync(ctx context.Context, install ...string) error {
+	return run(ctx, install, true)
+}
+
+// run is Update and Sync: updateAll updates everything installed rather than
+// only the named packages.
+func run(ctx context.Context, tools []string, updateAll bool) error {
 	requested, err := resolveTools(tools)
 	if err != nil {
 		return err
@@ -173,7 +186,7 @@ func Update(ctx context.Context, tools ...string) error {
 
 	inPlace := hadLive && utils.DirExists(filepath.Join(target, "conda-meta"))
 	if inPlace {
-		return updateInPlace(ctx, target, requested)
+		return updateInPlace(ctx, target, requested, updateAll)
 	}
 
 	// A prefix with no conda-meta/, or a half-built one, cannot be updated by
@@ -252,9 +265,9 @@ func createPrefix(ctx context.Context, target string, want []pkg) error {
 }
 
 // updateInPlace installs any requested package the prefix lacks, then updates
-// the requested packages, or everything installed when none were named, using
-// the prefix's own micromamba.
-func updateInPlace(ctx context.Context, target string, requested []pkg) error {
+// everything installed when updateAll or none were named, otherwise only the
+// requested packages, using the prefix's own micromamba.
+func updateInPlace(ctx context.Context, target string, requested []pkg, updateAll bool) error {
 	mmBin := filepath.Join(target, "bin", "micromamba")
 	if !utils.FileExists(mmBin) {
 		return fmt.Errorf("%s is missing; remove %s and run `condatainer update --libexec`", mmBin, target)
@@ -274,7 +287,7 @@ func updateInPlace(ctx context.Context, target string, requested []pkg) error {
 	}
 
 	args := []string{"update", "-y", "-p", target, "-c", "conda-forge"}
-	if len(requested) == 0 {
+	if updateAll || len(requested) == 0 {
 		args = append(args, "-a")
 	} else {
 		args = append(args, packageNames(requested)...)
@@ -407,17 +420,32 @@ func verifyToolchain(ctx context.Context, prefix string) error {
 // verifyFloor reads name's own version from prefix and checks it against
 // floorMajor.floorMinor, naming what that floor buys in a failure.
 func verifyFloor(ctx context.Context, prefix, name string, floorMajor, floorMinor int, need string) error {
-	out, err := commandContext(ctx, filepath.Join(prefix, "bin", name), versionFlag(name)).Output()
-	if err != nil {
-		return fmt.Errorf("could not read %s's version: %w", name, err)
+	return checkFloorAt(ctx, filepath.Join(prefix, "bin", name), name, floorMajor, floorMinor, need)
+}
+
+// CheckFloor checks the binary at path against the minimum version of the
+// package that provides name, for a binary found outside this toolchain. A name
+// with no floor passes.
+func CheckFloor(ctx context.Context, path, name string) error {
+	p, ok := packageFor(name)
+	if !ok || p.floorMajor == 0 {
+		return nil
 	}
+	return checkFloorAt(ctx, path, name, p.floorMajor, p.floorMinor, p.floorNeed)
+}
+
+func checkFloorAt(ctx context.Context, path, name string, floorMajor, floorMinor int, need string) error {
+	// Exit status is ignored: unsquashfs prints its version and exits 1.
+	out, runErr := commandContext(ctx, path, versionFlag(name)).CombinedOutput()
 	version := parseVersion(string(out))
 	if version == "" {
+		if runErr != nil {
+			return fmt.Errorf("could not read %s's version: %w", name, runErr)
+		}
 		return fmt.Errorf("could not parse %s's version from %q", name, strings.TrimSpace(string(out)))
 	}
 	if !meetsFloor(version, floorMajor, floorMinor) {
-		return fmt.Errorf("provisioned %s %s is below the required %d.%d (%s)",
-			name, version, floorMajor, floorMinor, need)
+		return fmt.Errorf("%s %s is below the required %d.%d (%s)", name, version, floorMajor, floorMinor, need)
 	}
 	return nil
 }
