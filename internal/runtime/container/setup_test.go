@@ -70,6 +70,19 @@ func TestBuildEnvironmentSqfOnlyEnvMountIsNeverWritable(t *testing.T) {
 	}
 }
 
+func TestNestedRootEnv(t *testing.T) {
+	tests := []struct{ name, inherited, root, want string }{
+		{"detected root is handed over", "", "/opt/cnt", "CNT_ROOT=/opt/cnt"},
+		{"an existing CNT_ROOT is left alone", "/x", "/x", ""},
+		{"no root, nothing to set", "", "", ""},
+	}
+	for _, tt := range tests {
+		if got := nestedRootEnv(tt.inherited, tt.root); got != tt.want {
+			t.Errorf("%s: got %q, want %q", tt.name, got, tt.want)
+		}
+	}
+}
+
 // prefixes answers with a fixed prefix per path, standing in for the runtime
 // metadata a real overlay carries.
 func prefixes(byPath map[string]string) func(string) string {

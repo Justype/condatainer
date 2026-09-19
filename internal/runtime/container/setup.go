@@ -259,6 +259,10 @@ func buildEnvironment(overlays []string, lastImg string, envMounted bool, cfg Se
 		)
 	}
 
+	if v := nestedRootEnv(os.Getenv("CNT_ROOT"), config.GetRootDir()); v != "" {
+		envList = append(envList, v)
+	}
+
 	// Prepare environment notes for display
 	envNotes := make(map[string]string)
 	for key, value := range configs {
@@ -278,6 +282,16 @@ func buildEnvironment(overlays []string, lastImg string, envMounted bool, cfg Se
 	}
 
 	return envList, envNotes, diagnostics
+}
+
+// nestedRootEnv is the CNT_ROOT setting for the container, or "" when none is
+// needed: the bound executable cannot detect the root from its own path, so a
+// root found that way is handed over unless CNT_ROOT is already set.
+func nestedRootEnv(inherited, root string) string {
+	if inherited != "" || root == "" {
+		return ""
+	}
+	return "CNT_ROOT=" + root
 }
 
 // AutoEnableFakeroot checks if fakeroot should be auto-enabled for writable .img overlays

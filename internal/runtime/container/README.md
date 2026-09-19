@@ -341,7 +341,7 @@ need a JSON parser with no guaranteed one in the base image, for a source
 | `$TMPDIR` | When env var is set and the path exists |
 | Scheduler node-local tmp | When inside a job exposing one (e.g. `SLURM_TMPDIR`) |
 | Base data directories | From config; added `:ro` if not writable |
-| `condatainer` executable | For nested calls (always; bound to `/usr/bin/condatainer`) |
+| `condatainer` executable | For nested calls (always; bound to `/.cnt_bin/condatainer`) |
 
 After collection, `DeduplicateBindPaths()` removes conflicting bind paths:
 - Keeps longest/most specific paths
