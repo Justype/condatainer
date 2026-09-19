@@ -2,7 +2,13 @@ package registry
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
+	"sort"
 	"strings"
 
 	"oras.land/oras-go/v2/registry/remote"
@@ -57,4 +63,57 @@ func Logout(ctx context.Context, registry string) error {
 		return fmt.Errorf("logout from %s failed: %w", registry, err)
 	}
 	return nil
+}
+
+// StoredCredential is one host with a saved credential. The secret is never
+// read into it.
+type StoredCredential struct {
+	Host     string
+	Username string // empty when a helper holds the credential or it is a bare token
+	Helper   string // credential helper serving this host, empty for the config file
+}
+
+// StoredCredentials lists the hosts the Docker/OCI credential store has
+// credentials for, sorted by host. A host held only by a global credsStore
+// helper is not listed: the helper cannot be asked which hosts it knows.
+func StoredCredentials(ctx context.Context) ([]StoredCredential, error) {
+	store, err := credentials.NewStoreFromDocker(credentials.StoreOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("cannot open registry credential store: %w", err)
+	}
+	data, err := os.ReadFile(store.ConfigPath())
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("cannot read %s: %w", store.ConfigPath(), err)
+	}
+	var cfg struct {
+		Auths map[string]struct {
+			Auth     string `json:"auth"`
+			Username string `json:"username"`
+		} `json:"auths"`
+		CredHelpers map[string]string `json:"credHelpers"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("cannot parse %s: %w", store.ConfigPath(), err)
+	}
+
+	byHost := map[string]StoredCredential{}
+	for host, entry := range cfg.Auths {
+		user := entry.Username
+		if raw, err := base64.StdEncoding.DecodeString(entry.Auth); err == nil && user == "" {
+			user, _, _ = strings.Cut(string(raw), ":")
+		}
+		byHost[host] = StoredCredential{Host: host, Username: user}
+	}
+	for host, helper := range cfg.CredHelpers {
+		byHost[host] = StoredCredential{Host: host, Helper: helper}
+	}
+	out := make([]StoredCredential, 0, len(byHost))
+	for _, c := range byHost {
+		out = append(out, c)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Host < out[j].Host })
+	return out, nil
 }

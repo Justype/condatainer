@@ -238,47 +238,6 @@ func TestUpstreamRefusesAnAmbiguousCollection(t *testing.T) {
 	}
 }
 
-// A public endpoint never carries an app, so the walk must not spend a round
-// trip asking — the same skip build.tryPrebuilt makes.
-func TestUpstreamSkipsAnAppOnAPublicEndpoint(t *testing.T) {
-	root := projectRoot(t)
-	var asked bool
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		asked = true
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	t.Cleanup(server.Close)
-
-	manifest := meta.Manifest{
-		SchemaVersion: meta.SchemaVersion,
-		Name:          "star/2.7.11b",
-		Type:          catalog.TypeApp,
-		BuildType:     "script",
-		Platform:      meta.Platform{OS: "linux", Arch: "amd64"},
-		Source:        meta.Source{Files: []string{meta.RecipeFileName}},
-		Build:         meta.Build{Source: collectionRepo},
-	}
-	derived, err := key.Generate(manifest, key.Sources{meta.RecipeFileName: []byte("echo star\n")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	manifest.Keys = derived.Keys()
-	body, _ := json.MarshalIndent(manifest, "", "  ")
-	artifact, err := lock.StageEntry(root, capsule.EntryName(manifest.Name, manifest.Keys.Identity.Digest()),
-		map[string][]byte{meta.FileName: body, meta.RecipeFileName: []byte("echo star\n")})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	endpoint := strings.TrimPrefix(server.URL, "http://")
-	if got := Upstream(context.Background(), root, []string{artifact}, collection(t, endpoint)); len(got) != 0 {
-		t.Errorf("recorded %#v for an app at a public endpoint", got)
-	}
-	if asked {
-		t.Error("the walk contacted a public endpoint for an app")
-	}
-}
-
 // vendorEnv writes a frozen environment, whose entry is a manifest alone: a
 // snapshot names no sources, and its keys are the tree hash of the payload the
 // pack produced rather than anything regenerable from a checkout.

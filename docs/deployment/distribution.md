@@ -180,10 +180,9 @@ declare for it. Publish to an endpoint you have declared `internal`.
 
 Both commands read the same sources, in order:
 
-1. `CNT_REGISTRY_TOKEN`, with optional `CNT_REGISTRY_USER`
-2. `GITHUB_TOKEN`, for `ghcr.io`
-3. the Docker/OCI credential store
-4. anonymous
+1. `GITHUB_TOKEN`, for `ghcr.io`
+2. the Docker/OCI credential store, in `~/.docker`, or in `$DOCKER_CONFIG` when set
+3. anonymous
 
 ```bash
 printf '%s\n' "$TOKEN" | condatainer registry login ghcr.io \

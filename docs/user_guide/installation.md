@@ -73,11 +73,13 @@ Compression is chosen automatically based on the runtime:
 
 ## Shell Completion
 
-CondaTainer supports shell completion for **Bash** and **Zsh**. The installation script will automatically add the necessary lines to your shell configuration file:
+CondaTainer supports shell completion for **Bash**, **Zsh** and **Fish**. The installation script adds the following to your `~/.bashrc`:
 
 ```bash
-source <(condatainer completion)
+source <(condatainer completion bash)
 ```
+
+For Zsh or Fish, see [`condatainer completion`](../manuals/condatainer.md#completion).
 
 ## Next Steps
 

@@ -32,20 +32,6 @@ func prebuiltObject(t *testing.T, recipe []byte, endpoints ...string) *BuildObje
 	return b
 }
 
-func TestTryPrebuiltSkipsPublicApp(t *testing.T) {
-	b := prebuiltObject(t, []byte("echo demo\n"), "registry.invalid/lab")
-	b.catalogSource.Desc.OCI.Audience = "public"
-	oldResolve := resolvePrebuilt
-	t.Cleanup(func() { resolvePrebuilt = oldResolve })
-	resolvePrebuilt = func(context.Context, string, string, string) (ocispec.Descriptor, map[string]string, error) {
-		t.Fatal("public app contacted registry")
-		return ocispec.Descriptor{}, nil, nil
-	}
-	if pulled, err := b.tryPrebuilt(t.Context()); err != nil || pulled {
-		t.Fatalf("result=%v error=%v", pulled, err)
-	}
-}
-
 func TestTryPrebuiltUsesOrderedEndpointAndEquivalence(t *testing.T) {
 	b := prebuiltObject(t, []byte("echo demo\n"), "mirror.invalid/lab", "origin.invalid/lab")
 	want, err := b.prebuiltEquivalence(t.Context())

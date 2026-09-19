@@ -12,11 +12,8 @@ import (
 	"oras.land/oras-go/v2/registry/remote/retry"
 )
 
-// Environment credentials, for a host with no usable Docker credential store.
+// Environment credential, for a host with no usable Docker credential store.
 const (
-	// EnvToken and EnvUser are checked for every host.
-	EnvToken = "CNT_REGISTRY_TOKEN"
-	EnvUser  = "CNT_REGISTRY_USER"
 	// EnvGitHubToken is GitHub's own name and applies to ghcr.io alone. It is not
 	// ours to rename, and it is already set in every GitHub Actions job.
 	EnvGitHubToken = "GITHUB_TOKEN"
@@ -28,12 +25,9 @@ const (
 	defaultTokenUser = "x-access-token"
 )
 
-// credentialFunc resolves credentials per registry host, in order: an explicit
-// environment token, the Docker/OCI credential store, then anonymous.
-//
-// The environment path exists for compute nodes, where there is no interactive
-// login and $HOME may not be the one holding ~/.docker/config.json. Anonymous is
-// the normal case for public artifacts, so a missing store is not an error.
+// credentialFunc resolves credentials per registry host, in order: GITHUB_TOKEN
+// for ghcr.io, the Docker/OCI credential store, then anonymous. Anonymous is the
+// normal case for public artifacts, so a missing store is not an error.
 func credentialFunc() auth.CredentialFunc {
 	store, storeErr := credentials.NewStoreFromDocker(credentials.StoreOptions{})
 	return func(ctx context.Context, host string) (auth.Credential, error) {
@@ -67,22 +61,17 @@ func HasCredential(ctx context.Context, ref string) bool {
 	return cred != auth.EmptyCredential
 }
 
-// envCredential builds a credential from the environment for host, reporting
-// false when nothing applies. EnvToken wins for any host; EnvGitHubToken is
-// consulted only for ghcr.io, so a job's GitHub token is never sent elsewhere.
+// envCredential builds a credential from GITHUB_TOKEN for ghcr.io, reporting
+// false for any other host so a job's token is never sent elsewhere.
 func envCredential(host string) (auth.Credential, bool) {
-	token := strings.TrimSpace(os.Getenv(EnvToken))
-	if token == "" && strings.EqualFold(host, ghcrHost) {
-		token = strings.TrimSpace(os.Getenv(EnvGitHubToken))
+	if !strings.EqualFold(host, ghcrHost) {
+		return auth.Credential{}, false
 	}
+	token := strings.TrimSpace(os.Getenv(EnvGitHubToken))
 	if token == "" {
 		return auth.Credential{}, false
 	}
-	user := strings.TrimSpace(os.Getenv(EnvUser))
-	if user == "" {
-		user = defaultTokenUser
-	}
-	return auth.Credential{Username: user, Password: token}, true
+	return auth.Credential{Username: defaultTokenUser, Password: token}, true
 }
 
 // newAuthClient is the client every registry operation uses: retrying transport,

@@ -69,11 +69,6 @@ func upstreamOf(ctx context.Context, entry *lock.Entry, cat catalog.Catalog) (lo
 	}
 	log := logging.FromContext(ctx)
 	for _, endpoint := range source.Desc.OCI.Pull {
-		// A public endpoint never carries an app, so asking is a round trip that
-		// can only answer no. The same skip build.tryPrebuilt makes.
-		if source.Desc.OCI.Audience == string(registry.Public) && entry.Manifest.Type == catalog.TypeApp {
-			continue
-		}
 		desc, annotations, err := registry.ResolveArtifact(ctx, endpoint, repo, tag)
 		if err != nil {
 			log.Debug("endpoint did not answer for this artifact", "endpoint", endpoint, "name", entry.Manifest.Name, "err", err)

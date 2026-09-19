@@ -1960,6 +1960,9 @@ too, because they do not start from a local artifact.
 printf '%s\n' "$TOKEN" | condatainer registry login ghcr.io \
   --username "$USER" --password-stdin
 
+# Show which registries have stored credentials (never the secrets)
+condatainer registry list
+
 # Publish by installed name, inferring the selected source's oci.push endpoint.
 condatainer registry push grch38/genome/gencode49
 
@@ -1992,9 +1995,8 @@ version selection and may build when no published artifact exists. Pull never
 falls back to a build. Placement precedence is `--prefix`, `--name`, the exact
 address when it contains a complete name, then the published OCI title.
 
-Authentication precedence is `CNT_REGISTRY_TOKEN` plus optional
-`CNT_REGISTRY_USER`, `GITHUB_TOKEN` for `ghcr.io`, the Docker credential store,
-then anonymous access. Versioned tags are immutable unless `push --force` is
+Authentication precedence is `GITHUB_TOKEN` for `ghcr.io`, the Docker credential
+store (`$DOCKER_CONFIG` when set, else `~/.docker`), then anonymous access. Versioned tags are immutable unless `push --force` is
 used; version-less OS artifacts publish a `YYYYMMDD` tag and `latest`.
 
 ### Large pushes

@@ -339,17 +339,17 @@ artifact being pushed, rather than guessed.
 
 Credential precedence is:
 
-1. `CNT_REGISTRY_TOKEN` and optional `CNT_REGISTRY_USER` for any host;
-2. `GITHUB_TOKEN` for `ghcr.io` only;
-3. Docker/OCI credential store, including configured credential helpers;
-4. anonymous access.
+1. `GITHUB_TOKEN` for `ghcr.io` only;
+2. Docker/OCI credential store, including configured credential helpers;
+3. anonymous access.
 
-`Login` and `Logout` manage the same store. Tokens are never logged.
+`Login` and `Logout` manage the same store, and `StoredCredentials` lists its
+hosts. Tokens are never logged or listed.
 
 ## Callers
 
 The publisher/admin surface is `condatainer registry push|pull|tags|resolve|
-login|logout`, in [`cmd/registry.go`](../../cmd/registry.go). Choosing an
+login|logout|list`, in [`cmd/registry.go`](../../cmd/registry.go). Choosing an
 endpoint from flags, config, or an artifact's recorded `build.source` happens
 there and never here: this package is told where to go. See the
 [manual](../../docs/manuals/condatainer.md) for that surface.

@@ -51,7 +51,7 @@ func TestRegistryCommandHasThePlannedSurface(t *testing.T) {
 	cmd := newRegistryCommand()
 	want := map[string]bool{
 		"push": false, "pull": false, "tags": false,
-		"resolve": false, "login": false, "logout": false,
+		"resolve": false, "login": false, "logout": false, "list": false,
 	}
 	for _, child := range cmd.Commands() {
 		if _, ok := want[child.Name()]; ok {

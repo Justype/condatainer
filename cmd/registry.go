@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"text/tabwriter"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/spf13/cobra"
@@ -42,8 +43,9 @@ func newRegistryCommand() *cobra.Command {
 		Long: `Publish and fetch read-only .sqf artifacts, overlays and bases alike, through an OCI
 registry such as ghcr.io.
 
-Credentials are taken from CNT_REGISTRY_TOKEN and CNT_REGISTRY_USER first, then
-from the Docker credential store, and anonymous access last.`,
+Credentials are taken from GITHUB_TOKEN for ghcr.io first, then from the Docker
+credential store (set DOCKER_CONFIG to use another directory), and anonymous
+access last.`,
 	}
 
 	push := &cobra.Command{
@@ -190,7 +192,7 @@ terminal.`,
 		Use:   "logout <registry-host>",
 		Short: "Remove stored registry credentials",
 		Long: `Removes the saved credentials for one registry host. Credentials given
-through CNT_REGISTRY_TOKEN and CNT_REGISTRY_USER are unaffected.`,
+through GITHUB_TOKEN are unaffected.`,
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -202,7 +204,43 @@ through CNT_REGISTRY_TOKEN and CNT_REGISTRY_USER are unaffected.`,
 		},
 	}
 
-	cmd.AddCommand(push, pull, tags, resolve, login, logout)
+	list := &cobra.Command{
+		Use:   "list",
+		Short: "List registries with stored credentials",
+		Long: `Lists the registry hosts that have saved credentials, with the username where
+one is recorded. Passwords and tokens are never shown.
+
+GITHUB_TOKEN, when set, is used for ghcr.io ahead of these.`,
+		Args:         cobra.NoArgs,
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			stored, err := registry.StoredCredentials(cmd.Context())
+			if err != nil {
+				return err
+			}
+			out := cmd.OutOrStdout()
+			if len(stored) == 0 {
+				fmt.Fprintln(out, "No stored registry credentials.")
+			} else {
+				tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+				fmt.Fprintln(tw, "HOST\tUSER\tSTORE")
+				for _, c := range stored {
+					store := "config"
+					if c.Helper != "" {
+						store = "helper: " + c.Helper
+					}
+					fmt.Fprintf(tw, "%s\t%s\t%s\n", c.Host, c.Username, store)
+				}
+				tw.Flush()
+			}
+			if os.Getenv(registry.EnvGitHubToken) != "" {
+				fmt.Fprintf(out, "%s is set and applies to ghcr.io.\n", registry.EnvGitHubToken)
+			}
+			return nil
+		},
+	}
+
+	cmd.AddCommand(push, pull, tags, resolve, login, logout, list)
 	return cmd
 }
 

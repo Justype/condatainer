@@ -27,9 +27,6 @@ func (b *BuildObject) tryPrebuilt(ctx context.Context) (prebuiltResult, error) {
 	if b.catalogSource == nil || b.catalogSource.DescriptorErr != nil || len(b.catalogSource.Desc.OCI.Pull) == 0 {
 		return false, nil
 	}
-	if b.catalogSource.Desc.OCI.Audience == "public" && b.spec.Image.Type == "app" {
-		return false, nil
-	}
 
 	want, err := b.prebuiltEquivalence(ctx)
 	if err != nil {
@@ -46,10 +43,8 @@ func (b *BuildObject) tryPrebuilt(ctx context.Context) (prebuiltResult, error) {
 		desc, annotations, err := resolvePrebuilt(ctx, endpoint, repo, tag)
 		if err != nil {
 			switch {
-			case errors.Is(err, registry.ErrNotFound), errors.Is(err, registry.ErrUnsupportedPlatform):
-				continue
-			case closedDoor(ctx, err, endpoint):
-				lastFallback = err
+			case errors.Is(err, registry.ErrNotFound), errors.Is(err, registry.ErrUnsupportedPlatform),
+				closedDoor(ctx, err, endpoint):
 				continue
 			case errors.Is(err, registry.ErrUnavailable):
 				lastFallback = err
@@ -74,10 +69,8 @@ func (b *BuildObject) tryPrebuilt(ctx context.Context) (prebuiltResult, error) {
 		if err := pullPrebuilt(ctx, endpoint, repo, desc, annotations, b.tgt.Path,
 			registry.KindFor(b.spec.Image.Type)); err != nil {
 			switch {
-			case errors.Is(err, registry.ErrNotFound), errors.Is(err, registry.ErrUnsupportedPlatform):
-				continue
-			case closedDoor(ctx, err, endpoint):
-				lastFallback = err
+			case errors.Is(err, registry.ErrNotFound), errors.Is(err, registry.ErrUnsupportedPlatform),
+				closedDoor(ctx, err, endpoint):
 				continue
 			case errors.Is(err, registry.ErrUnavailable):
 				lastFallback = err
@@ -91,8 +84,10 @@ func (b *BuildObject) tryPrebuilt(ctx context.Context) (prebuiltResult, error) {
 		return true, nil
 	}
 	if lastFallback != nil {
-		log.Warn("no endpoint could serve this artifact; building the selected recipe locally",
-			"name", b.spec.Image.Name, "err", lastFallback)
+		log.Debug("prebuilt unavailable", "name", b.spec.Image.Name, "err", lastFallback)
+		log.Warn(fmt.Sprintf("Cannot fetch prebuilt %s, building from the recipe", b.spec.Image.Name))
+	} else {
+		log.Info(fmt.Sprintf("No prebuilt %s available, building from the recipe", b.spec.Image.Name))
 	}
 	return false, nil
 }
