@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -57,7 +58,7 @@ func RunDaemon(sshDest string, port int, localOnly bool, reportFd int) error {
 		reportPipe = nil
 	}
 
-	dial, tunnelStop, tunnelDone, method, err := tryEstablishTunnel(sshDest, sockPath)
+	dial, tunnelStop, tunnelDone, method, err := EstablishTunnel(sshDest, sockPath)
 	if err != nil {
 		report(fmt.Sprintf("no working tunnel to %s: %v", sshDest, err))
 		return fmt.Errorf("no working tunnel to %s: %w", sshDest, err)
@@ -98,29 +99,64 @@ func RunDaemon(sshDest string, port int, localOnly bool, reportFd int) error {
 	return RunProxy(ctx, fmt.Sprintf("%s:%d", bind, port), dial)
 }
 
-// waitUnixSock polls until the Unix socket at path is connectable or timeout elapses.
-func waitUnixSock(path string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		conn, err := net.DialTimeout("unix", path, 200*time.Millisecond)
-		if err == nil {
-			conn.Close()
-			return nil
-		}
-		time.Sleep(100 * time.Millisecond)
+// tunnelStartTimeout is how long a system ssh -D gets to open its listener.
+const tunnelStartTimeout = 10 * time.Second
+
+// startSocksSSH runs `ssh -D listen <sshArgs>` and waits for the listener at
+// (network, addr). It gives up as soon as ssh exits, naming what ssh printed,
+// rather than waiting out the timeout. cleanup runs on stop and on failure.
+func startSocksSSH(listen, network, addr string, sshArgs []string, cleanup func()) (DialFunc, func(), <-chan struct{}, error) {
+	var stderr bytes.Buffer
+	cmd := exec.Command("ssh", append([]string{"-D", listen}, sshArgs...)...)
+	// Pdeathsig: if the daemon itself dies (crash, OOM-kill) before stop()
+	// runs, the kernel kills this ssh process directly instead of leaving
+	// it holding the tunnel open. ssh never escalates privilege, so
+	// unlike freeze.MountedRun's namespaced mount this needs no sentinel.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		return nil, nil, nil, err
 	}
-	return fmt.Errorf("timed out waiting for %s", path)
+	exited := make(chan struct{})
+	go func() { cmd.Wait(); close(exited) }() //nolint:errcheck
+
+	var once sync.Once
+	stop := func() {
+		once.Do(func() {
+			cmd.Process.Kill() //nolint:errcheck
+			cleanup()
+		})
+	}
+
+	deadline := time.Now().Add(tunnelStartTimeout)
+	for {
+		if c, err := net.DialTimeout(network, addr, 200*time.Millisecond); err == nil {
+			c.Close()
+			return dialViaSocks5(network, addr), stop, exited, nil
+		}
+		if time.Now().After(deadline) {
+			stop()
+			return nil, nil, nil, fmt.Errorf("listener did not open within %s", tunnelStartTimeout)
+		}
+		select {
+		case <-exited:
+			stop()
+			return nil, nil, nil, fmt.Errorf("ssh exited: %s", strings.TrimSpace(stderr.String()))
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
 }
 
-// tryEstablishTunnel attempts three methods to create a tunnel through sshDest,
+// EstablishTunnel attempts three methods to create a tunnel through sshDest,
 // returning a DialFunc, a cleanup stop(), a done channel (closed when the tunnel
-// exits unexpectedly), and a label for logging.
+// exits unexpectedly), and a label for logging. sockPath is where the
+// `ssh -D` Unix socket is created, so concurrent tunnels need distinct paths.
 //
 // Priority:
 //  1. Go SSH library with non-interactive auth (hostbased or publickey)
 //  2. System ssh -D Unix socket (current approach, needs SSH keys)
 //  3. System ssh -D TCP port (127.0.0.1, fallback for older OpenSSH)
-func tryEstablishTunnel(sshDest, sockPath string) (DialFunc, func(), <-chan struct{}, string, error) {
+func EstablishTunnel(sshDest, sockPath string) (DialFunc, func(), <-chan struct{}, string, error) {
 	var errs []string
 
 	// Option 1: Go SSH with non-interactive auth
@@ -143,37 +179,13 @@ func tryEstablishTunnel(sshDest, sockPath string) (DialFunc, func(), <-chan stru
 
 	// Option 2: system ssh -D Unix socket
 	slog.Default().Debug("proxy tunnel: trying ssh/unix-sock", "dest", sshDest, "sock", sockPath)
-	os.Remove(sockPath) //nolint:errcheck
-	if cmd := exec.Command("ssh", append([]string{"-D", sockPath}, sshArgs...)...); func() bool {
-		// Pdeathsig: if the daemon itself dies (crash, OOM-kill) before stop()
-		// runs, the kernel kills this ssh process directly instead of leaving
-		// it holding the tunnel open. ssh never escalates privilege, so
-		// unlike freeze.MountedRun's namespaced mount this needs no sentinel.
-		cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
-		if err := cmd.Start(); err != nil {
-			slog.Default().Debug("proxy tunnel: ssh/unix-sock start failed", "err", err)
-			errs = append(errs, "ssh/unix-sock start: "+err.Error())
-			return false
-		}
-		if err := waitUnixSock(sockPath, 10*time.Second); err != nil {
-			slog.Default().Debug("proxy tunnel: ssh/unix-sock socket never appeared", "err", err)
-			cmd.Process.Kill() //nolint:errcheck
-			errs = append(errs, "ssh/unix-sock: "+err.Error())
-			return false
-		}
-		return true
-	}() {
-		done := make(chan struct{})
-		go func() { cmd.Wait(); close(done) }() //nolint:errcheck
-		var once sync.Once
-		stop := func() {
-			once.Do(func() {
-				cmd.Process.Kill()  //nolint:errcheck
-				os.Remove(sockPath) //nolint:errcheck
-			})
-		}
-		return dialViaSocks5("unix", sockPath), stop, done, "ssh/unix-sock", nil
+	os.Remove(sockPath)                                                                                         //nolint:errcheck
+	dial, stop, done, err := startSocksSSH(sockPath, "unix", sockPath, sshArgs, func() { os.Remove(sockPath) }) //nolint:errcheck
+	if err == nil {
+		return dial, stop, done, "ssh/unix-sock", nil
 	}
+	slog.Default().Debug("proxy tunnel: ssh/unix-sock failed", "err", err)
+	errs = append(errs, "ssh/unix-sock: "+err.Error())
 
 	// Option 3: system ssh -D TCP port (127.0.0.1)
 	slog.Default().Debug("proxy tunnel: trying ssh/tcp", "dest", sshDest)
@@ -183,31 +195,13 @@ func tryEstablishTunnel(sshDest, sockPath string) (DialFunc, func(), <-chan stru
 		return nil, nil, nil, "", fmt.Errorf("all tunnel methods failed: %s", strings.Join(errs, "; "))
 	}
 	innerAddr := fmt.Sprintf("127.0.0.1:%d", innerPort)
-	cmd := exec.Command("ssh", append([]string{"-D", innerAddr}, sshArgs...)...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL} // see the unix-sock tunnel above
-	if err := cmd.Start(); err != nil {
-		slog.Default().Debug("proxy tunnel: ssh/tcp start failed", "err", err)
-		errs = append(errs, "ssh/tcp start: "+err.Error())
+	dial, stop, done, err = startSocksSSH(innerAddr, "tcp", innerAddr, sshArgs, func() {})
+	if err != nil {
+		slog.Default().Debug("proxy tunnel: ssh/tcp failed", "err", err)
+		errs = append(errs, "ssh/tcp: "+err.Error())
 		return nil, nil, nil, "", fmt.Errorf("all tunnel methods failed: %s", strings.Join(errs, "; "))
 	}
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		if c, err := net.DialTimeout("tcp", innerAddr, 200*time.Millisecond); err == nil {
-			c.Close()
-			done := make(chan struct{})
-			go func() { cmd.Wait(); close(done) }() //nolint:errcheck
-			var once sync.Once
-			stop := func() {
-				once.Do(func() { cmd.Process.Kill() }) //nolint:errcheck
-			}
-			return dialViaSocks5("tcp", innerAddr), stop, done, "ssh/tcp", nil
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	cmd.Process.Kill() //nolint:errcheck
-	slog.Default().Debug("proxy tunnel: ssh/tcp port never opened", "addr", innerAddr)
-	errs = append(errs, "ssh/tcp: port did not open in time")
-	return nil, nil, nil, "", fmt.Errorf("all tunnel methods failed: %s", strings.Join(errs, "; "))
+	return dial, stop, done, "ssh/tcp", nil
 }
 
 // dialViaSocks5 returns a DialFunc that reaches targets through a SOCKS5 proxy.

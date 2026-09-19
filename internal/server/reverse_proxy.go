@@ -10,10 +10,12 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
 	internalproxy "github.com/Justype/condatainer/internal/runtime/proxy"
+	"github.com/Justype/condatainer/internal/utils"
 )
 
 // origHostKey is the context key for passing the original frontend Host header
@@ -70,6 +72,7 @@ type proxyEntry struct {
 	name string // helper script name (e.g. "code-server")
 	node string
 	port int
+	stop func() // closes the SSH tunnel; nil for a direct TCP entry
 }
 
 // proxyRegistry caches one reverse-proxy per helper ID.
@@ -103,7 +106,7 @@ func isLocalHost(node string) bool {
 }
 
 // Open creates (or returns existing) a reverse-proxy for the given helper using
-// a three-level fallback: direct TCP (same host or bindAll) → Go SSH → system ssh -W.
+// a two-level fallback: direct TCP (same host or bindAll) → SSH tunnel (Go SSH, else `ssh -D`).
 // When bindAll is true the service binds to 0.0.0.0 and is reachable via direct TCP
 // from the login node — SSH tunnel is skipped entirely.
 // The SSH dial happens outside the registry lock so HTTP Get() calls are never
@@ -146,16 +149,8 @@ func (r *proxyRegistry) Open(id, name, node string, port int, bindAll bool) {
 	}
 
 	// SSH dial happens outside the lock — may take up to 25 s on unreachable nodes.
-	// Level 2: Go SSH.
-	dial, stop, done, err := internalproxy.DialGoSSH(node)
-	var goSSHErr error
-	if err != nil {
-		goSSHErr = err
-		r.log.Debug("server: go-ssh failed", "node", node, "err", err)
-		r.log.Info("server: falling back to system ssh", "node", node)
-		// Level 3: system ssh -W fallback.
-		dial, stop, done, err = internalproxy.DialSystemSSH(node)
-	}
+	// Level 2: EstablishTunnel — Go SSH, else one multiplexing `ssh -D` per node.
+	dial, stop, done, err := r.establishTunnel(node)
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -163,11 +158,7 @@ func (r *proxyRegistry) Open(id, name, node string, port int, bindAll bool) {
 
 	if err != nil {
 		r.log.Warn("server: cannot open tunnel", "node", node, "id", id, "err", err)
-		if goSSHErr != nil {
-			r.lastErrors[id] = fmt.Sprintf("SSH to %s failed: %v", node, goSSHErr)
-		} else {
-			r.lastErrors[id] = fmt.Sprintf("SSH to %s failed: %v", node, err)
-		}
+		r.lastErrors[id] = fmt.Sprintf("SSH to %s failed: %v", node, err)
 		return
 	}
 	// Double-check: another goroutine may have opened it while we were dialing.
@@ -187,18 +178,55 @@ func (r *proxyRegistry) Open(id, name, node string, port int, bindAll bool) {
 		stop()
 	}()
 
-	r.entries[id] = &proxyEntry{rp: rp, name: name, node: node, port: port}
+	r.entries[id] = &proxyEntry{rp: rp, name: name, node: node, port: port, stop: stop}
 	delete(r.lastErrors, id)
 	r.log.Debug("server: proxy tunnel opened", "id", id, "node", node, "port", port)
 }
 
-// Close removes and discards the proxy entry for a helper.
+// establishTunnel opens an SSH tunnel to node with a socket path of its own, so
+// tunnels to several nodes never share one. stop also removes the socket's directory.
+func (r *proxyRegistry) establishTunnel(node string) (internalproxy.DialFunc, func(), <-chan struct{}, error) {
+	base := utils.GetTmpDir()
+	if err := utils.MkdirAllShared(base); err != nil {
+		return nil, nil, nil, err
+	}
+	dir, err := os.MkdirTemp(base, "cnt-tunnel-")
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	dial, stop, done, method, err := internalproxy.EstablishTunnel(node, filepath.Join(dir, "s.sock"))
+	if err != nil {
+		os.RemoveAll(dir) //nolint:errcheck
+		return nil, nil, nil, err
+	}
+	r.log.Debug("server: tunnel established", "node", node, "method", method)
+	return dial, func() { stop(); os.RemoveAll(dir) }, done, nil //nolint:errcheck
+}
+
+// Close removes the proxy entry for a helper and stops its SSH tunnel.
 func (r *proxyRegistry) Close(id string) {
 	r.mu.Lock()
+	entry := r.entries[id]
 	delete(r.entries, id)
 	delete(r.pending, id)
 	delete(r.lastErrors, id)
 	r.mu.Unlock()
+	if entry != nil && entry.stop != nil {
+		entry.stop()
+	}
+}
+
+// CloseAll closes every open proxy, so a shutting-down server leaves no tunnel behind.
+func (r *proxyRegistry) CloseAll() {
+	r.mu.RLock()
+	ids := make([]string, 0, len(r.entries))
+	for id := range r.entries {
+		ids = append(ids, id)
+	}
+	r.mu.RUnlock()
+	for _, id := range ids {
+		r.Close(id)
+	}
 }
 
 // Get returns the proxy entry for a helper, or nil if not open.

@@ -16,7 +16,7 @@ SSH tunnel + dual-protocol proxy management for HPC compute nodes.
 ```
 job/login node
   RunDaemon()
-    ├── tryEstablishTunnel()   ← SSH tunnel to login node
+    ├── EstablishTunnel()      ← SSH tunnel to login node
     │     ├── 1. DialGoSSH()        Go SSH library (no subprocess)
     │     ├── 2. ssh -D unix-sock   system ssh, Unix socket SOCKS5
     │     └── 3. ssh -D 127.0.0.1  system ssh, TCP SOCKS5 (OpenSSH <6.7)
@@ -29,7 +29,10 @@ job/login node
 
 ## SSH Tunnel Fallback Chain (`daemon.go`, `ssh_dial.go`)
 
-`tryEstablishTunnel` tries three methods in order, returning on the first success:
+`EstablishTunnel` tries three methods in order, returning on the first success. The proxy daemon and the
+dashboard's reverse proxy (`internal/server`) both call it; the dashboard gives each tunnel its own
+socket path, since it can hold tunnels to several nodes at once. Every method carries all proxied
+connections over one authenticated SSH connection.
 
 | Priority | Method | Condition |
 |---|---|---|

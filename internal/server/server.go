@@ -133,6 +133,7 @@ func RunDaemon(port int, reportPipe *os.File, watchPID int) error {
 		shutCtx, shutCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer shutCancel()
 		httpServer.Shutdown(shutCtx) //nolint:errcheck
+		s.proxies.CloseAll()
 	}()
 
 	logging.FromContext(ctx).Debug("server: listening", "addr", fmt.Sprintf("http://127.0.0.1:%d", actualPort))
