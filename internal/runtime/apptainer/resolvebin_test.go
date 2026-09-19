@@ -217,7 +217,7 @@ func TestRunApptainerPrependsLibexecBinToPath(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	if err := runApptainerWithOutput(context.Background(), bin, "exec", "", false, nil, &out, &out, nil); err != nil {
+	if err := runApptainerWithOutput(context.Background(), bin, "exec", "", false, nil, &out, &out, nil, 0); err != nil {
 		t.Fatalf("runApptainerWithOutput: %v", err)
 	}
 

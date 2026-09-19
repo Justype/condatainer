@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/image/sif"
@@ -35,6 +36,10 @@ type Options struct {
 	BindLibexec bool
 
 	BaseImage string
+
+	// StopGrace is how long the container gets to exit after this process is
+	// told to stop; zero keeps the default.
+	StopGrace time.Duration
 
 	// PassThruStdin is retained for callers that track whether stdin is expected.
 	// Actual stdin is owned by IO.Stdin so internal execution never assumes a terminal.

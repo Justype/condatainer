@@ -293,6 +293,22 @@ When writing helper scripts, use `${CNT_HELPER_BIND_ADDR:-127.0.0.1}` as the bin
 
 ---
 
+## Stopping a helper
+
+A stop is a SIGTERM to the wrapper: the scheduler's cancel signals the batch shell only, and headless
+runs signal the process group. The wrapper runs the container command in the background and `wait`s on
+it, because bash defers a trap while a foreground command runs. Its trap forwards TERM to
+`condatainer exec` and the wrapper keeps waiting, so the container unmounts its images before the
+wrapper records `done` (exit code 130) and exits.
+
+`condatainer exec` is launched with `--stop-grace 30` (`stopGraceSecs`): after TERM, Apptainer gets that
+long to exit before it is killed. The value stays inside the scheduler's own TERM-to-KILL delay, which
+is what ends the job when the container ignores TERM. Killing a writable image's `fuse2fs` mount leaves
+the image needing recovery, so nothing in the wrapper kills the container before that delay expires.
+
+Until the container has started there is nothing to forward to, so an earlier trap records `done` and
+cleans up directly.
+
 ## NFS State Files
 
 Written by the script on the compute node; read by the CLI monitor and server watcher on the login node.

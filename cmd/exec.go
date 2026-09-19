@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"time"
 
 	"github.com/Justype/condatainer/cmd/internal/ui"
 	"github.com/Justype/condatainer/internal/runtime/apptainer"
@@ -20,6 +21,7 @@ var execFlags CommonFlags
 var execGpuRequested bool
 var execActivation string
 var execProjectDir string
+var execStopGrace int
 
 var execCmd = &execCommand{
 	Command: cobra.Command{
@@ -54,6 +56,8 @@ func init() {
 	RegisterCommonFlags(&execCmd.Command, &execFlags)
 	execCmd.Flags().BoolVar(&execGpuRequested, "gpu", false, "Force GPU flags (--nv/--rocm) even if autoload_gpu is disabled")
 	execCmd.Flags().StringVar(&execActivation, "activation", "all", "Which activate.d scripts to source before the command: all, env, or none")
+	execCmd.Flags().IntVar(&execStopGrace, "stop-grace", 0, "Seconds the container gets to exit after this process is told to stop")
+	execCmd.Flags().MarkHidden("stop-grace") //nolint:errcheck
 	RegisterProjectFlags(&execCmd.Command, &execProjectDir)
 
 	// For 'exec': use default file completion for positional args
@@ -118,6 +122,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 		HidePrompt:     hidePrompt,
 		GpuRequested:   execGpuRequested,
 		Activation:     activation,
+		StopGrace:      time.Duration(execStopGrace) * time.Second,
 	}
 
 	plan, err := exec.Prepare(cmd.Context(), options)

@@ -120,6 +120,6 @@ if apptainer.IsBuildCancelled(err) {
 - Build operations unset `SINGULARITY_BIND`/`APPTAINER_BIND` to avoid `%post` mount conflicts
 - Definition builds pass `--fix-perms`, so an OCI base's owner-unreadable files and no-write directories
   are packed with their content and removable at cleanup
-- Context cancellation: SIGTERM (5s wait) → SIGKILL
+- Context cancellation: SIGTERM, then SIGKILL after `ExecOptions.StopGrace` (5s when unset)
 - `Bin.Version()` runs the binary only when neither the process nor `toolpath`'s per-user cache
   (unchanged size and modification time) has an answer for its path

@@ -169,6 +169,7 @@ func Prepare(ctx context.Context, options Options) (*Plan, error) {
 		Env:        envList,
 		Fakeroot:   fakeroot,
 		Additional: setupResult.ApptainerFlags,
+		StopGrace:  options.StopGrace,
 	}
 
 	return &Plan{

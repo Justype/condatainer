@@ -291,6 +291,7 @@ func KnownFlags() map[string]bool {
 		"--fakeroot": true, "-f": true,
 		"--gpu":        true,
 		"--activation": true,
+		"--stop-grace": true,
 		"--debug":      true,
 		"--no-submit":  true,
 		"--quiet":      true, "-q": true,
@@ -402,7 +403,7 @@ func needsValue(flag string) bool {
 	valueFlags := map[string]bool{
 		"-o": true, "--overlay": true,
 		"--env": true, "--bind": true,
-		"--activation": true,
+		"--activation": true, "--stop-grace": true,
 	}
 	return valueFlags[flag]
 }

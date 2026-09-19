@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/Justype/condatainer/internal/logging"
 )
@@ -19,6 +20,9 @@ type ExecOptions struct {
 	Stdin      io.Reader // Custom stdin reader (optional, defaults to os.Stdin)
 	Stdout     io.Writer // Redirect stdout (optional; nil = discard)
 	Stderr     io.Writer // Redirect stderr (optional; nil = discard)
+	// StopGrace is how long apptainer gets to exit after a cancel's SIGTERM
+	// before it is killed. Zero keeps the default.
+	StopGrace time.Duration
 }
 
 // Exec executes a command inside a container
@@ -51,7 +55,7 @@ func Exec(ctx context.Context, imagePath string, command []string, opts *ExecOpt
 
 	logging.FromContext(ctx).Debug("executing in container", "image", imagePath, "command", strings.Join(command, " "))
 
-	return runApptainerWithOutput(ctx, opts.Bin, "exec", imagePath, false, opts.Stdin, opts.Stdout, opts.Stderr, envPrefixed(opts.Bin, opts.Env), args...)
+	return runApptainerWithOutput(ctx, opts.Bin, "exec", imagePath, false, opts.Stdin, opts.Stdout, opts.Stderr, envPrefixed(opts.Bin, opts.Env), opts.StopGrace, args...)
 }
 
 // envPrefixed rewrites KEY=VALUE settings as APPTAINERENV_KEY=VALUE for the

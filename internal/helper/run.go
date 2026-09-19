@@ -181,6 +181,11 @@ func checkRoot(ctx context.Context, cwd string) error {
 	return err
 }
 
+// stopGraceSecs is how long the container gets to exit after the wrapper is
+// told to stop, so a writable image is unmounted before anything is killed.
+// It sits inside the scheduler's own TERM-to-KILL delay.
+const stopGraceSecs = 30
+
 // buildCondatainerCmd constructs the condatainer exec command run by the wrapper
 // on the compute node. Uses "condatainer exec" (not "e") so that no env.img
 // auto-loading occurs — all overlays are explicit. The helper script runs
@@ -202,7 +207,7 @@ func buildCondatainerCmd(opts RunOptions, spec *scheduler.ResourceSpec) (string,
 	}
 
 	var parts []string
-	parts = append(parts, shellQuote(exe), "exec")
+	parts = append(parts, shellQuote(exe), "exec", "--stop-grace", strconv.Itoa(stopGraceSecs))
 
 	// Named read-only overlays (SquashFS) — code-server, igv, etc.
 	for _, ol := range opts.Overlays {
@@ -530,7 +535,8 @@ func buildHelperCommandBody(id, name, cwd, scriptDir, stateDir string, walltime 
 	}
 	fmt.Fprintln(&sb)
 
-	// Trap SIGTERM/INT (walltime kill, scancel, qdel) so done is recorded even when killed.
+	// Until the container is running there is nothing to forward to: record done
+	// and clean up, so a stop during setup still leaves a finished helper.
 	// CNT_JOB_TMPDIR is always cleaned up: headless uses rm -rf on the resolved path;
 	// scheduler uses the shell variable so it works for both the scheduler-assigned dir
 	// and the /tmp fallback (scheduler-assigned dirs being wiped twice is harmless).
@@ -568,12 +574,24 @@ func buildHelperCommandBody(id, name, cwd, scriptDir, stateDir string, walltime 
 		fmt.Fprintf(&sb, "cd %s\n", shellQuote(cwd))
 	}
 
-	// Run the helper inside the container
-	fmt.Fprintln(&sb, containerCmd)
+	// Run the helper inside the container in the background and wait on it: bash
+	// defers a trap while a foreground command runs, so a scheduler's SIGTERM
+	// would never reach it. The trap forwards TERM to the container and the loop
+	// keeps waiting, so the container exits (and unmounts its images) before the
+	// wrapper does.
+	fmt.Fprintf(&sb, "%s &\n", containerCmd)
+	fmt.Fprintln(&sb, `_cnt_child=$!`)
+	fmt.Fprintln(&sb, `_cnt_stopped=0`)
+	fmt.Fprintln(&sb, `trap '_cnt_stopped=1; kill -TERM $_cnt_child 2>/dev/null' TERM INT`)
+	fmt.Fprintln(&sb, `while :; do`)
+	fmt.Fprintln(&sb, `  wait $_cnt_child`)
+	fmt.Fprintln(&sb, `  _cnt_exit=$?`)
+	fmt.Fprintln(&sb, `  kill -0 $_cnt_child 2>/dev/null || break`)
+	fmt.Fprintln(&sb, `done`)
+	fmt.Fprintln(&sb, `[ $_cnt_stopped = 1 ] && _cnt_exit=130`)
 	fmt.Fprintln(&sb)
 
-	// Normal exit: disarm trap, kill watchdog, then record done with real exit code.
-	fmt.Fprintln(&sb, `_cnt_exit=$?`)
+	// Disarm the trap, kill the watchdog, then record done with the exit code.
 	fmt.Fprintln(&sb, `trap - TERM INT`)
 	if sched == nil {
 		fmt.Fprintln(&sb, `kill -KILL -$_cnt_watchdog_pid 2>/dev/null`)

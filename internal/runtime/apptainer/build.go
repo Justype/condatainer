@@ -60,5 +60,5 @@ func Build(ctx context.Context, imagePath, defFile string, opts *BuildOptions) e
 		procEnv = append(procEnv, "APPTAINER_TMPDIR="+opts.TmpDir)
 	}
 
-	return runApptainerWithOutput(ctx, opts.Bin, "build", imagePath, false, os.Stdin, os.Stdout, os.Stderr, procEnv, args...)
+	return runApptainerWithOutput(ctx, opts.Bin, "build", imagePath, false, os.Stdin, os.Stdout, os.Stderr, procEnv, 0, args...)
 }

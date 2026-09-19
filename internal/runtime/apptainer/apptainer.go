@@ -227,6 +227,10 @@ func CheckZstdSupport(currentVersion string) bool {
 // Internal Helper
 // ---------------------------------------------------------
 
+// defaultStopGrace is how long apptainer gets to exit after SIGTERM before it
+// is killed.
+const defaultStopGrace = 5 * time.Second
+
 // runApptainerWithOutput executes an apptainer command with control over output handling.
 //
 // op: "exec", "pull", "build", etc.
@@ -240,7 +244,9 @@ func CheckZstdSupport(currentVersion string) bool {
 //
 // procEnv: extra KEY=VALUE settings for apptainer's own environment, on top of
 // the parent's. This is how APPTAINERENV_* vars reach the container.
-func runApptainerWithOutput(ctx context.Context, bin Bin, op string, imagePath string, capture bool, stdin io.Reader, stdout, stderr io.Writer, procEnv []string, args ...string) error {
+// stopGrace: how long apptainer gets after a cancel's SIGTERM before it is
+// killed; zero means defaultStopGrace.
+func runApptainerWithOutput(ctx context.Context, bin Bin, op string, imagePath string, capture bool, stdin io.Reader, stdout, stderr io.Writer, procEnv []string, stopGrace time.Duration, args ...string) error {
 	var cmd *exec.Cmd
 	if dir, ok := libexec.Dir(); bin.Libexec && ok {
 		cmd = exec.CommandContext(ctx, "bash", append([]string{"-c", libexecActivationScript(dir), bin.Path}, args...)...)
@@ -308,7 +314,10 @@ func runApptainerWithOutput(ctx context.Context, bin Bin, op string, imagePath s
 	cmd.Stdout = stdoutWriter
 	cmd.Stderr = stderrWriter
 
-	cmd.WaitDelay = 5 * time.Second
+	cmd.WaitDelay = defaultStopGrace
+	if stopGrace > 0 {
+		cmd.WaitDelay = stopGrace
+	}
 	cmd.Cancel = func() error {
 		// Use SIGTERM first for graceful shutdown
 		return cmd.Process.Signal(syscall.SIGTERM)
