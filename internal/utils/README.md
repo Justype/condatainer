@@ -8,17 +8,21 @@ Shared utilities for console output, file operations, downloads, and script pars
 console.go   Styled console output, logging, user prompts
 download.go  HTTP downloads with progress bars
 files.go     File and directory utilities
-flock.go     Bare non-blocking file locking primitive
+filelock.go  Bare non-blocking file locking primitive
 parser.go    Build script metadata parsing
 ```
 
 ## Locking
 
-`AcquireFlock(path, write)` is the one non-blocking `flock` primitive in the
+`AcquireFileLock(path, write)` is the one non-blocking file-lock primitive in the
 codebase — `open` with a mode picked by `write` (`O_RDWR`/exclusive vs.
 `O_RDONLY`/shared, since some callers use the open mode itself as a
 permission check ahead of and independent from the lock), then a non-blocking
-`flock(2)`. It carries no domain meaning of its own: `internal/image.Lock`/
+whole-file `fcntl` open-file-description lock (`F_OFD_SETLK`, Linux 3.15+). It is that kind, not
+`flock(2)`, because its job is to see an ext3 image a running container has mounted: Apptainer takes a
+plain `fcntl` lock there, which a `flock` conflicts with only on filesystems that fold the two together
+(NFSv3 does, NFSv4 does not). The descriptor owns the lock, so two acquisitions in one process conflict
+and closing the file releases it, as with `flock`. It carries no domain meaning of its own: `internal/image.Lock`/
 `AcquireLock` wraps it to add `ErrProtected`/`ErrInUse` classification for
 overlay images (a lock sentinel that opens `O_RDWR` and fails as
 "write-protected" specifically means an artifact was `chmod a-w`'d to pin
@@ -27,7 +31,7 @@ sentinel, which has no such "protected" concept. It lives here, not in
 `internal/image`, because `internal/libexec` needs the identical mechanism
 and must not depend on `internal/image` (or anything that depends on it) —
 see `internal/libexec/README.md` and `internal/image/lock.go`'s own comment
-for why. `internal/image.Lock` is a type alias for `*utils.FlockHandle`
+for why. `internal/image.Lock` is a type alias for `*utils.FileLock`
 rather than a wrapping struct, so both packages' locks are the exact same
 type wherever a caller holds them together (`internal/runtime/
 exec.Prepare`'s combined overlay + toolchain lock slice).

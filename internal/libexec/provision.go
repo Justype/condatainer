@@ -165,7 +165,7 @@ func run(ctx context.Context, tools []string, updateAll bool) error {
 	}
 	defer tierLock.Close()
 
-	var useLock *utils.FlockHandle
+	var useLock *utils.FileLock
 	if hadLive {
 		lockPath := filepath.Join(target, lockFileName)
 		if !utils.FileExists(lockPath) {
@@ -173,7 +173,7 @@ func run(ctx context.Context, tools []string, updateAll bool) error {
 				f.Close()
 			}
 		}
-		useLock, err = utils.AcquireFlock(lockPath, true)
+		useLock, err = utils.AcquireFileLock(lockPath, true)
 		if err != nil {
 			return fmt.Errorf("condatainer is currently running (toolchain is locked); stop all running condatainer sessions before updating: %w", err)
 		}
@@ -228,13 +228,13 @@ func containsPkg(list []pkg, p pkg) bool {
 }
 
 // acquireTierLock takes the tier's exclusive Update lock, creating its file.
-func acquireTierLock(path string) (*utils.FlockHandle, error) {
+func acquireTierLock(path string) (*utils.FileLock, error) {
 	if !utils.FileExists(path) {
 		if f, err := utils.CreateFileWritable(path); err == nil {
 			f.Close()
 		}
 	}
-	lock, err := utils.AcquireFlock(path, true)
+	lock, err := utils.AcquireFileLock(path, true)
 	if err != nil {
 		return nil, fmt.Errorf("another condatainer update of the toolchain is running: %w", err)
 	}

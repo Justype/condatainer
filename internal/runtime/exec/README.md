@@ -84,7 +84,7 @@ exec.Run(ctx, opts)
    `apptainer.Normal()`, now that fakeroot is final — see that package's README for which binary and why
 6. **Debug output** - Print configuration if debug mode
 7. **Print environment** - Show overlay environments (if interactive and not hidden)
-8. **Acquire file locks** - Hold shared locks on all `.sqf` overlays and the base image for the duration of execution. `.img` overlays are skipped — Apptainer flocks them itself and our lock would conflict. Prevents concurrent `remove` or `build --update` from deleting files in use.
+8. **Acquire file locks** - Hold shared locks on all `.sqf` overlays and the base image for the duration of execution. `.img` overlays are skipped — Apptainer locks them itself and our lock would conflict. Prevents concurrent `remove` or `build --update` from deleting files in use.
 9. **Inject proxy env** - If an active SOCKS5 proxy is found via `proxy.FindActiveProxy()`, prepend `http_proxy`/`https_proxy`/`all_proxy` (and uppercase variants) to the container environment so tools inside the container use the tunnel.
 10. **Wrap for activation** - If `container.ActivationScript()` is non-empty (an overlay's own `etc/conda/activate.d` needs sourcing — see that package's README, *Activation*), `wrapWithActivation` replaces `Command` with `bash -c <activation + exec "$@"> cnt-activate <original command...>`. A static `--env` list can't express this: it's shell script, not values.
 11. **Execute** - Call `apptainer.Exec()` with processed configuration

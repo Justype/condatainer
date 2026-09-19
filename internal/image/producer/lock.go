@@ -1,7 +1,7 @@
 // Package producer coordinates commands that create or replace one image.
 //
 // Its lock is separate from image.AcquireLock: a producer lock prevents two
-// builds or pulls from targeting the same pathname, while the inode flock
+// builds or pulls from targeting the same pathname, while the inode lock
 // prevents replacing an image that a running container is using.
 package producer
 

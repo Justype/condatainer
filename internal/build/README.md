@@ -154,8 +154,8 @@ match the prompts.
 Each image target has a producer lock at the image path plus `.lock`, containing
 `BuildLockInfo` JSON. The implementation lives in `internal/image/producer` so
 build and registry pull serialize on the same pathname. This is distinct from
-the inode flock used while an installed image is mounted: the producer lock
-coordinates creation; the inode flock protects current readers at replacement.
+the inode lock used while an installed image is mounted: the producer lock
+coordinates creation; the inode lock protects current readers at replacement.
 
 **Lifecycle:**
 - **Scheduler submit** (`submitJob` in `graph.go`): lock created with `runner=<scheduler>`, `job_id=""`, **no node** before calling the scheduler. Updated with the real job ID after `Submit()` returns. Removed if submit fails.

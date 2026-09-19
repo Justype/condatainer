@@ -101,8 +101,10 @@ Bash scripts in [`cnt-scripts/helpers/`](https://github.com/Justype/cnt-scripts)
 
 ## File Locking
 
-`exec`/`run` hold `LOCK_SH` on `.sqf`/`.sif` files during execution (`.img` skipped — Apptainer
-flocks those itself); `remove` and `build --update` probe `LOCK_EX` before modifying. **An
+`exec`/`run` hold a shared lock on `.sqf`/`.sif` files during execution (`.img` skipped — Apptainer
+locks those itself); `remove` and `build --update` probe an exclusive lock before modifying. The
+lock is an `fcntl` one, the kind Apptainer takes on a mounted `.img`, so an in-use image is seen on
+every filesystem. **An
 unwritable image is protected and is never modified or removed** — clearing the write bit
 (`chmod a-w`) is how an artifact is pinned. See
 [`internal/image/README.md`](internal/image/README.md) for the three distinct lock-failure causes

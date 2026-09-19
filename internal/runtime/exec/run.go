@@ -113,7 +113,7 @@ func Prepare(ctx context.Context, options Options) (*Plan, error) {
 		if !utils.FileExists(ol) || utils.DirExists(ol) {
 			continue
 		}
-		// Skip .img files: Apptainer flocks them itself during execution, so
+		// Skip .img files: Apptainer locks them itself during execution, so
 		// acquiring our own lock would conflict. They are pre-checked via
 		// container.Setup() → CheckAvailable() before exec starts.
 		if utils.IsImg(ol) {

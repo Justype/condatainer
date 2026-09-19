@@ -179,25 +179,25 @@ This package importing nothing under `internal/image` is not incidental — it i
 (which needs `toolpath.Resolve`) is itself reachable from `internal/image`, and `internal/image`
 must never depend on anything that depends back on one of its own children. The lock
 below is the one thing this package used to share with `internal/image` (both wanted a plain
-non-blocking flock); it now uses `internal/utils.AcquireFlock` instead of `internal/image.
-AcquireLock` — the actual flock mechanics were the only genuinely shared part, so that's the one
+non-blocking lock); it now uses `internal/utils.AcquireFileLock` instead of `internal/image.
+AcquireLock` — the actual locking mechanics were the only genuinely shared part, so that's the one
 piece that moved to a place both packages could reach without an import between them. `internal/
-image.Lock` is now a type alias for `utils.FlockHandle` for exactly this reason: the two are the
+image.Lock` is now a type alias for `utils.FileLock` for exactly this reason: the two are the
 same type, so a caller holding a mixed slice of overlay and toolchain locks (`internal/runtime/
 exec.Prepare`) needs no conversion between what this package returns and what `internal/image`
 returns.
 
 ## Locking
 
-Two locks, both non-blocking `flock`s through `internal/utils.AcquireFlock`, so a collision fails at
+Two locks, both non-blocking file locks through `internal/utils.AcquireFileLock`, so a collision fails at
 once with a clear message and nobody waits.
 
 - **`<prefix>/.lock`.** A reader (`AcquireUse`, called from `internal/runtime/exec.Prepare` alongside
-  the existing overlay/base locks) holds `LOCK_SH` for the duration of one apptainer subprocess
-  call. `Update` takes `LOCK_EX` before touching a live prefix and refuses if a reader holds it. This
+  the existing overlay/base locks) holds a shared lock for the duration of one apptainer subprocess
+  call. `Update` takes an exclusive lock before touching a live prefix and refuses if a reader holds it. This
   mirrors how `.sqf`/`.sif` overlays are protected (CLAUDE.md, *File Locking*). A prefix with no
   `.lock` file gets an empty one before locking: creating it without checking for a race is fine,
-  since the flock acquired right after is what serializes access.
+  since the lock acquired right after is what serializes access.
 - **`<tier>/.libexec.lock`.** Held by `Update` for its whole run, so two updates of one tier cannot
   interleave, including the first one, when there is no prefix yet to hold a lock. When a prefix
   without `conda-meta/` is recreated, the in-prefix lock is released before the removal, because the

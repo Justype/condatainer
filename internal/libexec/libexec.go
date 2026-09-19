@@ -65,8 +65,8 @@ func NotInstalledError(name string) error {
 	return fmt.Errorf("%s is not installed in the self-provisioned toolchain; run `condatainer update --libexec %s`", name, p.name)
 }
 
-// lockFileName is the per-generation lock sentinel a reader holds LOCK_SH on
-// and Update takes LOCK_EX on. See the README, Locking.
+// lockFileName is the per-generation lock sentinel a reader holds a shared lock on
+// and Update takes an exclusive one on. See the README, Locking.
 const lockFileName = ".lock"
 
 // Dir returns the nearest tier's libexec directory that is actually
@@ -158,7 +158,7 @@ func LockPath() (string, bool) {
 // provisioned yet, in which case there is nothing to protect and callers must
 // treat a nil lock as "no lock held," not an error. A non-nil error means
 // Update holds the exclusive lock right now.
-func AcquireUse() (*utils.FlockHandle, error) {
+func AcquireUse() (*utils.FileLock, error) {
 	path, ok := LockPath()
 	if !ok {
 		return nil, nil
@@ -169,7 +169,7 @@ func AcquireUse() (*utils.FlockHandle, error) {
 			f.Close()
 		}
 	}
-	lock, err := utils.AcquireFlock(path, false)
+	lock, err := utils.AcquireFileLock(path, false)
 	if err != nil {
 		return nil, fmt.Errorf("the toolchain is being updated right now; try again in a moment: %w", err)
 	}

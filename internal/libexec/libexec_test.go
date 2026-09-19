@@ -152,7 +152,7 @@ func TestAcquireUseFailsWhileUpdateHoldsTheLock(t *testing.T) {
 	scratch := withScratchTier(t)
 	provisionedStub(t, scratch)
 
-	writer, err := utils.AcquireFlock(filepath.Join(scratch, "libexec", lockFileName), true)
+	writer, err := utils.AcquireFileLock(filepath.Join(scratch, "libexec", lockFileName), true)
 	if err != nil {
 		t.Fatalf("failed to simulate Update's exclusive lock: %v", err)
 	}

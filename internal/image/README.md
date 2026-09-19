@@ -155,27 +155,31 @@ if errors.As(err, &overlayErr) {
 
 ## Locking Strategy
 
-Locks use `syscall.Flock` on the image file itself (no separate `.lock` file), non-blocking (`LOCK_NB`).
-The bare open+flock mechanics live in `internal/utils.AcquireFlock` — shared with
+Locks are `fcntl` open-file-description locks over the whole image file (no separate `.lock` file),
+non-blocking. They are the kind Apptainer takes on a mounted ext3 image, so a running container
+holds a conflicting lock on every filesystem — a `flock` would not see it where `flock` and `fcntl`
+locks are separate (NFSv4). A lock belongs to the descriptor, not the process, so two acquisitions in
+one process conflict and closing the file releases it.
+The bare open+lock mechanics live in `internal/utils.AcquireFileLock` — shared with
 `internal/libexec`'s own toolchain-generation lock, which has no write-protection concept and so
 calls it directly rather than through this package (see `internal/utils/README.md`, *Locking*).
-`Lock` here is a type alias for `*utils.FlockHandle`; what this package adds on top is the
+`Lock` here is a type alias for `*utils.FileLock`; what this package adds on top is the
 protection semantics below:
 
-- **Shared** (`LOCK_SH`): multiple readers can hold concurrently; acquired read-only (`O_RDONLY`)
-- **Exclusive** (`LOCK_EX`): single writer; blocks all other locks; opened `O_RDWR`
+- **Shared**: multiple readers can hold concurrently; acquired read-only (`O_RDONLY`)
+- **Exclusive**: single writer; blocks all other locks; opened `O_RDWR`
 - Released automatically when the file descriptor is closed
 
-**Protection.** The `O_RDWR` above is not what `flock` needs — a lock can be placed on any descriptor.
-It is the rule: **an image with its write bit clear is protected and is never modified or removed**,
+**Protection.** An exclusive `fcntl` lock needs a descriptor open for writing, so a write lock opens
+`O_RDWR` — and that is also the rule: **an image with its write bit clear is protected and is never modified or removed**,
 including for its owner, who can unlink it through the directory anyway and can restore the bit.
 `chmod a-w <image>` is how an artifact is pinned, and it stays readable while pinned.
 
 A failed attempt reports which of three things happened, and callers may branch on the first two:
-`ErrProtected` (write bit clear), `ErrInUse` (a conflicting flock), or a missing file.
+`ErrProtected` (write bit clear), `ErrInUse` (a conflicting lock), or a missing file.
 
 **Who holds locks:**
-- `exec`/`run`: acquire and hold shared read locks on all `.sqf` overlays and the base image for the entire duration of `apptainer exec`. `.img` overlays are skipped — Apptainer flocks them itself; acquiring our own lock conflicts with Apptainer's locking.
+- `exec`/`run`: acquire and hold shared read locks on all `.sqf` overlays and the base image for the entire duration of `apptainer exec`. `.img` overlays are skipped — Apptainer locks them itself; acquiring our own lock conflicts with Apptainer's locking.
 - `overlay chown`: acquires and holds an exclusive lock for the duration of the operation.
 - `overlay resize/check`: probe-and-release exclusive lock (via `CheckIntegrity` → `CheckAvailable`) — no lock is held across the resize2fs/e2fsck run, so the caller must not pre-acquire one (a held lock collides with the probe).
 - `remove`: probe-and-release exclusive lock before `os.Remove()` — fails if shared lock is held.

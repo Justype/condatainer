@@ -48,9 +48,9 @@ whether there is anything to hand over — false means an exact copy was adopted
 and nothing has to be produced.
 
 Producer locks coordinate creation because a missing target has no inode to
-lock. Once an SQF exists, `exec` and `run` hold a shared inode `flock` while
+lock. Once an SQF exists, `exec` and `run` hold a shared inode lock while
 reading it; operations that replace or remove an existing file require an
-exclusive inode `flock`.
+exclusive inode lock.
 
 ## Placement and promotion
 
@@ -64,7 +64,7 @@ callers naming a destination narrow with `SearchDirs`, since "it exists somewher
 else" does not answer a request to have it *here*. It
 copies and never moves or links: the source is usually on another filesystem, a
 hardlink would make `GC` report freeing bytes a second link still holds and would
-share mode bits and `flock` with the user's own file, and a symlink is refused by
+share mode bits and locks with the user's own file, and a symlink is refused by
 `Commit` outright.
 
 A build reaches the store through `BuildObject.publishToStore`, which reads the

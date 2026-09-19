@@ -85,7 +85,7 @@ func TestUpdateRefusesWhileInUse(t *testing.T) {
 	scratch := withScratchTier(t)
 	provisionedStub(t, scratch)
 
-	reader, err := utils.AcquireFlock(filepath.Join(scratch, "libexec", lockFileName), false)
+	reader, err := utils.AcquireFileLock(filepath.Join(scratch, "libexec", lockFileName), false)
 	if err != nil {
 		t.Fatalf("failed to simulate an active reader: %v", err)
 	}

@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -110,5 +111,39 @@ func TestSharedLockHeldWhileReadingExcludesAWriter(t *testing.T) {
 	}
 	if err := CheckAvailable(path, true); !errors.Is(err, ErrInUse) {
 		t.Errorf("a writer was allowed in during a read: %v", err)
+	}
+}
+
+// The messages are written once: a sentinel matched with errors.Is does not
+// print its own text after them.
+func TestLockMessagesDoNotRepeatTheSentinel(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "busy.sqf")
+	if err := os.WriteFile(path, []byte("payload"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	held, err := AcquireLock(path, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Close()
+
+	for _, write := range []bool{true, false} {
+		err := CheckAvailable(path, write)
+		if !errors.Is(err, ErrInUse) {
+			t.Fatalf("write=%v: want ErrInUse, got %v", write, err)
+		}
+		if strings.Contains(err.Error(), ErrInUse.Error()) {
+			t.Errorf("write=%v: %q repeats the sentinel text", write, err)
+		}
+	}
+
+	if os.Geteuid() != 0 {
+		if err := os.Chmod(path, 0o444); err != nil {
+			t.Fatal(err)
+		}
+		err := CheckAvailable(path, true)
+		if !errors.Is(err, ErrProtected) || strings.Contains(err.Error(), ErrProtected.Error()) {
+			t.Errorf("protected: got %q, want a message that matches ErrProtected without repeating it", err)
+		}
 	}
 }

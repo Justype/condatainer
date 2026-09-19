@@ -76,7 +76,7 @@ func pull(ctx context.Context, base, repo string, desc ocispec.Descriptor, annot
 		return err
 	}
 	// Protection is a stable fact — the write bit — so it is worth knowing before
-	// a multi-gigabyte download rather than after. A conflicting flock is not:
+	// a multi-gigabyte download rather than after. A conflicting lock is not:
 	// it may well be gone by the time the transfer finishes, so it is left to the
 	// probe below and not treated as a reason to refuse now.
 	destDir := filepath.Dir(destPath)
@@ -118,7 +118,7 @@ func pull(ctx context.Context, base, repo string, desc ocispec.Descriptor, annot
 	}
 
 	// Immediately before the rename, and not before the download: an exec on
-	// another node may hold LOCK_SH and be reading the old file lazily over NFS,
+	// another node may hold a shared lock and be reading the old file lazily over NFS,
 	// where replacing it stales the handle mid-job. A lock taken earlier would
 	// block every exec for the length of the transfer and would then be held on
 	// an orphaned inode anyway.

@@ -1678,7 +1678,7 @@ condatainer overlay export [OPTIONS] <overlay.img>
 
 **Channel order:** `micromamba env export` sorts the `channels:` block alphabetically, which can break re-solve. When an overlay carries a `.condarc`, its channel priority is used to reorder the block (matching `conda env export`); channels not listed there are prepended.
 
-**In-use overlays:** exporting an ext3 `.img` while a writable session holds it fails with a clear "currently being written" error. (If you are in an ext3 overlay, use `mm export`)
+**In-use overlays:** exporting an ext3 `.img` while a writable session holds it fails with a clear "is open for writing by another process" error. (If you are in an ext3 overlay, use `mm export`)
 
 **Examples:**
 
