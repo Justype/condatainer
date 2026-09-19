@@ -69,21 +69,49 @@ function openOverlayPicker(type) {
   opTargetType = type;
   gid('op-app-search').value = '';
   filterAppOverlays('');
+  if (!allOverlays.length) loadOverlays().then(() => filterAppOverlays(gid('op-app-search').value));
+  gid('op-tab-project-btn').style.display = _projectInfo?.root ? '' : 'none';
   opSwitchTab('module');
   gid('op-modal').classList.add('open');
 }
 
 function opSwitchTab(tab) {
-  const isModule = tab === 'module';
-  gid('op-tab-module-btn').classList.toggle('active', isModule);
-  gid('op-tab-file-btn').classList.toggle('active', !isModule);
-  gid('op-tab-app').classList.toggle('active', isModule);
-  gid('op-tab-file').classList.toggle('active', !isModule);
-  if (!isModule) opFileNavigate(gid('cfg-cwd')?.value || srvScratch || srvHome || '/');
+  ['module', 'project', 'file'].forEach(t => {
+    gid('op-tab-' + t + '-btn').classList.toggle('active', t === tab);
+    gid('op-tab-' + (t === 'module' ? 'app' : t)).classList.toggle('active', t === tab);
+  });
+  if (tab === 'project') loadProjectPins();
+  if (tab === 'file') opFileNavigate(gid('cfg-cwd')?.value || srvScratch || srvHome || '/');
+}
+
+async function loadProjectPins() {
+  const list = gid('op-project-list');
+  list.innerHTML = '<div class="modal-empty">Loading…</div>';
+  let pins = [];
+  try {
+    pins = (await fetch('/api/project/pins?cwd=' + encodeURIComponent(gid('cfg-cwd')?.value || '')).then(r => r.json())) || [];
+  } catch { /* shown as empty */ }
+  list.innerHTML = pins.length
+    ? pins.map(p =>
+        '<div class="modal-row" onclick="selectPinnedOverlay(\'' + escHtml(p.path) + '\',\'' + escHtml(p.name) + '\')">' +
+          '<span class="modal-row-icon">' + iconSvg('hexagon') + '</span>' +
+          '<span class="modal-row-name fw-bold">' + escHtml(p.name) + '<span class="td-muted">@' + escHtml(p.ident) + '</span></span>' +
+          '<span class="modal-row-sel"><button class="btn btn-sm btn-primary">Select</button></span>' +
+        '</div>'
+      ).join('')
+    : '<div class="modal-empty">No pinned overlays available here.</div>';
+}
+
+function selectPinnedOverlay(path, name) {
+  if (!selectedModules.find(m => m.path === path)) {
+    selectedModules.push({ name, path });
+    renderModuleChips();
+  }
+  closeModal('op-modal');
 }
 
 function filterAppOverlays(q) {
-  const sqfOvs = allOverlays.filter(o => o.type === 'sqf');
+  const sqfOvs = allOverlays;
   const terms  = searchTerms(q);
   const hits   = terms.length ? sqfOvs.filter(o => matchesAllTerms(o.name, terms)) : sqfOvs;
   gid('op-app-list').innerHTML = hits.length

@@ -237,14 +237,15 @@ function _menuHtml(sel) {
   const moveCopy =
     mi('folder', 'Move to…', 'ctxMoveTo()') +
     mi('content_copy', 'Copy to…', 'ctxCopyTo()');
+  const refresh = sep + mi('refresh', 'Refresh', 'navigateFiles(currentPath)');
   const del = sep + mi('delete', 'Delete', 'ctxDelete()', ' row-menu-danger');
   if (sel.length === 1) {
     const e = sel[0];
     return mi('download', e.is_dir ? 'Download as zip' : 'Download', 'ctxDownload()') + sep + clip + sep +
-      mi('edit', 'Rename', 'ctxRename()') + moveCopy + del;
+      mi('edit', 'Rename', 'ctxRename()') + moveCopy + refresh + del;
   }
   return '<div class="row-menu-hdr">' + sel.length + ' selected</div>' +
-    mi('download', 'Download', 'ctxDownload()') + sep + clip + sep + moveCopy + del;
+    mi('download', 'Download', 'ctxDownload()') + sep + clip + sep + moveCopy + refresh + del;
 }
 
 // _openMenuAt shows a dropdown with the given items at pos ({top,left} or

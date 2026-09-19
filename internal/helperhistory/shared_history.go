@@ -32,6 +32,7 @@ const SubdirName = ".helper-history"
 type record struct {
 	Helper   string   `json:"helper"`
 	Location string   `json:"location"`
+	Required []string `json:"required,omitempty"`
 	Overlays []string `json:"overlays"`
 }
 
@@ -39,6 +40,7 @@ type record struct {
 // Helper/Location are already the map keys (ListAll) or the arguments
 // (ListUsed) by the time a caller sees it, so only what's left is exposed.
 type UsedCombination struct {
+	Required []string  `json:"required,omitempty"`
 	Overlays []string  `json:"overlays"`
 	LastUsed time.Time `json:"last_used"`
 }
@@ -58,17 +60,18 @@ func convertLocationForFilename(location string) string {
 }
 
 // RecordUsed records that name was run at location (project-root-relative,
-// slash-separated) with overlays, in root's shared history. A no-op when
-// root is "" — no standing project means no shared audience to record for.
+// slash-separated) with the helper's required overlays and the overlays the
+// user added, in root's shared history. A no-op when root is "" — no standing
+// project means no shared audience to record for.
 //
 // Reads every file already in .helper-history/ and either bumps the matching
 // combination's mtime (a repeat use) or writes a new entry (a fresh one).
-func RecordUsed(root, name, location string, overlays []string) error {
+func RecordUsed(root, name, location string, required, overlays []string) error {
 	if root == "" {
 		return nil
 	}
-	sorted := append([]string(nil), overlays...)
-	sort.Strings(sorted)
+	sortedRequired := sortedCopy(required)
+	sorted := sortedCopy(overlays)
 
 	dir := Dir(root)
 	if err := utils.MkdirAllShared(dir); err != nil {
@@ -94,12 +97,13 @@ func RecordUsed(root, name, location string, overlays []string) error {
 		if err := json.Unmarshal(data, &rec); err != nil {
 			continue
 		}
-		if rec.Helper == name && rec.Location == location && slices.Equal(rec.Overlays, sorted) {
+		if rec.Helper == name && rec.Location == location &&
+			slices.Equal(rec.Required, sortedRequired) && slices.Equal(rec.Overlays, sorted) {
 			return bumpMtime(path)
 		}
 	}
 
-	rec := record{Helper: name, Location: location, Overlays: sorted}
+	rec := record{Helper: name, Location: location, Required: sortedRequired, Overlays: sorted}
 	data, err := json.Marshal(rec)
 	if err != nil {
 		return err
@@ -112,6 +116,12 @@ func RecordUsed(root, name, location string, overlays []string) error {
 	defer f.Close()
 	_, err = f.Write(data)
 	return err
+}
+
+func sortedCopy(in []string) []string {
+	out := append([]string(nil), in...)
+	sort.Strings(out)
+	return out
 }
 
 // bumpMtime touches path's mtime to now, without reading or rewriting its
@@ -186,7 +196,7 @@ func ListUsed(root, name, location string) ([]*UsedCombination, error) {
 		if rf.rec.Helper != name || rf.rec.Location != location {
 			continue
 		}
-		out = append(out, &UsedCombination{Overlays: rf.rec.Overlays, LastUsed: rf.lastUsed})
+		out = append(out, &UsedCombination{Required: rf.rec.Required, Overlays: rf.rec.Overlays, LastUsed: rf.lastUsed})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].LastUsed.After(out[j].LastUsed) })
 	return out, nil
@@ -208,7 +218,7 @@ func ListAll(root string) (map[string]map[string][]*UsedCombination, error) {
 			out[rf.rec.Helper] = byLocation
 		}
 		byLocation[rf.rec.Location] = append(byLocation[rf.rec.Location],
-			&UsedCombination{Overlays: rf.rec.Overlays, LastUsed: rf.lastUsed})
+			&UsedCombination{Required: rf.rec.Required, Overlays: rf.rec.Overlays, LastUsed: rf.lastUsed})
 	}
 	return out, nil
 }

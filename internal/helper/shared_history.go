@@ -11,10 +11,10 @@ import "github.com/Justype/condatainer/internal/helperhistory"
 type UsedCombination = helperhistory.UsedCombination
 
 // RecordUsed records that name was run at location (project-root-relative,
-// slash-separated) with overlays, in root's shared history. See
-// internal/helperhistory.RecordUsed.
-func RecordUsed(root, name, location string, overlays []string) error {
-	return helperhistory.RecordUsed(root, name, location, overlays)
+// slash-separated) with its required and added overlays, in root's shared
+// history. See internal/helperhistory.RecordUsed.
+func RecordUsed(root, name, location string, required, overlays []string) error {
+	return helperhistory.RecordUsed(root, name, location, required, overlays)
 }
 
 // ListUsed returns every combination recorded for name at location, newest

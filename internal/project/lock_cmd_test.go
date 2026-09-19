@@ -41,7 +41,7 @@ func TestClassifyOverlay(t *testing.T) {
 // and drops it the moment a pin is added — never writing one itself.
 func TestUnpinnedHelperOverlays(t *testing.T) {
 	root := projectRoot(t)
-	if err := helperhistory.RecordUsed(root, "rstudio-server", ".", []string{"rstudio-server/4.4.3"}); err != nil {
+	if err := helperhistory.RecordUsed(root, "rstudio-server", ".", nil, []string{"rstudio-server/4.4.3"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -68,7 +68,7 @@ func TestUnpinnedHelperOverlays(t *testing.T) {
 // never suggested — nothing could pin it either direction.
 func TestUnpinnedHelperOverlaysExcludesExternalPaths(t *testing.T) {
 	root := projectRoot(t)
-	if err := helperhistory.RecordUsed(root, "rstudio-server", ".", []string{"../../scratch/test.sqf"}); err != nil {
+	if err := helperhistory.RecordUsed(root, "rstudio-server", ".", nil, []string{"../../scratch/test.sqf"}); err != nil {
 		t.Fatal(err)
 	}
 	unpinned, err := UnpinnedHelperOverlays(root, lock.New())
@@ -80,15 +80,16 @@ func TestUnpinnedHelperOverlaysExcludesExternalPaths(t *testing.T) {
 	}
 }
 
-// ManualPinUsage names every helper recorded using a manual pin, and reports
+// ManualPinUsage names every helper recorded using a manual pin, whether it
+// was a required or an added overlay, and reports
 // a fact ("no recorded helper usage") rather than nothing for one with none
 // — an absent list is not the same as "not manual".
 func TestManualPinUsage(t *testing.T) {
 	root := projectRoot(t)
-	if err := helperhistory.RecordUsed(root, "rstudio-server", ".", []string{"build-essential"}); err != nil {
+	if err := helperhistory.RecordUsed(root, "rstudio-server", ".", []string{"build-essential"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := helperhistory.RecordUsed(root, "jupyterlab", ".", []string{"build-essential"}); err != nil {
+	if err := helperhistory.RecordUsed(root, "jupyterlab", ".", nil, []string{"build-essential"}); err != nil {
 		t.Fatal(err)
 	}
 

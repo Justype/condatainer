@@ -492,10 +492,15 @@ th.file-actions-cell{width:112px;} /* fits the 3 buttons of a folder row (star, 
 .td-node{width:1%;white-space:nowrap;}
 
 /* ── Module chips ────────────────────────── */
-.module-chip{display:flex;align-items:center;gap:6px;padding:4px 8px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);}
+.module-chip{display:flex;align-items:center;gap:6px;padding:4px 8px;min-height:32px;box-sizing:border-box;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);}
 .module-chip.required{opacity:.5;}
+.module-chip.unresolved{border-color:color-mix(in srgb,var(--danger) 40%,transparent);}
+.module-chip.unresolved .module-chip-label{color:var(--danger);}
+.project-line{display:flex;align-items:center;gap:8px;margin-top:6px;font-size:13px;}
+.project-label{color:var(--muted);min-width:52px;}
+.project-path{flex:1;word-break:break-all;}
 .module-chip-name{font-family:var(--mono);flex:1;}
-.module-chip-label{color:var(--muted);}
+.module-chip-label{font-family:var(--mono);color:var(--muted);}
 .module-chip .btn-ghost{padding:0 4px;}
 
 /* ── Misc utilities ──────────────────────── */

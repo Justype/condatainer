@@ -90,6 +90,10 @@ never call `HasRequestedRoot` at all (`internal/build`'s own container
 invocations, which always set `BaseImage` explicitly and are unaffected by
 this scan either way).
 
+A helper launch checks the root before submitting: the base pin of the project
+its working directory stands in, else the configured default (`checkRoot` in
+`internal/helper`). That matches what the job's own `exec` resolves on the node.
+
 ## Important Diff from Apptainer Flags
 
 **Writable** in CondaTainer means making the ext3 `.img` overlay writable, not adding `--writable` to Apptainer. The `.img` overlay is writable by default when used as an overlay.

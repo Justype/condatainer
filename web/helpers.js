@@ -1535,6 +1535,80 @@ async function startHelper() {
   }
 }
 
+/* ── Project + required-overlay resolution ─ */
+// The server resolves each required name the way a launch does; renderModuleChips
+// refetches only when the set of names or the working directory changes.
+let _projectInfo = null;
+let _projectKey = '';
+let _projectReq = 0;
+
+function _requiredChip(name) {
+  const r = (_projectInfo?.required || []).find(x => x.name === name);
+  if (!r) {
+    return '<div class="module-chip required"><span class="module-chip-name">' + escHtml(name) + '</span></div>';
+  }
+  if (!r.resolved) {
+    return '<div class="module-chip unresolved"><span class="module-chip-name">' + escHtml(name) + '</span>' +
+      '<span class="module-chip-label">not resolved</span></div>';
+  }
+  const to = r.resolved + (r.ident ? '@' + r.ident : '');
+  const text = to === name ? escHtml(name)
+    : escHtml(name) + ' <span class="module-chip-label">→</span> ' + escHtml(to);
+  return '<div class="module-chip required"><span class="module-chip-name">' + text + '</span></div>';
+}
+
+function _syncProjectInfo(names) {
+  const cwd = gid('cfg-cwd')?.value || '';
+  const key = cwd + '\n' + names.join('\n');
+  if (key === _projectKey) return;
+  _projectKey = key;
+  loadProjectInfo(cwd, names);
+}
+
+async function loadProjectInfo(cwd, names) {
+  const req = ++_projectReq;
+  let info = null;
+  if (cwd) {
+    const qs = new URLSearchParams({ cwd });
+    names.forEach(n => qs.append('name', n));
+    try { info = await fetch('/api/project?' + qs).then(r => r.ok ? r.json() : null); } catch { info = null; }
+  }
+  if (req !== _projectReq) return;
+  _projectInfo = info;
+  _renderProjectLine();
+  renderModuleChips();
+}
+
+function _renderProjectLine() {
+  const info = _projectInfo;
+  const line = gid('project-line');
+  if (!line) return;
+  const has = !!(info && info.cwd);
+  line.style.display = has ? '' : 'none';
+  gid('project-distro-line').style.display = has ? '' : 'none';
+  if (!has) return;
+  gid('project-path').textContent = info.root || 'none';
+  gid('project-distro').textContent = info.distro || '';
+  gid('project-create-btn').disabled = info.root === info.cwd;
+}
+
+async function createProject() {
+  const cwd = gid('cfg-cwd')?.value || '';
+  const r = await fetch('/api/project', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ cwd }),
+  });
+  if (!r.ok) { showProgressError('Creating project', await r.text()); return; }
+  const { warning } = await r.json();
+  if (warning) showProgressError('Creating project', warning);
+  _projectKey = '';
+  renderModuleChips();
+  checkProjectReuse();
+}
+
+gid('cfg-cwd').addEventListener('input', () => renderModuleChips());
+
 /* ── Module chips ────────────────────────── */
 function renderModuleChips() {
   const list = gid('cfg-modules-list');
@@ -1552,14 +1626,13 @@ function renderModuleChips() {
     }
   });
   const requiredNames = (selectedHelper?.required_overlays || '').trim().split(/\s+/).filter(Boolean);
-  const requiredChips = requiredNames.map(name => {
+  const requiredResolved = requiredNames.map(name => {
     let resolved = name;
     Object.entries(params).forEach(([k, v]) => { resolved = resolved.replaceAll('{' + k + '}', v); });
-    return '<div class="module-chip required">' +
-      '<span class="module-chip-name">' + escHtml(resolved) + '</span>' +
-      '<span class="module-chip-label">default</span>' +
-    '</div>';
-  }).join('');
+    return resolved;
+  });
+  _syncProjectInfo(requiredResolved);
+  const requiredChips = requiredResolved.map(_requiredChip).join('');
 
   const userChips = selectedModules.map((m, i) =>
     '<div class="module-chip">' +

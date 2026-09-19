@@ -62,23 +62,27 @@ access, which `ShareWithParentGroup` (already called inside
 `cnt-lock/` has — the whole point, since this is written by whoever's UID
 happens to run the helper next.
 
-**What counts as the combination:** the resolved `-o` overlay list only, in
-exactly the form `normalizeOverlayForHistory` already produces for personal
-history (a catalog `name/version`, or a path relative to the launch `cwd`).
-Resolved `#PARAM:` values and the autoloaded env overlay (`-e`) are excluded
-— a `#PARAM:` choice is a per-launch settings question already served by
-saved config, and every helper autoloads its env overlay unconditionally, so
-it is not a decision two setups could differ on.
+**What counts as the combination:** two lists kept apart: `required`, the
+helper's `#REQUIRED_OVERLAYS:` names as declared with the launch's `{KEY}`
+params filled in — a `{R_VERSION}` choice is recorded as `r/4.4.3`, the same
+string that keys its pin — and `overlays`, the `-o` list the user added, in the
+form `normalizeOverlayForHistory` produces (a catalog `name/version`, or a
+path relative to the launch `cwd`). Both take part in dedup. Every overlay in either list counts as used, so both
+feed the project's status; only `overlays` is offered back by the reuse lookup,
+since the required ones follow from the helper and its params. Resolved
+`#PARAM:` values and the autoloaded env overlay (`-e`) are not recorded — a
+`#PARAM:` choice is a per-launch settings question already served by saved
+config, and every helper autoloads its env overlay unconditionally, so it is
+not a decision two setups could differ on.
 
 **No browsing view, anywhere.** There is no `helper history <name>` command
-and no dashboard tab for past combinations — usage is still never evidence
-of importance, which applies to displaying it as much as to acting on it.
-The data has exactly two consumers: the fresh-start reuse lookup
-(`ListUsed`, one helper, one location, offered as a confirmed default —
-never applied silently) and `internal/project`'s project-wide "used but not
-pinned" / "which helper uses this manual pin" signals (`ListAll`, aggregated,
-never displayed as raw combinations). See `internal/project/README.md`,
-"Used but not pinned, and who uses a manual pin".
+and no dashboard tab for past combinations. The data has exactly two
+consumers: the fresh-start reuse lookup (`ListUsed`, one helper, one location,
+offered as a confirmed default — never applied silently) and
+`internal/project`'s project-wide "used but not pinned" / "which helper uses
+this manual pin" signals (`ListAll`, aggregated, never displayed as raw
+combinations). See `internal/project/README.md`, "Used but not pinned, and who
+uses a manual pin".
 
 **Why a separate package (`internal/helperhistory`) instead of living here.**
 `internal/project` needs to read this data too (for the aggregate signals

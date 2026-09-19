@@ -29,9 +29,6 @@
     <li class="nav-item" data-section="overlays">
       <svg class="icon nav-icon"><use href="#i-hexagon"></use></svg><span class="nav-label">Overlay</span>
     </li>
-    <li class="nav-item" data-section="project">
-      <svg class="icon nav-icon"><use href="#i-folder"></use></svg><span class="nav-label">Project</span>
-    </li>
     <li class="nav-item" data-section="files">
       <svg class="icon nav-icon"><use href="#i-files"></use></svg><span class="nav-label">Files</span>
     </li>
@@ -133,6 +130,15 @@
             <div class="field-row">
               <input class="field-input" id="cfg-cwd" placeholder="Working directory (default: current)">
               <button class="btn btn-sm" id="cfg-cwd-browse-btn" onclick="openFilePicker('cfg-cwd','dir')">Browse</button>
+            </div>
+            <div class="project-line" id="project-line">
+              <span class="project-label">Project</span>
+              <span class="mono project-path" id="project-path"></span>
+              <button class="btn btn-sm" id="project-create-btn" onclick="createProject()">Create project</button>
+            </div>
+            <div class="project-line" id="project-distro-line">
+              <span class="project-label">Distro</span>
+              <span class="mono" id="project-distro"></span>
             </div>
           </div>
           <div class="field">
@@ -247,23 +253,6 @@
             <tr><td colspan="5" class="td-empty">Loading…</td></tr>
           </tbody>
         </table>
-      </div>
-    </section>
-
-    <!-- ─ Project ───────────────────────────── -->
-    <section class="section" id="sec-project">
-      <div class="s-header">
-        <div>
-          <div class="s-title">Project</div>
-          <div class="s-sub">cnt-lock/ status for the working directory set on Start</div>
-        </div>
-        <div class="btn-row">
-          <button class="btn btn-sm btn-primary" id="project-lock-btn" onclick="lockProject()"><svg class="icon"><use href="#i-folder"></use></svg>Lock project</button>
-          <button class="btn btn-sm" onclick="loadProjectStatus()"><svg class="icon"><use href="#i-refresh"></use></svg>Refresh</button>
-        </div>
-      </div>
-      <div id="project-status-panel">
-        <div class="modal-empty">Loading…</div>
       </div>
     </section>
 
@@ -451,6 +440,7 @@
     </div>
     <div class="modal-tabs">
       <button class="modal-tab active" id="op-tab-module-btn" onclick="opSwitchTab('module')">Module overlay</button>
+      <button class="modal-tab" id="op-tab-project-btn" style="display:none" onclick="opSwitchTab('project')">Project</button>
       <button class="modal-tab" id="op-tab-file-btn" onclick="opSwitchTab('file')">File (.sqf)</button>
     </div>
     <div class="modal-tab-body active" id="op-tab-app">
@@ -461,6 +451,9 @@
         </div>
       </div>
       <div id="op-app-list"></div>
+    </div>
+    <div class="modal-tab-body" id="op-tab-project">
+      <div class="modal-body" id="op-project-list"></div>
     </div>
     <div class="modal-tab-body" id="op-tab-file">
       <div class="modal-bc" id="op-file-bc"></div>
@@ -594,7 +587,6 @@
 <script src="/static/jobs.js"></script>
 <script src="/static/helpers.js"></script>
 <script src="/static/overlays.js"></script>
-<script src="/static/project.js"></script>
 <script src="/static/history.js"></script>
 <script src="/static/files.js"></script>
 <script>

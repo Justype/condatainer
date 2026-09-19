@@ -19,6 +19,7 @@ import (
 	"github.com/Justype/condatainer/internal/image"
 	"github.com/Justype/condatainer/internal/image/ext3"
 	"github.com/Justype/condatainer/internal/logging"
+	"github.com/Justype/condatainer/internal/project"
 	"github.com/Justype/condatainer/internal/runtime/container"
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
@@ -159,6 +160,27 @@ func resolveSpec(scriptPath string, overrides *scheduler.ResourceSpec) *schedule
 	return &base
 }
 
+// checkRoot fails a launch whose container root is missing, so the error
+// surfaces here rather than in the job log on a compute node. The node's exec
+// takes the root from the project cwd stands in, else the default.
+func checkRoot(ctx context.Context, cwd string) error {
+	standing, err := project.StandingAt(cwd)
+	if err != nil {
+		return err
+	}
+	if standing != nil {
+		root, err := standing.Base(ctx)
+		if err != nil {
+			return err
+		}
+		if root != "" {
+			return nil
+		}
+	}
+	_, err = config.GetBaseImage()
+	return err
+}
+
 // buildCondatainerCmd constructs the condatainer exec command run by the wrapper
 // on the compute node. Uses "condatainer exec" (not "e") so that no env.img
 // auto-loading occurs — all overlays are explicit. The helper script runs
@@ -177,14 +199,6 @@ func buildCondatainerCmd(opts RunOptions, spec *scheduler.ResourceSpec) (string,
 	exe, err := os.Executable()
 	if err != nil {
 		return "", fmt.Errorf("could not locate condatainer binary: %w", err)
-	}
-
-	// The generated command runs on a compute node: a missing default root is
-	// caught here rather than deep in a job's log. There is no -b/--base-image
-	// to pin it with — the node's own exec resolves the same default itself
-	// (see the container README, Root selection).
-	if _, err := config.GetBaseImage(); err != nil {
-		return "", err
 	}
 
 	var parts []string

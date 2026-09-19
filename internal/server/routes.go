@@ -28,6 +28,8 @@ func registerRoutes(mux *http.ServeMux, s *srv) {
 	// REST API
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/env/check", s.handleEnvCheck)
+	mux.HandleFunc("/api/project", s.handleProject)
+	mux.HandleFunc("/api/project/pins", s.handleProjectPins)
 	mux.HandleFunc("/api/helpers/available", s.handleHelpersAvailable)
 	mux.HandleFunc("/api/helpers/update", s.handleHelpersUpdate)
 	mux.HandleFunc("/api/helpers/bookmarks", s.handleHelperBookmarks)
@@ -52,7 +54,5 @@ func registerRoutes(mux *http.ServeMux, s *srv) {
 	mux.HandleFunc("/api/fs/copy", s.handleFSCopy)
 	mux.HandleFunc("/api/gpu-options", s.handleGpuOptions)
 	mux.HandleFunc("/api/partitions", s.handlePartitions)
-	mux.HandleFunc("/api/project/status", s.handleProjectStatus)
-	mux.HandleFunc("/api/project/lock", s.handleProjectLock)
 
 }

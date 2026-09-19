@@ -1,6 +1,6 @@
 // Package orchestrate composes internal/project and internal/project/lock
-// steps that a single caller — `cmd/project.go`'s `project lock`, and the
-// dashboard's lock action — needs run in a fixed sequence. It exists as its
+// steps that a caller — `cmd/project.go`'s `project lock`, and the
+// dashboard's project creation — needs run in a fixed sequence. It exists as its
 // own package because internal/project/publish already imports
 // internal/project (for LookupAt/LookupLocal), so internal/project itself
 // can never import internal/project/publish back without a cycle; this
@@ -44,10 +44,7 @@ type LockResult struct {
 }
 
 // Lock creates or updates root's lock from its #DEP: declarations: scan,
-// reconcile, pin, derive the base, and report. This is the orchestration
-// `cmd/project.go`'s `project lock` used to inline directly inside its
-// RunE — extracted so the dashboard's lock action is a second caller of
-// exactly this sequence, never a reimplementation of it.
+// reconcile, pin, derive the base, and report.
 func Lock(ctx context.Context, root string, opts LockOptions) (*LockResult, error) {
 	current, err := lock.Load(root)
 	if err != nil {
@@ -110,12 +107,9 @@ func Lock(ctx context.Context, root string, opts LockOptions) (*LockResult, erro
 // vendored that its own recipe collection already publishes at the exact
 // same identity, and reports which, for display.
 //
-// Moved here from cmd/project.go (it used to be unexported and local): it
-// mutates the lock (l.AddRemote) in a way Publish persists, so it is part
-// of what locking produces, not CLI decoration — the dashboard's lock
-// action has to write the same cnt-lock/lock.json content the CLI would for
-// the same run. Exported because `project pin` and `project select-distro`
-// call it too, each pinning outside a full Lock run.
+// It mutates the lock (l.AddRemote) in a way Publish persists. Exported
+// because `project pin`, `project select-distro` and Init call it too, each
+// pinning outside a full Lock run.
 //
 // It never fails the pin. No network, no configured source, no declared
 // endpoint and no match all record nothing — locking has to work offline,

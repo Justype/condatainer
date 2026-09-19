@@ -3,6 +3,7 @@ package project
 import (
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -150,7 +151,7 @@ func usageIndex(root string) (map[string][]string, error) {
 	for helperName, byLocation := range all {
 		for location, combos := range byLocation {
 			for _, combo := range combos {
-				for _, overlay := range combo.Overlays {
+				for _, overlay := range append(slices.Clone(combo.Required), combo.Overlays...) {
 					if pinKey, ok := classifyOverlay(overlay, location); ok {
 						add(pinKey, helperName)
 					}
@@ -226,8 +227,7 @@ func frozenEnvKey(root, location string) (string, bool) {
 
 // UnpinnedHelperOverlays is usageIndex's keys with no matching entry in
 // l.Pins — a suggestion, never a fallback. It never writes a pin and never
-// becomes a scan Finding: usage is still never evidence of a project
-// dependency.
+// becomes a scan Finding.
 func UnpinnedHelperOverlays(root string, l *lock.Lock) ([]string, error) {
 	index, err := usageIndex(root)
 	if err != nil {

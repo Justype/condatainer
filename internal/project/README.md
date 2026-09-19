@@ -158,8 +158,9 @@ fix.
 
 `UnpinnedHelperOverlays` and `ManualPinUsage` (`lock_cmd.go`) both read
 `usageIndex`, a reverse index built from the project's shared helper-setup
-history (`internal/helper/README.md`): which pin key each recorded overlay
-combination would address, mapped to the helper names that used it.
+history (`internal/helper/README.md`): which pin key each recorded overlay —
+a helper's required overlays and the ones the user added alike — would
+address, mapped to the helper names that used it.
 `UnpinnedHelperOverlays` is that index's keys with no matching pin — what
 answers "why does a helper's `#REQUIRED_OVERLAYS:` refuse instead of
 resolving ambiently" concretely: the strict resolution stays exactly as
@@ -169,10 +170,8 @@ status`/`project lock`'s report under its own heading, never merged into the
 the same index read the other way — for each manual pin, which helpers are
 recorded using it, the manual-pin equivalent of a `#DEP:` pin's own
 `Request.Scripts`. An empty result is reported as a fact ("no recorded helper
-usage"), never a suggestion to unpin: nothing about a helper that has not run
-since this shipped, or one that runs rarely, is distinguishable from "no
-longer needed" by usage alone, and this package's principle — usage is never
-evidence of importance — applies to its absence too.
+usage"), never a suggestion to unpin: a helper that has not run since
+recording began is indistinguishable from one that no longer needs the pin.
 
 ## The project's root
 

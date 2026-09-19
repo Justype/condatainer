@@ -21,7 +21,7 @@ func testRoot(t *testing.T) string {
 // RecordUsed is a no-op with no standing project — nothing to record for and
 // no error either.
 func TestRecordUsedNoopWithNoRoot(t *testing.T) {
-	if err := RecordUsed("", "rstudio-server", ".", []string{"build-essential"}); err != nil {
+	if err := RecordUsed("", "rstudio-server", ".", nil, []string{"build-essential"}); err != nil {
 		t.Fatalf("RecordUsed(\"\", ...) = %v, want nil", err)
 	}
 }
@@ -29,7 +29,7 @@ func TestRecordUsedNoopWithNoRoot(t *testing.T) {
 // A fresh combination writes exactly one file.
 func TestRecordUsedWritesOneFile(t *testing.T) {
 	root := testRoot(t)
-	if err := RecordUsed(root, "rstudio-server", ".", []string{"build-essential", "r/4.4.3"}); err != nil {
+	if err := RecordUsed(root, "rstudio-server", ".", nil, []string{"build-essential", "r/4.4.3"}); err != nil {
 		t.Fatal(err)
 	}
 	entries, err := os.ReadDir(Dir(root))
@@ -46,7 +46,7 @@ func TestRecordUsedWritesOneFile(t *testing.T) {
 func TestRecordUsedRepeatBumpsMtimeNotANewFile(t *testing.T) {
 	root := testRoot(t)
 	overlays := []string{"build-essential", "r/4.4.3"}
-	if err := RecordUsed(root, "rstudio-server", ".", overlays); err != nil {
+	if err := RecordUsed(root, "rstudio-server", ".", nil, overlays); err != nil {
 		t.Fatal(err)
 	}
 	entries, err := os.ReadDir(Dir(root))
@@ -67,7 +67,7 @@ func TestRecordUsedRepeatBumpsMtimeNotANewFile(t *testing.T) {
 
 	// Order shuffled and re-sorted internally, so this still counts as the
 	// same combination.
-	if err := RecordUsed(root, "rstudio-server", ".", []string{"r/4.4.3", "build-essential"}); err != nil {
+	if err := RecordUsed(root, "rstudio-server", ".", nil, []string{"r/4.4.3", "build-essential"}); err != nil {
 		t.Fatal(err)
 	}
 	entries, err = os.ReadDir(Dir(root))
@@ -86,14 +86,14 @@ func TestRecordUsedRepeatBumpsMtimeNotANewFile(t *testing.T) {
 	}
 }
 
-// A different overlay set at the same helper+location is a second, distinct
-// combination — two files, not a replacement.
+// A different required or added overlay set at the same helper+location is a
+// second, distinct combination — two files, not a replacement.
 func TestRecordUsedDifferentOverlaysIsASecondFile(t *testing.T) {
 	root := testRoot(t)
-	if err := RecordUsed(root, "rstudio-server", ".", []string{"r/4.4.3"}); err != nil {
+	if err := RecordUsed(root, "rstudio-server", ".", []string{"r/4.4.3"}, []string{"extra"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := RecordUsed(root, "rstudio-server", ".", []string{"r/4.5.0"}); err != nil {
+	if err := RecordUsed(root, "rstudio-server", ".", []string{"r/4.5.0"}, []string{"extra"}); err != nil {
 		t.Fatal(err)
 	}
 	entries, err := os.ReadDir(Dir(root))
@@ -108,14 +108,14 @@ func TestRecordUsedDifferentOverlaysIsASecondFile(t *testing.T) {
 // ListUsed returns only the matching helper+location, newest mtime first.
 func TestListUsedFiltersAndOrdersByRecency(t *testing.T) {
 	root := testRoot(t)
-	if err := RecordUsed(root, "rstudio-server", ".", []string{"r/4.4.3"}); err != nil {
+	if err := RecordUsed(root, "rstudio-server", ".", nil, []string{"r/4.4.3"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := RecordUsed(root, "jupyterlab", ".", []string{"python/3.12"}); err != nil {
+	if err := RecordUsed(root, "jupyterlab", ".", nil, []string{"python/3.12"}); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(10 * time.Millisecond)
-	if err := RecordUsed(root, "rstudio-server", ".", []string{"r/4.5.0"}); err != nil {
+	if err := RecordUsed(root, "rstudio-server", ".", nil, []string{"r/4.5.0"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -146,13 +146,13 @@ func TestListUsedEmptyWithNoHistoryDir(t *testing.T) {
 // ListAll groups every combination by helper, then location.
 func TestListAllGroupsByHelperThenLocation(t *testing.T) {
 	root := testRoot(t)
-	if err := RecordUsed(root, "rstudio-server", ".", []string{"r/4.4.3"}); err != nil {
+	if err := RecordUsed(root, "rstudio-server", ".", nil, []string{"r/4.4.3"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := RecordUsed(root, "rstudio-server", "sub", []string{"r/4.5.0"}); err != nil {
+	if err := RecordUsed(root, "rstudio-server", "sub", nil, []string{"r/4.5.0"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := RecordUsed(root, "jupyterlab", ".", []string{"python/3.12"}); err != nil {
+	if err := RecordUsed(root, "jupyterlab", ".", nil, []string{"python/3.12"}); err != nil {
 		t.Fatal(err)
 	}
 

@@ -205,6 +205,9 @@ func PlanRun(ctx context.Context, opts RunOptions) (*RunPlan, error) {
 		return nil, fmt.Errorf("walltime is required for helpers — set #TIME: in the script or pass walltime explicitly")
 	}
 
+	if err := checkRoot(ctx, cwd); err != nil {
+		return nil, err
+	}
 	containerCmd, err := buildCondatainerCmd(opts, spec)
 	if err != nil {
 		return nil, err
@@ -278,7 +281,8 @@ func ExecutePlan(ctx context.Context, plan *RunPlan) (string, error) {
 		run := newHelperRun(helperID, plan.Options.ScriptName, jobID, cwd, plan.Spec.Time,
 			plan.Options, plan.UserOverlays, plan.Spec, plan.Params, "pending", string(plan.Scheduler.GetType()))
 		_ = AppendHistory(run)
-		recordSharedUsage(cwd, plan.Options.ScriptName, run.Overlays)
+		recordSharedUsage(cwd, plan.Options.ScriptName,
+			resolveOverlayTemplate(plan.Meta.RequiredOverlays, plan.Params), run.Overlays)
 		logger.Info("Helper submitted", "id", helperID)
 		return helperID, nil
 	}
@@ -307,16 +311,18 @@ func ExecutePlan(ctx context.Context, plan *RunPlan) (string, error) {
 	run := newHelperRun(helperID, plan.Options.ScriptName, "", cwd, plan.Spec.Time,
 		plan.Options, plan.UserOverlays, plan.Spec, plan.Params, "starting", "local")
 	_ = AppendHistory(run)
-	recordSharedUsage(cwd, plan.Options.ScriptName, run.Overlays)
+	recordSharedUsage(cwd, plan.Options.ScriptName,
+		resolveOverlayTemplate(plan.Meta.RequiredOverlays, plan.Params), run.Overlays)
 	// Reap the child while the caller lives; init reaps it afterwards.
 	go func() { _ = cmd.Wait() }()
 	return helperID, nil
 }
 
-// recordSharedUsage records this launch's overlay combination in the
-// project's shared history when cwd stands inside one. Best-effort: a
+// recordSharedUsage records this launch's required overlays (as declared, with
+// params filled in) and added overlays in the project's shared history when
+// cwd stands inside one. Best-effort: a
 // launch that already started must not fail because of it.
-func recordSharedUsage(cwd, name string, overlays []string) {
+func recordSharedUsage(cwd, name string, required, overlays []string) {
 	standing, err := project.StandingAt(cwd)
 	if err != nil || standing == nil {
 		return
@@ -325,5 +331,5 @@ func recordSharedUsage(cwd, name string, overlays []string) {
 	if err != nil {
 		return
 	}
-	_ = RecordUsed(standing.Root, name, filepath.ToSlash(location), overlays)
+	_ = RecordUsed(standing.Root, name, filepath.ToSlash(location), required, overlays)
 }
