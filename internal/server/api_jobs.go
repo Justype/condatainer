@@ -286,6 +286,7 @@ func (s *srv) handleHelpersClearFinished(w http.ResponseWriter, r *http.Request)
 }
 
 // handleGpuOptions serves GET /api/gpu-options — returns unique GPU type names from the active scheduler.
+// An empty list means no scheduler; a failed query is a 503 so the client can retry.
 func (s *srv) handleGpuOptions(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	sched := scheduler.ActiveScheduler()
@@ -297,7 +298,7 @@ func (s *srv) handleGpuOptions(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	info, err := sched.GetClusterInfo(ctx)
 	if err != nil || info == nil {
-		json.NewEncoder(w).Encode([]string{}) //nolint:errcheck
+		http.Error(w, "scheduler query failed", http.StatusServiceUnavailable)
 		return
 	}
 	seen := make(map[string]bool)
@@ -312,4 +313,27 @@ func (s *srv) handleGpuOptions(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.Strings(opts)
 	json.NewEncoder(w).Encode(opts) //nolint:errcheck
+}
+
+// handlePartitions serves GET /api/partitions — returns the partition/queue names of the active scheduler.
+// An empty list means no scheduler; a failed query is a 503 so the client can retry.
+func (s *srv) handlePartitions(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	names := []string{}
+	if sched := scheduler.ActiveScheduler(); sched != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+		defer cancel()
+		info, err := sched.GetClusterInfo(ctx)
+		if err != nil || info == nil {
+			http.Error(w, "scheduler query failed", http.StatusServiceUnavailable)
+			return
+		}
+		for _, l := range info.Limits {
+			if l.Partition != "" {
+				names = append(names, l.Partition)
+			}
+		}
+	}
+	sort.Strings(names)
+	json.NewEncoder(w).Encode(names) //nolint:errcheck
 }

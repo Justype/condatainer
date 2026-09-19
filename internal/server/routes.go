@@ -51,6 +51,7 @@ func registerRoutes(mux *http.ServeMux, s *srv) {
 	mux.HandleFunc("/api/fs/bookmarks", s.handleFSBookmarks)
 	mux.HandleFunc("/api/fs/copy", s.handleFSCopy)
 	mux.HandleFunc("/api/gpu-options", s.handleGpuOptions)
+	mux.HandleFunc("/api/partitions", s.handlePartitions)
 	mux.HandleFunc("/api/project/status", s.handleProjectStatus)
 	mux.HandleFunc("/api/project/lock", s.handleProjectLock)
 

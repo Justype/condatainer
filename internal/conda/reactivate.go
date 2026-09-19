@@ -84,7 +84,7 @@ func sortedHookScripts(dir, ext string, reverse bool) []string {
 	return scripts
 }
 
-// shellQuote renders a path as a single-quoted shell word. The '\'' escape
+// shellQuote renders a path as a single-quoted shell word. The \' escape
 // works in both POSIX shells (close-quote, escaped literal quote, reopen)
 // and fish (its \' escape inside single quotes), so one implementation
 // covers every Shell.

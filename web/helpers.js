@@ -197,6 +197,8 @@ let _helperSavedConfig = {}; // saved config for the currently selected helper
 let _gpuOptions = [];        // available GPU types from scheduler
 let _gpuOptionsLoaded = false;
 let _gpuOptionsLoading = null;
+let _partitionOptionsLoaded = false;
+let _partitionOptions = [];
 let _helpersLoaded = false;
 let _helpersLoading = null;
 
@@ -204,7 +206,7 @@ async function loadGpuOptions(force) {
   if (!force && (_gpuOptionsLoaded || _gpuOptionsLoading)) return _gpuOptionsLoading;
   _gpuOptionsLoading = (async () => {
     try {
-      const opts = await fetch('/api/gpu-options').then(r => r.json());
+      const opts = await fetch('/api/gpu-options').then(r => { if (!r.ok) throw new Error(r.status); return r.json(); });
       if (Array.isArray(opts) && opts.length) {
         _gpuOptions = opts;
         initCombobox('cfg-gpu', opts, true, null);
@@ -216,6 +218,28 @@ async function loadGpuOptions(force) {
     await _gpuOptionsLoading;
   } finally {
     _gpuOptionsLoading = null;
+  }
+}
+
+let _partitionOptionsLoading = null;
+
+async function loadPartitionOptions(force) {
+  if (_partitionOptionsLoading) return _partitionOptionsLoading;
+  if (!force && _partitionOptionsLoaded) return;
+  _partitionOptionsLoading = (async () => {
+    try {
+      const opts = await fetch('/api/partitions').then(r => { if (!r.ok) throw new Error(r.status); return r.json(); });
+      if (Array.isArray(opts) && opts.length) {
+        _partitionOptions = opts;
+        initCombobox('cfg-partition', opts, true, null);
+      }
+      _partitionOptionsLoaded = true;
+    } catch {}
+  })();
+  try {
+    await _partitionOptionsLoading;
+  } finally {
+    _partitionOptionsLoading = null;
   }
 }
 
@@ -236,6 +260,7 @@ async function loadHelpers(force) {
     if (_applyPendingStartSelection(true)) return;
     _restoreSelection();
     loadGpuOptions();
+    loadPartitionOptions();
     return;
   }
 
@@ -265,6 +290,7 @@ async function loadHelpers(force) {
   if (_applyPendingStartSelection(true)) return;
   _restoreSelection();
   loadGpuOptions(force);
+  loadPartitionOptions(force);
 }
 
 async function refreshStartHelpers() {
@@ -432,15 +458,16 @@ function openHelperConfigModal() {
 
   resRows.forEach(({ key, label, ph }) => {
     const saved = _helperSavedConfig[key] || '';
-    const useCombo = key === 'gpu' && _gpuOptions.length > 0;
+    const useCombo = (key === 'gpu' && _gpuOptions.length > 0) ||
+                     (key === 'partition' && _partitionOptions.length > 0);
     html += '<span class="param-name">' + escHtml(label) + '</span>' +
       '<div class="param-cell">' +
         (useCombo
-          ? '<div class="combo-wrap" id="combo-hcfg-gpu">' +
-              '<input class="field-input combo-input" id="hcfg-gpu" autocomplete="off"' +
+          ? '<div class="combo-wrap" id="combo-hcfg-' + key + '">' +
+              '<input class="field-input combo-input" id="hcfg-' + key + '" autocomplete="off"' +
               ' value="' + escHtml(saved) + '" data-value="' + escHtml(saved) + '"' +
               ' placeholder="' + escHtml(ph) + '">' +
-              '<div class="combo-list" id="combo-list-hcfg-gpu"></div>' +
+              '<div class="combo-list" id="combo-list-hcfg-' + key + '"></div>' +
             '</div>'
           : '<input class="field-input" id="hcfg-' + key + '" value="' + escHtml(saved) +
               '" placeholder="' + escHtml(ph) + '">') +
@@ -473,6 +500,7 @@ function openHelperConfigModal() {
   body.innerHTML = html;
 
   if (_gpuOptions.length) initCombobox('hcfg-gpu', _gpuOptions, true, null);
+  if (_partitionOptions.length) initCombobox('hcfg-partition', _partitionOptions, true, null);
   paramComputed.forEach(({ p, opts, isOpen }) => {
     if (opts.length) initCombobox('hcfg-' + p.key, opts, isOpen, null);
   });
