@@ -227,24 +227,14 @@ func (s *srv) handleHelperStop(w http.ResponseWriter, r *http.Request, id string
 	log := logging.FromContext(s.ctx)
 	if run := helper.HistoryEntryForID(id); run == nil {
 		log.Warn("server: stop — history entry not found", "id", id)
-	} else if run.JobID == "" {
-		if err := helper.KillHeadlessProcess(id); err != nil {
-			log.Debug("server: stop headless helper failed", "id", id, "err", err)
-		}
-	} else if sched := scheduler.ActiveScheduler(); sched == nil {
-		log.Warn("server: stop — no scheduler available", "id", id, "jobID", run.JobID)
-	} else {
-		cancelCtx, cancelCancel := context.WithTimeout(context.Background(), 30*time.Second)
-		if err := sched.CancelJob(cancelCtx, run.JobID); err != nil {
-			log.Warn("server: cancel job failed", "id", id, "jobID", run.JobID, "err", err)
-		}
-		cancelCancel()
+	} else if err := helper.StopRun(s.ctx, run); err != nil {
+		log.Warn("server: stop failed", "id", id, "jobID", run.JobID, "err", err)
 	}
 	// closeDone cleans up the proxy, updates history, decrements runningCount, and
 	// moves the ID to the done-map so the watcher skips it on future ticks.
 	// This ensures the count is correct immediately even if the trap never fires
 	// (e.g. SIGKILL, node crash, NFS issue).
-	s.watcher.closeDone(id, 0, time.Now())
+	s.watcher.closeDone(id, 130, time.Now()) // the exit code the wrapper records for a stop
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, `{"ok":true}`)
 }

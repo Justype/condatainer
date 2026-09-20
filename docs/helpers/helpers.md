@@ -191,7 +191,7 @@ The table lists each run's name, status (`running` / `done` / `failed`), node, w
 
 ### From the CLI
 
-Launch or reattach to a helper by name; the command prints the access URL:
+Launch or reattach to a helper by name. After the job is submitted the command returns to the prompt, and the access URL is printed to that terminal when the service is ready, along with any messages the app sends, such as a password. This stops when you close the shell. Add `--wait` to stay attached until the service is ready. To cancel, use `condatainer helper stop`; Ctrl+C only detaches:
 
 ```bash
 condatainer helper vscode-server      # show picker: launch or show status
@@ -199,6 +199,9 @@ condatainer helper                    # show status of all running helpers
 condatainer helper vscode-server stop # stop this helper's sessions
 condatainer helper stop --all         # stop every running helper
 ```
+
+A stop lets the helper shut down cleanly: the service gets up to 30 seconds to exit and unmount its
+overlays before the job ends.
 
 #### Resource Flags
 
@@ -223,6 +226,7 @@ These apply in all modes (HPC and headless).
 | `-o, --overlay` | Additional read-only overlay (repeatable) |
 | `-w, --cwd <path>` | Set working directory (e.g. `-w .` for current directory) |
 | `--new` | Skip reuse prompt, force new session |
+| `--wait` | Stay attached until the service is ready, instead of returning after submit |
 | `--no-project` | Resolve `#REQUIRED_OVERLAYS:` by installed name, even standing inside a project |
 
 When `-e` is unset, the helper looks in the current directory, preferring a per-user `env-$USER.img` over a shared `env.img`. If neither `.img` exists but its frozen snapshot (`env-$USER.sqf` or `env.sqf`) does, that is used instead, read-only — a helper declaring `#IMG_PACKAGES:` still needs an actual writable `.img` and runs guided overlay creation in that case.

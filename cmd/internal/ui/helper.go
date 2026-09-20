@@ -786,33 +786,42 @@ func GuidedInstallMissing(ctx context.Context, e *helper.ErrMissingPackages) err
 	return cntexec.InstallPackages(ctx, e.EnvImg, specs, false, cntexec.IO{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr})
 }
 
-// MonitorHelper polls NFS state files until the job finishes or the user presses
-// Ctrl+C. Returns nil once the service is ready or the job completes cleanly.
-func MonitorHelper(ctx context.Context, id string) error {
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT)
-	defer signal.Stop(sig)
-
-	utils.PrintMessage("Waiting for service to start...")
+// MonitorHelper polls NFS state files until the service is ready or the job
+// finishes. Attached, Ctrl+C detaches and leaves the job running. Detached, it
+// is a background watcher printing into the launching terminal: it has no Ctrl+C
+// handling and also ends when the helper is stopped before it is ready.
+func MonitorHelper(ctx context.Context, id string, detached bool) error {
+	var sig chan os.Signal
+	if !detached {
+		sig = make(chan os.Signal, 1)
+		signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT)
+		defer signal.Stop(sig)
+		utils.PrintMessage("Waiting for service to start...")
+	}
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
 	var msgOffset int64
-	var readySeen bool
+	ticks := 0
 
 	for {
 		select {
 		case <-sig:
-			utils.PrintMessage("Job still running. Use 'condatainer helper --status' to check.")
+			utils.PrintMessage("Detached; the helper is still running. Stop it with 'condatainer helper stop', or check it with 'condatainer helper --status'.")
 			return nil
 
 		case <-ctx.Done():
 			return nil
 
 		case <-ticker.C:
+			ticks++
 			r := helper.PollOnce(id, msgOffset)
 			msgOffset = r.NewOffset
 
+			// A detached watcher prints into a terminal the shell may be waiting on.
+			if detached && (len(r.NewMessages) > 0 || r.Ready != nil || r.Done != nil) {
+				fmt.Print("\r\n")
+			}
 			for _, m := range r.NewMessages {
 				switch m.Level {
 				case "warn":
@@ -824,8 +833,7 @@ func MonitorHelper(ctx context.Context, id string) error {
 				}
 			}
 
-			if r.Ready != nil && !readySeen {
-				readySeen = true
+			if r.Ready != nil {
 				rs := r.Ready
 				_ = helper.UpdateHistoryRun(id, func(run *helper.HelperRun) {
 					run.Status = "running"
@@ -838,7 +846,11 @@ func MonitorHelper(ctx context.Context, id string) error {
 				})
 				tmp := &helper.HelperRun{ID: id, Port: rs.Port, URLPath: rs.URLPath, ExternalURL: rs.ExternalURL}
 				if u := tmp.AccessURL(config.GetRunningServerPort()); u != "" {
-					utils.PrintSuccess("Access at: %s", u)
+					if detached {
+						utils.PrintSuccess("%s is ready. Access at: %s", id, u)
+					} else {
+						utils.PrintSuccess("Access at: %s", u)
+					}
 				}
 				if n := config.Global.Notification; n == "terminal" || n == "both" {
 					fmt.Print("\a")
@@ -850,21 +862,32 @@ func MonitorHelper(ctx context.Context, id string) error {
 
 			if r.Done != nil {
 				status := "failed"
-				if r.Done.ExitCode == 0 {
+				if r.Done.ExitCode == 0 || r.Done.ExitCode >= 128 { // 128+ is a signal: a stop
 					status = "done"
 				} else {
 					utils.PrintError("Helper %s failed (exit %d). Log: %s",
 						id, r.Done.ExitCode, helper.JobLogFilePath(id))
 				}
 				_ = helper.UpdateHistoryStatus(id, status, r.Done.Ts)
-				if r.Done.ExitCode != 0 {
+				if status == "failed" {
 					return fmt.Errorf("helper %s exited with non-zero code", id)
 				}
 				utils.PrintMessage("Helper %s finished.", id)
 				return nil
 			}
+
+			// Stopped or closed out elsewhere before it was ever ready.
+			if detached && ticks%5 == 0 && helperInactive(id) {
+				return nil
+			}
 		}
 	}
+}
+
+// helperInactive reports that the helper's history entry is gone or finished.
+func helperInactive(id string) bool {
+	run := helper.HistoryEntryForID(id)
+	return run == nil || run.Status == "done" || run.Status == "failed"
 }
 
 // FormatAge formats an elapsed duration as a compact human-readable string

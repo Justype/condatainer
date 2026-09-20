@@ -94,3 +94,13 @@ func TestParsePostScriptHelperFlagsRequiresValues(t *testing.T) {
 		t.Fatal("expected invalid --cpus value to return an error")
 	}
 }
+
+func TestParsePostScriptHelperFlagsWait(t *testing.T) {
+	flags, rest, err := parsePostScriptHelperFlags([]string{"--wait", "--mem", "8g"})
+	if err != nil || !flags.waitSet || len(rest) != 0 {
+		t.Fatalf("--wait: flags.waitSet=%v rest=%#v err=%v", flags.waitSet, rest, err)
+	}
+	if _, _, err := parsePostScriptHelperFlags([]string{"--wait=1"}); err == nil {
+		t.Fatal("--wait=1 should be rejected: the flag takes no value")
+	}
+}

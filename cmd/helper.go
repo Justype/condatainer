@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	ui "github.com/Justype/condatainer/cmd/internal/ui"
@@ -17,6 +19,7 @@ import (
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 type postScriptHelperFlags struct {
@@ -40,6 +43,7 @@ type postScriptHelperFlags struct {
 	partition    string
 	newSet       bool
 	noProjectSet bool
+	waitSet      bool
 }
 
 var (
@@ -58,6 +62,7 @@ A helper script submits a job, starts the app, and opens an SSH tunnel to your b
   - With no arguments, shows the apps you have running.
   - Every helper has its own flags: condatainer helper <name> -h
   - Scheduler options (cpus, mem, time, gpu, account, partition) can be set per run or saved as defaults.
+  - The command returns once the job is submitted and prints the access URL to this terminal when the app is ready. Add --wait to stay attached until then. Stop an app with: condatainer helper stop
 
 Note: not available inside a container or a scheduler job.`,
 	Example: `  condatainer helper                          # Show running apps
@@ -219,6 +224,11 @@ func parsePostScriptHelperFlags(args []string) (postScriptHelperFlags, []string,
 					return flags, nil, fmt.Errorf("flag %s does not take a value", name)
 				}
 				flags.noProjectSet = true
+			case "--wait":
+				if hasVal {
+					return flags, nil, fmt.Errorf("flag %s does not take a value", name)
+				}
+				flags.waitSet = true
 			default:
 				passthrough = append(passthrough, arg)
 			}
@@ -584,7 +594,7 @@ func runHelper(cmd *cobra.Command, args []string) error {
 			if isRunning && chosen != nil {
 				if chosen.Status == "pending" || chosen.Status == "starting" {
 					// Not up yet — re-attach and wait for the service URL.
-					return ui.MonitorHelper(ctx, chosen.ID)
+					return ui.MonitorHelper(ctx, chosen.ID, false)
 				}
 				if url := chosen.AccessURL(serverPort); url != "" {
 					utils.PrintSuccess("Access at: %s", url)
@@ -720,14 +730,54 @@ func runHelper(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Monitor: poll NFS state files until ready or done.
-	if err := ui.MonitorHelper(ctx, helperID); err != nil {
+	// Without --wait, a detached watcher tells this terminal when the service is
+	// ready and records when it stops; a caller with no terminal waits here instead.
+	if !postFlags.waitSet {
+		if tty := stdoutTTY(); tty != "" {
+			if err := startHelperWatcher(helperID, tty); err != nil {
+				utils.PrintWarning("could not start the background watcher: %v", err)
+			} else {
+				utils.PrintMessage("Started %s. It is printed here when the service is ready; stop it with 'condatainer helper stop'.", helperID)
+				return nil
+			}
+		}
+	}
+	if err := ui.MonitorHelper(ctx, helperID, false); err != nil {
 		if errors.Is(err, context.Canceled) {
 			return nil
 		}
 		return err
 	}
 	return nil
+}
+
+// stdoutTTY is the terminal device this command prints to, or "" when stdout
+// is not a terminal.
+func stdoutTTY() string {
+	if !term.IsTerminal(int(os.Stdout.Fd())) {
+		return ""
+	}
+	tty, err := os.Readlink("/proc/self/fd/1")
+	if err != nil {
+		return ""
+	}
+	return tty
+}
+
+// startHelperWatcher launches the hidden _helper_watch command, which prints to
+// tty when the helper is ready and ends when the launching shell does.
+func startHelperWatcher(id, tty string) error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	watch := exec.Command(exe, "_helper_watch", "--id", id, "--tty", tty,
+		"--shell-pid", strconv.Itoa(os.Getppid()))
+	watch.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := watch.Start(); err != nil {
+		return err
+	}
+	return watch.Process.Release()
 }
 
 // showHelperStatus lists running helpers (optionally filtered by name) from JSONL history.
@@ -945,7 +995,7 @@ func runHelperStop(ctx context.Context, name string, stopAll bool) error {
 	}
 
 	for _, r := range toStop {
-		if err := stopHelperRun(r); err != nil {
+		if err := stopHelperRun(ctx, r); err != nil {
 			utils.PrintWarning("Failed to stop %s: %v", r.ID, err)
 		} else {
 			utils.PrintSuccess("Stopped %s", r.ID)
@@ -954,21 +1004,11 @@ func runHelperStop(ctx context.Context, name string, stopAll bool) error {
 	return nil
 }
 
-// stopHelperRun terminates a single helper run:
-//   - Scheduled (JobID != ""): asks the scheduler to cancel
-//   - Headless (JobID == ""): sends SIGTERM to the process group via the pid file
-//
-// Always marks the history entry as "done" so the server watcher and status
-// commands see it as finished even if the signal fails (process already dead).
-func stopHelperRun(r *helper.HelperRun) error {
-	if r.JobID != "" {
-		if sched := scheduler.ActiveScheduler(); sched != nil {
-			_ = sched.CancelJob(context.Background(), r.JobID)
-		}
-	} else {
-		if err := helper.KillHeadlessProcess(r.ID); err != nil {
-			utils.PrintDebug("kill headless process %s: %v", r.ID, err)
-		}
+// stopHelperRun stops a single helper run with helper.StopRun and always marks
+// its history entry "done", even if the signal fails (process already dead).
+func stopHelperRun(ctx context.Context, r *helper.HelperRun) error {
+	if err := helper.StopRun(ctx, r); err != nil {
+		utils.PrintDebug("stop %s: %v", r.ID, err)
 	}
 	return helper.UpdateHistoryStatus(r.ID, "done", time.Now())
 }

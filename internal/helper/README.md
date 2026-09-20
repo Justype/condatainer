@@ -293,6 +293,19 @@ When writing helper scripts, use `${CNT_HELPER_BIND_ADDR:-127.0.0.1}` as the bin
 
 ---
 
+## Waiting for a helper
+
+`condatainer helper <name>` returns once the job is submitted and leaves a hidden `_helper_watch`
+process running `ui.MonitorHelper` (its own session, stdout and stderr on the launching terminal's
+device). It prints the helper's messages and, when `ready` lands, the access URL, and records the run as
+`running` in the history; then it exits. It also exits when the launching shell's pid is gone
+(`--shell-pid`), on a `done` event before ready, or when the history entry is finished or gone.
+
+The output is written straight to a terminal the shell may be waiting on, so each batch starts on a new
+line. Without a terminal on stdout, or with `--wait`, the command waits itself and stays attached until
+`ready`. Ctrl+C there detaches; it never stops the helper. Later state, including `done`, is the
+dashboard server's to record.
+
 ## Stopping a helper
 
 A stop is a SIGTERM to the wrapper: the scheduler's cancel signals the batch shell only, and headless
