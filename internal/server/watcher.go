@@ -30,6 +30,20 @@ const runningSchedPollInterval = 5 * time.Minute
 // just prevents hammering the SSH server on persistent auth failures.
 const tunnelReopenInterval = 30 * time.Second
 
+// tunnelReopenMax caps the backoff between reopen attempts.
+const tunnelReopenMax = 5 * time.Minute
+
+// reopenInterval is the wait before the next reopen attempt after failures
+// consecutive failed dials: tunnelReopenInterval for the first two, then
+// doubling up to tunnelReopenMax.
+func reopenInterval(failures int) time.Duration {
+	d := tunnelReopenInterval
+	for i := 1; i < failures && d < tunnelReopenMax; i++ {
+		d *= 2
+	}
+	return min(d, tunnelReopenMax)
+}
+
 // helperInfo caches scheduler job ID, status, timing, and service address for an active helper.
 // Avoids re-reading history.jsonl on every tick.
 type helperInfo struct {
@@ -265,9 +279,17 @@ func (w *watcher) pollHelper(id string) {
 
 	// Reopen tunnel if it dropped (SSH disconnect or initial dial failure).
 	// Open() is called in a goroutine so the watcher is not blocked by the SSH dial.
-	// Rate-limited to avoid hammering the SSH server on persistent auth failures.
+	// Backs off with consecutive failures (reopenInterval) so a persistently
+	// failing tunnel is not hammered. After a failed dial the job is usually
+	// gone, so the scheduler is asked again before dialling once more.
 	if inf, ok := w.info[id]; ok && inf.status == "running" && inf.port > 0 && w.s.proxies.Get(id) == nil {
-		if last, seen := w.lastOpenAttempt[id]; !seen || time.Since(last) >= tunnelReopenInterval {
+		if last, seen := w.lastOpenAttempt[id]; !seen || time.Since(last) >= reopenInterval(w.s.proxies.Failures(id)) {
+			if w.s.proxies.LastError(id) != "" {
+				delete(w.lastSchedPoll, id)
+				if w.syncSchedulerStatus(id) {
+					return
+				}
+			}
 			w.lastOpenAttempt[id] = time.Now()
 			go w.s.proxies.Open(id, inf.name, inf.node, inf.port, inf.bindAll)
 		}
@@ -278,7 +300,7 @@ func (w *watcher) pollHelper(id string) {
 		walltime := time.Duration(rs.WalltimeSec) * time.Second
 		if inf, ok := w.info[id]; ok {
 			if rs.Port > 0 && w.s.proxies.Get(id) == nil {
-				w.s.proxies.Open(id, inf.name, rs.Node, rs.Port, inf.bindAll)
+				go w.s.proxies.Open(id, inf.name, rs.Node, rs.Port, inf.bindAll)
 			}
 			// Update cached info with actual start time, walltime, and service address from the ready event.
 			// bindAll is preserved from the initial history entry (set at submission time).
