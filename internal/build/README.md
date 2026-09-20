@@ -87,6 +87,11 @@ Recipes support metadata headers:
 Available variables: `$CNT_NAME` (complete name), `$CNT_TYPE`, `$CNT_PREFIX`, `$CNT_TMP` (also `$TMPDIR`, both `/cnt_tmp`),
 plus the scheduler's normalized `$NCPUS`, `$MEM`, `$MEM_GB`.
 Run as `bash -euo pipefail <recipe>` top to bottom — no `install()` wrapper.
+A script build also gets its `bin/` appended to `PATH` and
+`MAMBA_ROOT_PREFIX` set to the scratch path and `MAMBA_NO_RC=true`, the same root and rc handling as a Conda
+build, so `micromamba` is callable and its caches stay out of the user's home. A Conda or script build provisions a micromamba-only toolchain first when the host has none (a
+download, once); a failure to do so fails the build. A build submitted to the scheduler provisions it on
+the submitting host, before the job is queued, because the compute node may have no outbound access.
 
 ### Dependency Resolution
 

@@ -1,6 +1,7 @@
 package libexec
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -163,5 +164,14 @@ func TestAcquireUseFailsWhileUpdateHoldsTheLock(t *testing.T) {
 			lock.Close()
 		}
 		t.Error("AcquireUse() succeeded while the exclusive lock was held, want a refusal")
+	}
+}
+
+func TestEnsureMicromambaLeavesAProvisionedToolchainAlone(t *testing.T) {
+	scratch := withScratchTier(t)
+	provisionedStub(t, scratch)
+
+	if err := EnsureMicromamba(context.Background()); err != nil {
+		t.Fatalf("EnsureMicromamba on a provisioned tier: %v", err)
 	}
 }

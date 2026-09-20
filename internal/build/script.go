@@ -11,6 +11,7 @@ import (
 
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/libexec"
 	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/runtime/container"
 	execpkg "github.com/Justype/condatainer/internal/runtime/exec"
@@ -47,6 +48,11 @@ func (b *BuildObject) buildScript(ctx context.Context, buildDeps bool) error {
 
 	if skip, err := checkShouldBuild(b); skip || err != nil {
 		b.Cleanup(err != nil) //nolint:errcheck
+		return err
+	}
+
+	if err := ensureMicromamba(ctx); err != nil {
+		b.Cleanup(true) //nolint:errcheck
 		return err
 	}
 
@@ -184,6 +190,27 @@ func (b *BuildObject) buildDependencies(ctx context.Context, buildDeps bool) err
 	return nil
 }
 
+// toolchain returns the self-provisioned toolchain's directory and bin/, and
+// whether one is provisioned. buildScript provisions micromamba before this runs.
+func toolchain() (dir, bin string, ok bool) {
+	dir, ok = libexec.Dir()
+	if !ok {
+		return "", "", false
+	}
+	bin, _ = libexec.BinDir()
+	return dir, bin, true
+}
+
+// toolchainPathLine appends the toolchain's bin/ to PATH, or is empty without
+// one. Appended, so a tool the base or an overlay provides always wins and the
+// toolchain only fills a gap.
+func toolchainPathLine(bin string) string {
+	if bin == "" {
+		return ""
+	}
+	return `export PATH="$PATH":` + shellQuote(bin)
+}
+
 // buildExecOpts constructs the exec.Options for running the build script inside
 // the container, plus the IO carrying any #INPUT: answers on stdin.
 func (b *BuildObject) buildExecOpts() (execpkg.Options, execpkg.IO, error) {
@@ -197,16 +224,23 @@ func (b *BuildObject) buildExecOpts() (execpkg.Options, execpkg.IO, error) {
 		prefix = "/cnt/" + b.spec.Image.Name
 	}
 
+	// The self-provisioned toolchain, when there is one: a recipe can call
+	// micromamba where Conda's own path cannot do what it needs.
+	toolchainDir, toolchainBin, hasToolchain := toolchain()
+	if hasToolchain {
+		envSettings = append(envSettings, "MAMBA_ROOT_PREFIX="+ScratchPath, "MAMBA_NO_RC=true")
+	}
+
 	bashScript := fmt.Sprintf(`
 trap 'exit 130' INT TERM
-
+%s
 mkdir -p $TMPDIR
 bash -euo pipefail %s
 if [ $? -ne 0 ]; then
     echo "Build script %s failed."
     exit 1
 fi
-`, b.buildSource, b.buildSource)
+`, toolchainPathLine(toolchainBin), b.buildSource, b.buildSource)
 
 	depOverlays, err := dependencyOverlays(b.spec.Dependencies)
 	if err != nil {
@@ -219,7 +253,11 @@ fi
 	}
 	overlays = append(overlays, depOverlays...)
 
-	bindDirs := container.DeduplicateBindPaths(getAllBaseDirs())
+	baseDirs := getAllBaseDirs()
+	if hasToolchain {
+		baseDirs = append(baseDirs, toolchainDir)
+	}
+	bindDirs := container.DeduplicateBindPaths(baseDirs)
 	if b.ws.HostPayload() {
 		// Bind the leaf, not /cnt: covering /cnt would hide every dependency
 		// overlay mounted beside it. prepareBuildWorkspace created it.

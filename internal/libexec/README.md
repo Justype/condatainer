@@ -3,8 +3,12 @@
 Resolves and provisions CondaTainer's self-provisioned toolchain: one micromamba prefix in one of
 the four data-directory tiers. It always holds `micromamba`, and holds `squashfs-tools`
 (`mksquashfs`, `unsquashfs`), `squashfuse` and an ordinary (non-fakeroot) `apptainer` only when
-asked for by name. It is never a recipe's concern and never contributes to any artifact's identity:
-the toolchain is host-local infrastructure, the same status as the Apptainer binary itself.
+asked for by name. It never contributes to any artifact's identity: the toolchain is host-local
+infrastructure, the same status as the Apptainer binary itself. A Conda or script build creates it with `micromamba` alone when no tier has one
+(`EnsureMicromamba`). A script build can call
+`micromamba` from it, appended to `PATH` so anything the base provides wins; that is a convenience,
+not an input, so the version is not recorded and a recipe that solves with it is identified by its
+text.
 
 ## Placement
 

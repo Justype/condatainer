@@ -266,10 +266,19 @@ func (bg *BuildGraph) runSchedulerStep() error {
 	return nil
 }
 
-// submitJob creates and submits a scheduler job for the build
+// submitJob creates and submits a scheduler job for the build, provisioning
+// micromamba first when the build needs it.
 func (bg *BuildGraph) submitJob(obj *BuildObject, depIDs []string) (string, error) {
 	log := logging.FromContext(bg.ctx)
 	log.Debug("submitting scheduler job", "type", bg.scheduler.GetType(), "name", obj.NameVersion(), "deps", depIDs)
+
+	// The job runs the build on a compute node, which may have no outbound
+	// access, so the toolchain is provisioned here on the submitting host.
+	if obj.BuildType() != BuildTypeDef {
+		if err := ensureMicromamba(bg.ctx); err != nil {
+			return "", err
+		}
+	}
 
 	// Acquire lock before submitting to prevent duplicate scheduler submissions.
 	// The lock is created with an empty job_id and updated after Submit() returns.

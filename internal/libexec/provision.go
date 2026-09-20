@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/utils"
@@ -19,6 +20,8 @@ import (
 // commandContext builds a context-bound command for a host-side tool
 // invocation (micromamba, or a staged apptainer/mksquashfs/squashfuse being
 // verified) — never apptainer-mediated, these all run directly on the host.
+var ensureMu sync.Mutex
+
 func commandContext(ctx context.Context, name string, args ...string) *exec.Cmd {
 	return exec.CommandContext(ctx, name, args...)
 }
@@ -128,6 +131,18 @@ func resolveTools(names []string) ([]pkg, error) {
 // missing. A prefix without conda-meta/ is recreated.
 func Update(ctx context.Context, tools ...string) error {
 	return run(ctx, tools, false)
+}
+
+// EnsureMicromamba creates a toolchain holding micromamba alone when no tier
+// has one, and does nothing otherwise. Concurrent callers are serialized, so
+// only the first provisions.
+func EnsureMicromamba(ctx context.Context) error {
+	ensureMu.Lock()
+	defer ensureMu.Unlock()
+	if Installed("micromamba") {
+		return nil
+	}
+	return Update(ctx)
 }
 
 // Sync completes the toolchain: it creates the prefix if there is none, and

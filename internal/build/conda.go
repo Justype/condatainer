@@ -28,6 +28,19 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
+// ensureMicromamba provisions the toolchain with micromamba when the host has
+// none, so a Conda or script build never starts without it.
+func ensureMicromamba(ctx context.Context) error {
+	if libexec.Installed("micromamba") {
+		return nil
+	}
+	utils.PrintMessage("Installing micromamba into the self-provisioned toolchain...")
+	if err := libexec.EnsureMicromamba(ctx); err != nil {
+		return fmt.Errorf("failed to provision micromamba: %w", err)
+	}
+	return nil
+}
+
 // buildConda installs an environment with micromamba and packs it. The
 // install -> stage -> pack sequence is the script backend's too, which is why
 // both share packOutput.
@@ -37,6 +50,11 @@ func (b *BuildObject) buildConda(ctx context.Context) error {
 
 	if skip, err := checkShouldBuild(b); skip || err != nil {
 		b.Cleanup(err != nil) //nolint:errcheck
+		return err
+	}
+
+	if err := ensureMicromamba(ctx); err != nil {
+		b.Cleanup(true) //nolint:errcheck
 		return err
 	}
 
@@ -422,7 +440,7 @@ func (b *BuildObject) predictCondaIdentity(ctx context.Context) (meta.KeyRef, er
 }
 
 // solveConda runs the build's own create command as a dry run and returns what
-// it would install.
+// it would install. It provisions micromamba first if the host has none.
 //
 // It mounts none of the build workspace. A dry run writes nothing, so the
 // payload directory it would install into need not exist — which matters,
@@ -435,6 +453,9 @@ func (b *BuildObject) predictCondaIdentity(ctx context.Context) (meta.KeyRef, er
 // a decision, and Apptainer's mount chatter or Micromamba's progress would read
 // as a build that had started. Output is kept and reported only if it fails.
 func (b *BuildObject) solveConda(ctx context.Context) ([]conda.Package, error) {
+	if err := ensureMicromamba(ctx); err != nil {
+		return nil, err
+	}
 	// mkdir only — never prepareBuildWorkspace, which would create the scratch
 	// image this deliberately does without.
 	if err := ensureWorkspaceRoot(b); err != nil {
