@@ -186,7 +186,7 @@ func TestProjectTagRoundTrip(t *testing.T) {
 // project never used.
 func TestProjectTagRoundTripSnapshot(t *testing.T) {
 	m := meta.Manifest{Name: meta.EnvName, Type: catalog.TypeEnv, BuildType: meta.BuildTypeSnapshot}
-	m.Keys.Identity = meta.KeyRef{Scheme: "snapshot-env-v1", SHA256: strings.Repeat("d", 64)}
+	m.Keys.Identity = meta.KeyRef{Scheme: "payload-tree-v1", SHA256: strings.Repeat("d", 64)}
 	m.Keys.Equiv = m.Keys.Identity
 
 	tags, err := ProjectTags(m, true)

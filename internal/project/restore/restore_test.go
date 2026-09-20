@@ -490,3 +490,11 @@ func TestTransientStagingIsNamedForTheArtifact(t *testing.T) {
 		t.Fatalf("entry name = %q, want the encoded name and a short digest", want)
 	}
 }
+
+// A lock that recorded no payload key has nothing to compare a rebuild with, so
+// it says nothing rather than reading the artifact.
+func TestPayloadDriftNeedsARecordedKey(t *testing.T) {
+	if payloadDrifted(&lock.Entry{}, filepath.Join(t.TempDir(), "absent.sqf")) {
+		t.Error("drift reported for a lock with no payload key")
+	}
+}

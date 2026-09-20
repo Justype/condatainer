@@ -243,7 +243,7 @@ func TestUpstreamRefusesAnAmbiguousCollection(t *testing.T) {
 // pack produced rather than anything regenerable from a checkout.
 func vendorEnv(t *testing.T, root, identity string) string {
 	t.Helper()
-	ref := meta.KeyRef{Scheme: string(key.SnapshotEnvV1), SHA256: identity}
+	ref := meta.KeyRef{Scheme: string(key.PayloadTreeV1), SHA256: identity}
 	manifest := meta.Manifest{
 		SchemaVersion: meta.SchemaVersion,
 		Name:          meta.EnvName,

@@ -66,11 +66,13 @@ type BuildObject struct {
 	scriptSpecs     *scheduler.ScriptSpecs
 	condaChannelPkg string // channel-annotated package spec, e.g. "bioconda::star"; set when input uses "::" notation
 
-	// The recipe's #INPUT: questions and the answers, same order. Answers reach
-	// the recipe on stdin and go no further — they are not in Spec, so they
-	// cannot enter the manifest.
+	// Every question the build puts to the user and the answers, same order: the
+	// recipe's #INPUT: prompts first, then each #SOURCE: ask:. The first
+	// recipeInputs answers reach the recipe on stdin; the rest are consumed by
+	// the fetch. None is in Spec, so none can enter the manifest.
 	inputPrompts []string
 	inputAnswers []string
+	recipeInputs int
 
 	// Placeholder values for a template recipe, e.g. {"star_version": "2.7.11b"}.
 	// Handed to the catalog, which expands the recipe before it is written out.
@@ -182,6 +184,17 @@ func (b *BuildObject) SetStoreOverflow(v bool) { b.storeOverflow = v }
 func (b *BuildObject) StoreOverflow() bool    { return b.storeOverflow }
 func (b *BuildObject) BuildType() BuildType   { return b.buildType }
 func (b *BuildObject) InputAnswers() []string { return b.inputAnswers }
+
+// recipeAnswers are the answers the recipe reads on stdin: its #INPUT: prompts.
+func (b *BuildObject) recipeAnswers() []string {
+	return b.inputAnswers[:min(b.recipeInputs, len(b.inputAnswers))]
+}
+
+// sourceAnswers are the answers the fetch consumes, one per #SOURCE: ask: in
+// declaration order. They never reach the recipe.
+func (b *BuildObject) sourceAnswers() []string {
+	return b.inputAnswers[min(b.recipeInputs, len(b.inputAnswers)):]
+}
 
 func (b *BuildObject) String() string {
 	return fmt.Sprintf(`BuildObject:
@@ -632,11 +645,12 @@ func (b *BuildObject) parseInputPrompts() error {
 	if err != nil {
 		return fmt.Errorf("failed to parse inputs: %w", err)
 	}
-	b.inputPrompts = recipe.Inputs
+	b.inputPrompts, b.recipeInputs = recipe.Prompts(), len(recipe.Inputs)
 	return nil
 }
 
-// collectInputAnswers asks for every #INPUT: the recipe declares, in order.
+// collectInputAnswers asks for every question the recipe declares, in order: its
+// #INPUT: prompts, then each #SOURCE: ask:.
 // Answers reach the recipe on stdin, not an env var: apptainer shell-evaluates
 // env values, so a $ or backtick in a pasted URL would be mangled or run.
 func (b *BuildObject) collectInputAnswers(ctx context.Context) error {
@@ -659,7 +673,7 @@ func (b *BuildObject) collectInputAnswers(ctx context.Context) error {
 	}
 
 	log := logging.FromContext(ctx)
-	for _, prompt := range b.inputPrompts {
+	for i, prompt := range b.inputPrompts {
 		msg := strings.ReplaceAll(prompt, `\\n`, "\n")
 		msg = strings.ReplaceAll(msg, "\\n", "\n")
 		for _, line := range strings.Split(msg, "\n") {
@@ -671,6 +685,12 @@ func (b *BuildObject) collectInputAnswers(ctx context.Context) error {
 			return err
 		}
 		b.inputAnswers = append(b.inputAnswers, input)
+
+		// Only where someone is being asked: a job reading piped answers on a
+		// node was checked when they were typed, on the login node.
+		if i >= b.recipeInputs && utils.IsInteractiveShell() {
+			warnIfLinkLacksVersion(log, b.spec.Image.Name, input)
+		}
 	}
 	return nil
 }
@@ -1087,7 +1107,7 @@ func resolveBuildSource(ctx context.Context, base *BuildObject, tmpDir string) (
 	}
 	base.buildSource = path
 	base.tempSource = true
-	base.inputPrompts = recipe.Inputs
+	base.inputPrompts, base.recipeInputs = recipe.Prompts(), len(recipe.Inputs)
 
 	// The recipe is authoritative over the index entry, which can be stale.
 	base.spec.Image.Type = recipe.Type
@@ -1104,7 +1124,7 @@ func resolveBuildSource(ctx context.Context, base *BuildObject, tmpDir string) (
 	// is never recorded; the variant is recorded as its selected values.
 	source := SourceSpec{Script: &ScriptSource{
 		File:    SourceFile{Name: filepath.Base(path), Data: recipe.Text},
-		Prompts: recipe.Inputs,
+		Prompts: recipe.Prompts(),
 	}}
 	if isContainer {
 		source = SourceSpec{Definition: &DefinitionSource{
@@ -1113,7 +1133,7 @@ func resolveBuildSource(ctx context.Context, base *BuildObject, tmpDir string) (
 	}
 	source.Placeholders = selectedPlaceholders(recipe)
 	source.TargetTemplate = recipe.TargetTemplate
-	source.RequiresInput = len(recipe.Inputs) > 0
+	source.RequiresInput = len(recipe.Prompts()) > 0
 	source.Collection = match.Source.Desc.Source
 	base.spec.Source = source
 	base.embedSource(SourceFile{Name: meta.RecipeFileName, Data: recipe.Text})

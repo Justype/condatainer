@@ -20,6 +20,25 @@ type Artifact struct {
 	// From is the resolved upstream image digest for a definition, or
 	// meta.Unrecorded when resolution failed. It is empty without an upstream.
 	From string
+	// Fetched are the #SOURCE: inputs the build downloaded, by the name the
+	// recipe gave each and the digest of the bytes that arrived. A recipe that
+	// fetches without declaring a source contributes none, and its keys are what
+	// they were before sources existed.
+	Fetched []meta.SourceFile
+}
+
+// sourceValues renders fetched inputs as preimage lines. Only identity schemes
+// call it: a re-cut upstream file makes a different build, but not one that
+// stops substituting for what a recipe asks for.
+func sourceValues(sources []meta.SourceFile) []SourceValue {
+	if len(sources) == 0 {
+		return nil
+	}
+	out := make([]SourceValue, 0, len(sources))
+	for _, s := range sources {
+		out = append(out, SourceValue{Name: s.Name, Digest: s.Digest()})
+	}
+	return out
 }
 
 // Dep is one direct build dependency and the keys advertised by its image.

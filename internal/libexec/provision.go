@@ -130,31 +130,33 @@ func resolveTools(names []string) ([]pkg, error) {
 // micromamba on a tier with none; naming tools also installs any that are
 // missing. A prefix without conda-meta/ is recreated.
 func Update(ctx context.Context, tools ...string) error {
-	return run(ctx, tools, false)
+	return run(ctx, tools, false, false)
 }
 
 // EnsureMicromamba creates a toolchain holding micromamba alone when no tier
-// has one, and does nothing otherwise. Concurrent callers are serialized, so
-// only the first provisions.
+// has one, and does nothing otherwise. Callers are serialized in this process
+// and, through the tier lock, across processes: one that loses the race finds
+// the toolchain provisioned and leaves it alone.
 func EnsureMicromamba(ctx context.Context) error {
 	ensureMu.Lock()
 	defer ensureMu.Unlock()
 	if Installed("micromamba") {
 		return nil
 	}
-	return Update(ctx)
+	return run(ctx, nil, false, true)
 }
 
 // Sync completes the toolchain: it creates the prefix if there is none, and
 // otherwise installs any package in install that is missing and updates every
 // installed package.
 func Sync(ctx context.Context, install ...string) error {
-	return run(ctx, install, true)
+	return run(ctx, install, true, false)
 }
 
 // run is Update and Sync: updateAll updates everything installed rather than
-// only the named packages.
-func run(ctx context.Context, tools []string, updateAll bool) error {
+// only the named packages. ifMissing returns once the tier lock is held if
+// micromamba is by then installed.
+func run(ctx context.Context, tools []string, updateAll, ifMissing bool) error {
 	requested, err := resolveTools(tools)
 	if err != nil {
 		return err
@@ -179,6 +181,10 @@ func run(ctx context.Context, tools []string, updateAll bool) error {
 		return err
 	}
 	defer tierLock.Close()
+
+	if ifMissing && Installed("micromamba") {
+		return nil
+	}
 
 	var useLock *utils.FileLock
 	if hadLive {

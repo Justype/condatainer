@@ -42,6 +42,10 @@ func createSquashfs(ctx context.Context, b *BuildObject, isData bool, sourceDir,
 	log := logging.FromContext(ctx)
 	io := execpkg.IOFromContext(ctx)
 
+	if err := b.stagePayloadKey(ctx, sourceDir, metaDir); err != nil {
+		return err
+	}
+
 	source := sourceDir
 	if b.ws.UsesSandbox() {
 		source = b.ws.Sandbox

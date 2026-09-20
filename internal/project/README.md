@@ -771,7 +771,7 @@ Each kind names what closes it, since the two are unpinnable for different
 reasons and only one remedy applies:
 
 - **A writable `.img`** has no identity to hash — its content changes under any
-  reader. `overlay freeze` packs it into a `.sqf` with a `snapshot-env-v1`
+  reader. `overlay freeze` packs it into a `.sqf` with a `payload-tree-v1`
   identity, and a project-relative `.sqf` is `KindPath`, which pins. This is the
   case freeze exists for.
 - **An external `.sqf`** is already immutable; the problem is that restore does

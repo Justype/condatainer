@@ -25,6 +25,7 @@ func withScratchTier(t *testing.T) string {
 	scratch := filepath.Join(t.TempDir(), "condatainer")
 	t.Setenv("SCRATCH", filepath.Dir(scratch))
 	t.Setenv("XDG_DATA_HOME", "")
+	t.Setenv("HOME", t.TempDir())
 	t.Setenv("CNT_EXTRA_ROOT", "")
 	t.Setenv("CNT_ROOT", "")
 	config.InitDataPaths()

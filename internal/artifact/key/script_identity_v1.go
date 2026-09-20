@@ -13,6 +13,7 @@ import (
 //   - artifact type
 //   - every #ENV value
 //   - comment-stripped recipe digest
+//   - every #SOURCE: input's name and the digest of the bytes fetched
 //   - every selected placeholder
 //   - every direct dependency's name and exact identity
 //
@@ -31,6 +32,7 @@ func deriveScriptIdentityV1(a Artifact) (Value, Model, error) {
 		Type:         a.Type,
 		Env:          Env(a.Env),
 		Recipe:       RecipeDigest(a.Recipe),
+		Sources:      sourceValues(a.Fetched),
 		Placeholders: Placeholders(a.Placeholders),
 		Deps:         scriptIdentityDependenciesV1(a.Deps),
 	}

@@ -1589,7 +1589,7 @@ Display detailed metadata about an installed overlay, the base image, or an exte
 **Usage:**
 
 ```
-condatainer info <overlay>
+condatainer info [--verify] <overlay>
 ```
 
 **Examples:**
@@ -1599,7 +1599,13 @@ condatainer info samtools/1.22
 condatainer info ubuntu24/base          # the base image
 condatainer info env.img
 condatainer info ./ubuntu--22.04.sqf
+condatainer info nvim --verify          # also check its files against the payload key
 ```
+
+`--verify` reads a `.sqf` overlay's files and checks them against the payload key its manifest records,
+shown as `Payload`. It reads every byte, so it takes as long as reading the overlay, and it needs
+`squashfuse` and `unshare`. Only script builds record a payload key; for a Conda or definition build it
+says so.
 
 CondaTainer builds every image as a `.sqf`, the base included. A `.sif` from
 elsewhere reads the same way: its payload is a SquashFS partition starting
@@ -2116,6 +2122,7 @@ condatainer store list                                 # name, identity, size, p
 condatainer store list star/2.7.11b --equiv 9f2c1ab    # what could stand in for it
 condatainer store path star/2.7.11b --identity 9f2c1ab # one exact path, for scripts
 condatainer store validate                             # re-check every entry's keys
+condatainer store validate --payload                   # also read each entry's files (slow)
 condatainer store rm star/2.7.11b --identity 9f2c1ab   # delete one entry
 condatainer store gc                                   # what could be reclaimed
 condatainer store gc --layer user --apply              # reclaim it
@@ -2124,6 +2131,11 @@ condatainer store gc --layer user --apply              # reclaim it
 `store rm` deletes store entries only — an overlay under a plain name belongs to
 `condatainer remove`. Neither touches an overlay whose write bit is clear
 (`chmod a-w` is how an artifact is pinned) or one a running container is reading.
+
+`store validate --payload` also reads each entry's files and checks them against the payload key its
+manifest records (shown by `condatainer info` as `Payload`). It reads every byte, so it takes as long
+as reading the store, and it needs `squashfuse` and `unshare`. Only script builds record a payload key;
+Conda and definition builds are checked by their other keys.
 
 `gc` reports by default and needs `--dir` or `--layer` before `--apply`, so a
 directory shared with people who are not at the keyboard is never collected by
@@ -2165,9 +2177,12 @@ how the artifact was **built** — never over the payload bytes — so a rebuild
 the same inputs reproduces them on any machine, whether or not SquashFS happened
 to write identical bytes.
 
-Both hash the same four things: the artifact type, every `#ENV:` value, the
-comment-stripped recipe digest, and every selected `#PH:` placeholder. They
-differ only in how dependencies enter:
+Both hash the artifact type, every `#ENV:` value, the comment-stripped recipe
+digest, and every selected `#PH:` placeholder. They differ in how dependencies
+enter, and in one more input: identity also hashes the SHA-256 of every file a
+[`#SOURCE:`](build_script.md#source-tag) fetched, and equivalence does not. A file
+re-released upstream under the same name therefore gives a different identity and
+the same equivalence.
 
 | dependency | identity | equivalence |
 |---|---|---|
@@ -2377,9 +2392,11 @@ actually *available* is `project restore --dry-run`'s.
 ```bash
 condatainer project validate
 condatainer project validate --json
+condatainer project validate --installed [--match identity]
+condatainer project validate --payload
 ```
 
-Checks the lock alone:
+By default it checks the lock alone:
 
 - every declaration in the scripts has a pin
 - the project's root is pinned
@@ -2387,15 +2404,24 @@ Checks the lock alone:
 - every vendored artifact regenerates the keys it records
 - every dependency edge resolves to another vendored artifact
 
-Reads `cnt-lock/` and the project's scripts, and nothing else — no overlay, no
+By default it reads `cnt-lock/` and the project's scripts, and nothing else — no overlay, no
 store, no catalog, no configuration, no network — so it answers the same on a
 fresh clone that has restored nothing. Every key is recomputed from the vendored
 sources rather than trusted, and every dependency edge is followed by name *and*
 identity.
 
-It never asks whether an artifact is available to run. That is
-[`condatainer check <script>`](#check), which resolves through the same code
-`run` does and opens the overlay.
+By default it never asks whether an artifact is installed here.
+
+| flag | effect |
+|---|---|
+| `--installed` | also fail for every pin that is not installed here as an artifact agreeing with the lock |
+| `--match equivalent\|identity` | which key an installed artifact must agree with (default `equivalent`); used with `--installed` |
+| `--payload` | also read each installed artifact's files and check them against its recorded payload key; implies `--installed` |
+
+`--installed` uses the lookup [`project restore --dry-run`](#project-restore) plans with, and a build
+dependency that only a rebuild would need is not a problem. `--payload` reads every byte, so it takes as
+long as reading the overlays, and it needs `squashfuse` and `unshare`. Only script builds record a
+payload key; a Conda or definition build is skipped.
 
 ### Project Restore
 
@@ -2417,6 +2443,33 @@ Nothing is mounted and `cnt-lock/` is never modified.
 | `--keep-build-deps` | install newly produced build dependencies instead of discarding them |
 | `--replace` | overwrite a project path holding something the lock does not name |
 | `--json` | print JSON |
+
+**A published overlay is downloaded; anything else is rebuilt.** An artifact with a
+recorded location is fetched by content, so what arrives is exactly the recorded
+build and nothing upstream is consulted. One with no recorded location is rebuilt
+from the recipe in `cnt-lock/`, which downloads its `#SOURCE:` files again. If an
+upstream file has changed since, the rebuild is a different build.
+
+Under `--match equivalent` it is accepted, and the result line names what differs:
+
+```
+  built    grch38/gtf-gencode/49 → …/49.sqf (equivalent, not sha256:41ab1c2d3e4f; differs: src:gtf)
+```
+
+`--json` carries the digests of each input that differs. Under `--match identity`
+the restore fails instead. An artifact addressed by name is kept in the store under
+its own identity, and `condatainer project pin` can pin it.
+
+A rebuild can also match the locked identity and still produce different files, because the
+recipe is not deterministic. The restore keeps the result and warns:
+
+```
+  built    grch38/gtf-gencode/49 → …/49.sqf
+  warning: grch38/gtf-gencode/49 rebuilt with the locked identity but different files: its recipe does not produce the same output twice
+```
+
+To keep an analysis reproducible, publish its overlays with
+[`project push`](#project-push).
 
 **A project path is the only file a restore can destroy.** An artifact addressed
 by name goes to a store name no other identity holds, so nothing there is ever

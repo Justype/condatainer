@@ -73,6 +73,7 @@ func (b *BuildObject) recipeKeyArtifact(ctx context.Context) (key.Artifact, bool
 		Placeholders: b.spec.Source.Placeholders,
 		Deps:         b.dependencyKeys(ctx),
 		From:         b.spec.Source.UpstreamDigest(),
+		Fetched:      b.spec.Source.Fetched,
 	}, true
 }
 
@@ -223,10 +224,10 @@ var ErrNoPrediction = errors.New("identity cannot be predicted before the build"
 // It matters because --store files by identity, so "is this already installed"
 // is an identity question, not a name question — and answering it after the
 // build has run costs the whole build. Every input to a recipe-backed key is
-// known beforehand: the recipe text is embedded at resolution, and placeholders,
-// environment and dependency edges are fixed once dependencies are resolved.
-// Call it after buildDependencies, or the dependency edges are still unrecorded
-// and the answer describes a different artifact.
+// known beforehand: the recipe text is embedded at resolution, placeholders and
+// environment are fixed, dependency edges settle once dependencies are resolved,
+// and #SOURCE: digests once the sources are fetched. Call it after both, or the
+// answer describes a different artifact.
 //
 // A prediction is only ever acted on when it *matches* something installed, so
 // the direction of any error matters: an identity that cannot be predicted, or

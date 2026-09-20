@@ -144,24 +144,24 @@ A writable `.img` carries no embedded metadata: it is a working overlay rather
 than a built image, and its environment comes from its `.env` sidecar.
 
 The boundary is the freeze, not the payload. `overlay freeze` packs one into a
-`.sqf` carrying a manifest, a runtime document and a `snapshot-env-v1` key, and
+`.sqf` carrying a manifest, a runtime document and a `payload-tree-v1` key, and
 from that point everything here applies to it as to any other artifact.
 
 ## Scheme-backed keys
 
-The key package owns seven immutable derivation schemes. Each scheme has one file
+The key package owns seven derivation schemes. Each scheme has one file
 that states its question, accepted artifact types, complete preimage contents,
 and exclusions:
 
 | scheme | implementation | rule |
 |---|---|---|
-| script-identity-v1 | [script_identity_v1.go](key/script_identity_v1.go) | recipe inputs plus every exact dependency identity |
+| script-identity-v1 | [script_identity_v1.go](key/script_identity_v1.go) | recipe inputs, the digest of every fetched `#SOURCE:` file, and every exact dependency identity |
 | script-equiv-v1 | [script_equiv_v1.go](key/script_equiv_v1.go) | recipe inputs plus only substitution-relevant dependencies |
 | definition-identity-v1 | [definition_identity_v1.go](key/definition_identity_v1.go) | definition inputs plus the resolved upstream digest |
 | definition-equiv-v1 | [definition_equiv_v1.go](key/definition_equiv_v1.go) | definition inputs without the resolved upstream digest |
 | conda-explicit-v1 | [conda_explicit_v1.go](key/conda_explicit_v1.go) | stored explicit.txt bytes exactly |
 | conda-environment-v1 | [conda_environment_v1.go](key/conda_environment_v1.go) | stored environment.yml bytes exactly |
-| snapshot-env-v1 | [snapshot.go](key/snapshot.go) | one record per packed archive entry, sorted by path |
+| payload-tree-v1 | [payload.go](key/payload.go) | one record per packed archive entry, sorted by path |
 
 Valid pairs are fixed by build type:
 
@@ -170,7 +170,7 @@ Valid pairs are fixed by build type:
 | script | script-identity-v1 | script-equiv-v1 |
 | def | definition-identity-v1 | definition-equiv-v1 |
 | conda | conda-explicit-v1 | conda-environment-v1 |
-| snapshot | snapshot-env-v1 | snapshot-env-v1 |
+| snapshot | payload-tree-v1 | payload-tree-v1 |
 
 A snapshot is the one row whose two keys are a single value: it has no inputs to
 abstract away, so "is this the same environment" and "can this substitute for it"
@@ -200,6 +200,34 @@ or OS named by the artifact contributes name/version, and a history-only app or
 OS contributes nothing. The manifest freezes this role, so verification never
 reapplies newer policy.
 
+script-identity-v1 also carries one `src=<name>=<digest>` line for each `#SOURCE:` the build fetched,
+sorted by name. The digest is of the bytes as served and the URL never enters, because where a file
+came from is a location and not part of what the build was: the same bytes from a mirror, or through
+a per-user vendor link, are one input. The manifest records `{name, sha256}` under `source.fetched`
+and nothing else, so a link that carries an auth token is never published. Equivalence carries no
+sources: a file re-cut upstream makes a different build, but not one that stops substituting for what
+a recipe asks for. A recipe that fetches without declaring a source writes no lines, and its keys are
+what they were before sources existed. Comparison names the input that moved as `src:<name>`.
+
+### The payload key
+
+`manifest.keys.payload` is `payload-tree-v1` over what the archive holds, and it is independent of the
+other two: identity is derived from the build record, the payload key from the files. Each entry
+contributes its type, permission bits, path and a content id (the file's SHA-256, a symlink's target,
+a device's major:minor), sorted by path in byte order. Ownership and times are left out, since the
+archive flattens ownership and touching a file does not change what it is; the metadata directory is
+left out so the manifest carrying the key can live in the archive it describes. Only a recipe's build
+records one: a Conda environment is pinned by its explicit export and a definition by its upstream
+digest, and keying an OS rootfs is the slowest walk there is. A frozen environment records none: its
+identity is this value.
+
+A build hashes the directory `mksquashfs` is about to read, in Go with a worker per core the build
+was given, and writes the key into the staged manifest before packing. Reading an installed `.sqf` back
+(`info --verify`, `store validate --payload`, and a freeze taking its identity) mounts it and runs the same walk over
+the mount through the hidden `_payload_key` command, so a key computed either way is the same code and
+needs no host `find` or `sha256sum`. The key is not a security measure: whoever forges an archive
+computes the key of their own tree.
+
 A dependency lacking either key is unrecorded. Script identity includes its name
 plus that marker; script equivalence includes an unrecorded data dependency's
 marker and name; and the manifest sets provenance_complete to false.
@@ -208,8 +236,9 @@ Conda schemes deliberately bypass the canonical model and hash their stored
 exports byte for byte. The explicit export pins package URLs and build strings;
 the environment export pins channels plus package names and versions.
 
-Changing any rule requires a new scheme constant, a new implementation file, and
-a new dispatcher case. Existing scheme files remain immutable.
+Until the first release a scheme is edited in place: nothing that must keep verifying has been built
+under it. From then on, changing a rule requires a new scheme constant, a new implementation file,
+and a new dispatcher case, and existing scheme files remain immutable.
 
 ## The capsule
 

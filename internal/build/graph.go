@@ -100,7 +100,7 @@ func InstalledVersions(hidden map[string]bool) catalog.Have {
 }
 
 // resolvePlan expands the seeded roots into a dependency-first build order and
-// splits it into local and scheduler work. Resolution runs over the catalog
+// splits it into local and scheduler work, noting which each build gets. Resolution runs over the catalog
 // index alone, before any recipe is fetched or temp file written.
 func (bg *BuildGraph) resolvePlan(ctx context.Context, roots []string, hidden map[string]bool) error {
 	cat, err := config.OpenCatalog(ctx)
@@ -131,11 +131,21 @@ func (bg *BuildGraph) resolvePlan(ctx context.Context, roots []string, hidden ma
 		order = append(order, obj)
 	}
 
+	log := logging.FromContext(ctx)
 	for _, obj := range order {
-		if bg.submitJobs && bg.scheduler != nil && obj.RequiresScheduler() {
+		scheduled := bg.submitJobs && bg.scheduler != nil && obj.RequiresScheduler()
+		if scheduled {
 			bg.schedulerBuilds = append(bg.schedulerBuilds, obj)
 		} else {
 			bg.localBuilds = append(bg.localBuilds, obj)
+		}
+		if obj.IsInstalled() {
+			continue
+		}
+		if scheduled {
+			log.Info(obj.NameVersion()+" will be built by a scheduler job", "kind", "note")
+		} else {
+			log.Info(obj.NameVersion()+" will be built locally", "kind", "note")
 		}
 	}
 	return nil

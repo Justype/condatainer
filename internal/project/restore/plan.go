@@ -92,7 +92,7 @@ type Step struct {
 	Remotes []lock.Remote `json:"remotes,omitempty"`
 	// DependsOn are the artifacts that must exist first, sorted.
 	DependsOn []string `json:"depends_on,omitempty"`
-	// RequiresInput reports that a rebuild would prompt for #INPUT: answers.
+	// RequiresInput reports that a rebuild would prompt, for #INPUT: or #SOURCE: ask: answers.
 	RequiresInput bool `json:"requires_input,omitempty"`
 	// Arch is the artifact's recorded architecture, or "noarch".
 	Arch string `json:"arch,omitempty"`
@@ -172,7 +172,8 @@ type Options struct {
 	// submitted job carries it so the job produces exactly what it was sent for
 	// and leaves every other artifact to whoever asked for that one.
 	Only string
-	// Answers are #INPUT: answers per artifact path, in declaration order.
+	// Answers are the answers to a recipe's prompts per artifact path, #INPUT: first and then
+	// each #SOURCE: ask: in declaration order.
 	// Supplied per invocation because they are never recorded, and their
 	// presence is what makes an interactive rebuild plannable at all.
 	Answers map[string][]string
@@ -555,7 +556,7 @@ func (p *Plan) classify(step Step, keys meta.Keys, hostArch string, opts Options
 		step.Action = ActionBuild
 		if step.RequiresInput && len(opts.Answers[step.Artifact]) == 0 {
 			problems = append(problems, fmt.Sprintf(
-				"%s must be rebuilt and its recipe declares #INPUT:, which needs a terminal", step.Name))
+				"%s must be rebuilt and its recipe asks for input (#INPUT: or a #SOURCE: ask:), which needs a terminal", step.Name))
 		}
 	}
 	return step, problems

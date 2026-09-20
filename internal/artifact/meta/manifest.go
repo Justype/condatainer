@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -75,10 +77,14 @@ type Snapshot struct {
 	Entries int `json:"entries,omitempty"`
 }
 
-// Keys holds the versioned derivation scheme and expected digest for both keys.
+// Keys holds the versioned derivation scheme and expected digest for each key.
+// Payload is taken over what the archive holds rather than what produced it, so
+// it is independent of the other two. A frozen environment has none: its
+// identity is its payload key.
 type Keys struct {
 	Identity KeyRef `json:"identity,omitzero"`
 	Equiv    KeyRef `json:"equiv,omitzero"`
+	Payload  KeyRef `json:"payload,omitzero"`
 }
 
 // KeyRef is one derived key: its immutable scheme and expected SHA-256.
@@ -216,9 +222,33 @@ type Source struct {
 	// TargetTemplate is the #TARGET: the name was rendered from, empty for a
 	// recipe that is not a template.
 	TargetTemplate string `json:"target_template,omitempty"`
-	// RequiresInput reports that the recipe declared #INPUT: prompts, so a
-	// rebuild needs a human. The answers themselves are never recorded.
+	// RequiresInput reports that the recipe declared #INPUT: or #SOURCE: ask:
+	// prompts, so a rebuild needs a human. The answers themselves are never
+	// recorded.
 	RequiresInput bool `json:"requires_input,omitempty"`
+	// Fetched are the #SOURCE: inputs this build downloaded, in name order.
+	// A recipe that fetches without declaring a source records none.
+	Fetched []SourceFile `json:"fetched,omitempty"`
+}
+
+// SourceFile is one #SOURCE: input, by the name the recipe gave it and the
+// SHA-256 of the bytes that arrived.
+//
+// No URL is stored. A literal one is already in the embedded recipe, and an
+// answered one is a per-user secret — a vendor download link carries an auth
+// token, and a manifest travels into every dependent's capsule and is published
+// with the artifact.
+type SourceFile struct {
+	Name   string `json:"name"`
+	SHA256 string `json:"sha256"`
+}
+
+// Digest renders sha256:<hex>, or empty when the record is incomplete.
+func (s SourceFile) Digest() string {
+	if s.SHA256 == "" {
+		return ""
+	}
+	return "sha256:" + s.SHA256
 }
 
 // Normalize fills in what a manifest is allowed to leave out: an absent type
@@ -311,6 +341,18 @@ func ValidateManifest(m Manifest) error {
 			ErrInvalid, m.Name)
 	}
 
+	if m.BuildType == BuildTypeSnapshot && !m.Keys.Payload.Empty() {
+		return fmt.Errorf("%w: %s is a frozen environment; its identity is its payload key", ErrInvalid, m.Name)
+	}
+	if !m.Keys.Payload.Empty() {
+		if strings.TrimSpace(m.Keys.Payload.Scheme) == "" {
+			return fmt.Errorf("%w: payload key has no scheme", ErrInvalid)
+		}
+		if !validSHA256(m.Keys.Payload.SHA256) {
+			return fmt.Errorf("%w: payload key has invalid sha256 %q", ErrInvalid, m.Keys.Payload.SHA256)
+		}
+	}
+
 	identityEmpty := m.Keys.Identity.Empty()
 	equivEmpty := m.Keys.Equiv.Empty()
 	if identityEmpty != equivEmpty {
@@ -395,6 +437,26 @@ func StageManifest(dir string, m Manifest) error {
 		return err
 	}
 	return stageFile(dir, FileName, data)
+}
+
+// StagePayloadKey records the payload key in the manifest already staged in dir.
+// The key is taken over the finished payload, which is not known when the
+// manifest is first written.
+func StagePayloadKey(dir string, ref KeyRef) error {
+	path := filepath.Join(dir, FileName)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read staged manifest: %w", err)
+	}
+	m, err := DecodeManifest(data, path)
+	if err != nil {
+		return err
+	}
+	m.Keys.Payload = ref
+	if err := ValidateManifest(m); err != nil {
+		return err
+	}
+	return StageManifest(dir, m)
 }
 
 // ReadManifest returns the manifest embedded in an image. Only a genuinely

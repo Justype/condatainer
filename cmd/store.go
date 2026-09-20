@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/Justype/condatainer/internal/artifact/meta"
+	"github.com/Justype/condatainer/internal/image/freeze"
 	"github.com/Justype/condatainer/internal/store"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
@@ -128,17 +129,24 @@ Fails when the name and identity do not select exactly one artifact.`,
 }
 
 func newStoreValidateCmd() *cobra.Command {
-	return &cobra.Command{
+	var payload bool
+	cmd := &cobra.Command{
 		Use:   "validate [name]",
 		Short: "Check that every entry still matches the identity it is filed under",
 		Long: `Recomputes each entry's keys from the artifact itself, ignoring any cache, and
 compares them with the name it is filed under. Give a name to check only its
 builds.
 
-Prints one line per entry and fails if any entry does not match.`,
+Prints one line per entry and fails if any entry does not match.
+
+With --payload, also reads each entry's files and checks them against the
+payload key its manifest records. That reads every byte of every entry, so it
+takes as long as reading the store, and it needs squashfuse and unshare. Conda
+and definition builds record no payload key and are checked by their other keys
+only.`,
 		Args:         cobra.MaximumNArgs(1),
 		SilenceUsage: true,
-		RunE: func(_ *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			name := ""
 			if len(args) == 1 {
 				name = args[0]
@@ -146,6 +154,12 @@ Prints one line per entry and fails if any entry does not match.`,
 			report := store.Scan(store.ScanOptions{Name: name, Stored: true, Uncached: true})
 			store.SortReport(&report)
 			for _, candidate := range report.Candidates {
+				if payload {
+					if err := freeze.VerifyPayload(cmd.Context(), candidate.Path); err != nil && !errors.Is(err, freeze.ErrNoPayloadKey) {
+						report.Issues = append(report.Issues, store.Issue{Path: candidate.Path, Error: err.Error()})
+						continue
+					}
+				}
 				fmt.Fprintf(os.Stdout, "ok\t%s\t%s\n", store.FormatKeyRef(candidate.Identity), candidate.Path)
 			}
 			for _, issue := range report.Issues {
@@ -157,6 +171,8 @@ Prints one line per entry and fails if any entry does not match.`,
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&payload, "payload", false, "Also check each entry's files against its payload key")
+	return cmd
 }
 
 // printStoreReport lists entries grouped by images directory, as `list` does.

@@ -314,6 +314,7 @@ func recipeArtifact(m meta.Manifest, sources Sources) (Artifact, error) {
 		Recipe:       recipeData,
 		Placeholders: m.Source.Placeholders,
 		From:         upstreamDigest(m),
+		Fetched:      m.Source.Fetched,
 	}
 	for _, env := range recipe.Env {
 		artifact.Env = append(artifact.Env, meta.EnvVar{

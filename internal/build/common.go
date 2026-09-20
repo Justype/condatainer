@@ -225,14 +225,6 @@ func prepareBuildWorkspace(ctx context.Context, b *BuildObject) error {
 	return nil
 }
 
-// buildModeLabel returns the build mode string for display ("local" or "sbatch").
-func buildModeLabel(b *BuildObject) string {
-	if b.RequiresScheduler() {
-		return "sbatch"
-	}
-	return "local"
-}
-
 // isCancelledByUser checks if the error is due to user cancellation (Ctrl+C)
 // Exit code 130 = 128 + SIGINT(2), checks for "signal: killed/interrupt" or context errors
 func isCancelledByUser(err error) bool {

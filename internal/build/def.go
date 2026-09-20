@@ -43,8 +43,7 @@ func (b *BuildObject) buildDef(ctx context.Context) error {
 		return nil
 	}
 
-	log.Info("building image", "kind", "note", "image", filepath.Base(targetPath),
-		"mode", buildModeLabel(b), "source", b.buildSource)
+	log.Info("building image", "image", filepath.Base(targetPath), "source", b.buildSource)
 
 	done := watchContext(ctx, "def build")
 	defer close(done)

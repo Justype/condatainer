@@ -178,6 +178,14 @@ func modelDiff(want, got key.Model) []Diff {
 	if want.From != got.From {
 		out = append(out, Diff{Field: "from", Want: short(want.From), Got: short(got.From)})
 	}
+	// A re-cut upstream file moves identity and leaves equivalence alone, so
+	// this is the diff that says which input a substitute was built from.
+	for _, name := range union(sourceNames(want), sourceNames(got)) {
+		a, b := sourceDigest(want, name), sourceDigest(got, name)
+		if a != b {
+			out = append(out, Diff{Field: "src:" + name, Want: short(a), Got: short(b)})
+		}
+	}
 	for _, name := range union(placeholderNames(want), placeholderNames(got)) {
 		a, b := placeholder(want, name), placeholder(got, name)
 		if a != b {
@@ -257,6 +265,23 @@ func short(digest string) string {
 		return trimmed[:12]
 	}
 	return trimmed
+}
+
+func sourceNames(r key.Model) []string {
+	out := make([]string, 0, len(r.Sources))
+	for _, s := range r.Sources {
+		out = append(out, s.Name)
+	}
+	return out
+}
+
+func sourceDigest(r key.Model, name string) string {
+	for _, s := range r.Sources {
+		if s.Name == name {
+			return s.Digest
+		}
+	}
+	return "absent"
 }
 
 func placeholderNames(r key.Model) []string {

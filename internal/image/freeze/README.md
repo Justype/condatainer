@@ -9,7 +9,7 @@ run — both read and write images directly on the host.
 ```
 freeze.go     Freeze: walk, translate deletions, pack, identify, embed metadata
 pack.go       Pack/AppendMeta: the mksquashfs runs
-identity.go   TreeIdentity: hash the packed payload
+identity.go   TreeIdentity: hash the packed payload; VerifyPayload: check it against the manifest
 unfreeze.go   Unfreeze: rebuild a writable image from an artifact
 walk.go       Walk: list an overlay's upper/ via debugfs, no mount
 dump.go       dumpUpper: copy upper/ out via debugfs rdump, no mount

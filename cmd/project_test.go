@@ -13,6 +13,7 @@ import (
 	"github.com/Justype/condatainer/internal/artifact/key"
 	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/project/lock"
+	"github.com/Justype/condatainer/internal/project/restore"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -151,6 +152,34 @@ func TestProjectValidateSucceedsOnACompleteProject(t *testing.T) {
 
 	if _, err := run(t, "project", "validate"); err != nil {
 		t.Fatalf("validate failed on a complete project: %v", err)
+	}
+}
+
+// --installed asks what plain validate does not: whether the pins are on this
+// machine. A complete lock passes the first and fails the second when nothing
+// is installed.
+func TestProjectValidateInstalledFailsWhenAPinIsNotInstalled(t *testing.T) {
+	root := newProject(t)
+	writeScript(t, root, "run.sh", "#DEP: star/2.7.11b\nrun\n")
+	artifact := vendorArtifact(t, root, "star/2.7.11b", "echo star\n")
+	base := vendorArtifact(t, root, "ubuntu24/base", "echo base\n")
+
+	l := lock.New()
+	l.Pins["star/2.7.11b"] = lock.PinEntry{Artifact: artifact}
+	l.Pins[lock.BaseKey] = lock.PinEntry{Artifact: base}
+	if err := lock.Publish(root, l); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := run(t, "project", "validate"); err != nil {
+		t.Fatalf("plain validate failed: %v", err)
+	}
+	out, err := run(t, "project", "validate", "--installed", "--json")
+	if err == nil {
+		t.Fatalf("--installed passed with nothing installed:\n%s", out)
+	}
+	if !strings.Contains(out, "is not installed here") {
+		t.Errorf("--installed does not say which pin is missing:\n%s", out)
 	}
 }
 
@@ -639,5 +668,51 @@ func TestProjectListNamesWhatAPathPinHolds(t *testing.T) {
 	}
 	if !strings.Contains(rows, "path:overlays/combined.sqf (combined/1.0)") {
 		t.Errorf("a path pin does not name its artifact:\n%s", rows)
+	}
+}
+
+// An equivalent artifact stands in, and the note says which inputs differ. The
+// field names hold colons themselves, so only the colon-and-space ends one.
+func TestEquivalentNoteNamesTheInputsThatDiffer(t *testing.T) {
+	result := restore.Result{
+		Identity: "sha256:41ab1c2d3e4f5a6b7c8d",
+		Found:    "sha256:9f2b7e04a1c3d5e6f708",
+		Diffs: []string{
+			"src:gtf: 9f2b7e04a1c3 -> 3c81d5e2b7a4",
+			"dep:samtools/1.23.1: 11aa22bb33cc -> 44dd55ee66ff",
+		},
+	}
+	got := equivalentNote(result)
+	for _, want := range []string{"equivalent, not sha256:41ab1c2d3e4f;", "differs: src:gtf, dep:samtools/1.23.1"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("note = %q, want it to contain %q", got, want)
+		}
+	}
+	// Digests are for --json, not a restore of many artifacts.
+	if strings.Contains(got, "3c81d5e2b7a4") {
+		t.Errorf("note = %q carries a digest", got)
+	}
+}
+
+// With no diffs to name, the note is what it was before diffs existed.
+func TestEquivalentNoteWithoutDiffsNamesNothing(t *testing.T) {
+	got := equivalentNote(restore.Result{Identity: "sha256:41ab1c2d3e4f5a6b7c8d"})
+	if want := " (equivalent, not sha256:41ab1c2d3e4f)"; got != want {
+		t.Errorf("note = %q, want %q", got, want)
+	}
+}
+
+// --verify reads a .sqf; anything else is refused before it reads a byte.
+func TestInfoVerifyRefusesAnythingButASquashFS(t *testing.T) {
+	img := filepath.Join(t.TempDir(), "env.img")
+	if err := os.WriteFile(img, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runConsole(t, "info", img, "--verify")
+	if err == nil {
+		t.Fatalf("--verify accepted an .img:\n%s", out)
+	}
+	if !strings.Contains(err.Error(), "--verify reads a .sqf") {
+		t.Errorf("error = %v", err)
 	}
 }

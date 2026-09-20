@@ -145,6 +145,8 @@ its own build instead of taking a whole collection out of every listing.
 |---|---|
 | `#DEP:` on anything but data | error |
 | `#ARCH:` on an OS, or a value other than `native`/`noarch` | error |
+| `#SOURCE:` malformed or declared twice under one name | error |
+| `#SOURCE:` or `#INPUT:` on a `.def` | error |
 | a dependency mentioned in the name but not as whole components | lint |
 
 Only data has build dependencies: an app is prebuilt and self-contained, and an
@@ -158,6 +160,30 @@ so `star/2.7.11b` matches `grch38/star/2.7.11b/gencode49` and not
 `grch38/star2.7.11b/gencode49`. The second is the near-miss the lint reports — the
 author meant the version to be load-bearing, and the `#TARGET:` quietly stopped it
 counting.
+
+## `#SOURCE:` and the prompt list
+
+`#SOURCE:` declares a file the build fetches, as a name and either one URL or `ask:` and a prompt
+(`SourceURL`). A URL and a prompt both expand with the template, since a template's source URL is
+where it varies most. The name is all that survives expansion unchanged, and it is what the identity
+records the fetched digest against.
+
+`Recipe.Prompts` is the one ordered list of questions a build puts to the user: the `#INPUT:` prompts,
+then each `ask:` in declaration order. `#INPUT:` answers reach the recipe on stdin and `ask:` answers
+are consumed by the fetch, so putting the recipe's own first is what lets the two be told apart by
+count alone, however the declarations are interleaved in the file.
+
+A malformed `#SOURCE:` is skipped at parse and reported by `Validate`, for the reason every other
+recipe error is: one bad recipe must not take a collection out of a listing. It is an error and not
+a skip at build time, because the body would otherwise run against an unset `$CNT_SRC_<name>`.
+
+A definition declares neither `#SOURCE:` nor `#INPUT:`. It is built by apptainer from its own
+bootstrap, so nothing would fetch the source or read the answer, and a declaration would be silently
+ignored.
+
+The header is a comment, so `StripComments` removes it with the rest: changing a `#SOURCE:` URL moves
+neither key. Only the bytes it served can, through the digests the build records
+([`internal/artifact/README.md`](../internal/artifact/README.md)).
 
 ## What may surprise you
 

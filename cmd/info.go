@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/image/ext3"
+	"github.com/Justype/condatainer/internal/image/freeze"
 	"github.com/Justype/condatainer/internal/image/sif"
 	"github.com/Justype/condatainer/internal/image/squashfs"
 	"github.com/Justype/condatainer/internal/runtime/container"
@@ -43,6 +45,7 @@ var infoOverlayCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(infoOverlayCmd)
+	infoOverlayCmd.Flags().Bool("verify", false, "Also check the files against the payload key (reads every byte)")
 }
 
 // completeInfoArgs restricts file completion to .sqf and .img files with folder navigation.
@@ -77,14 +80,40 @@ func runInfoOverlay(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	verify, _ := cmd.Flags().GetBool("verify")
+	if verify && !utils.IsSqf(overlayPath) {
+		return fmt.Errorf("--verify reads a .sqf overlay, not %s", filepath.Ext(overlayPath))
+	}
+
 	switch {
 	case utils.IsSqf(overlayPath), utils.IsSif(overlayPath):
-		return displayImageInfo(overlayPath)
+		if err := displayImageInfo(overlayPath); err != nil {
+			return err
+		}
+		if verify {
+			return verifyPayload(cmd, overlayPath)
+		}
+		return nil
 	case utils.IsImg(overlayPath):
 		return displayImgInfo(overlayPath)
 	}
 
 	return fmt.Errorf("unsupported file type: %s", filepath.Ext(overlayPath))
+}
+
+// verifyPayload reads the overlay's files and reports whether they match the
+// payload key its manifest records.
+func verifyPayload(cmd *cobra.Command, overlayPath string) error {
+	err := freeze.VerifyPayload(cmd.Context(), overlayPath)
+	switch {
+	case err == nil:
+		utils.PrintSuccess("Payload matches the recorded key.")
+	case errors.Is(err, freeze.ErrNoPayloadKey):
+		utils.PrintMessage("No payload key recorded; a Conda or definition build is checked by its other keys.")
+	default:
+		return err
+	}
+	return nil
 }
 
 // imageType reports the recipe type the image was built as — app, base, os or
@@ -248,7 +277,7 @@ func displayImageInfo(overlayPath string) error {
 	return nil
 }
 
-// displayKeys prints the artifact's identity and equivalence keys.
+// displayKeys prints the artifact's identity and equivalence keys, and its payload key when it has one.
 //
 // The keys are regenerated from the image rather than read from the manifest,
 // so what is shown is what `store` and `project` will resolve by. An image
@@ -273,6 +302,9 @@ func displayKeys(imagePath string) {
 	}
 	if equiv != "" {
 		fmt.Printf("  %-14s %s\n", "Equivalence:", utils.StyleInfo(equiv))
+	}
+	if m, err := meta.ReadManifest(imagePath); err == nil && !m.Keys.Payload.Empty() {
+		fmt.Printf("  %-14s %s\n", "Payload:", utils.StyleInfo(store.FormatKeyRef(m.Keys.Payload)))
 	}
 }
 

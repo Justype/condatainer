@@ -77,8 +77,8 @@ func TestFreezeEmbedsTheIdentity(t *testing.T) {
 	writeInto(t, img, "/upper/cnt_env", "f", "payload\n")
 
 	res := freezeImage(t, img)
-	if res.Identity.Scheme != string(key.SnapshotEnvV1) {
-		t.Errorf("scheme = %q, want %q", res.Identity.Scheme, key.SnapshotEnvV1)
+	if res.Identity.Scheme != string(key.PayloadTreeV1) {
+		t.Errorf("scheme = %q, want %q", res.Identity.Scheme, key.PayloadTreeV1)
 	}
 	if len(res.Identity.SHA256) != 64 {
 		t.Errorf("sha256 = %q", res.Identity.SHA256)

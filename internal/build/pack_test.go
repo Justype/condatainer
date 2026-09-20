@@ -248,6 +248,7 @@ func TestPackedImageExcludesBuildScratch(t *testing.T) {
 	withPackSettings(t)
 
 	b := newPackObject(t, catalog.TypeApp)
+	b.buildType = BuildTypeScript
 	if err := os.MkdirAll(filepath.Join(b.ws.CntDir, b.spec.Image.Name), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -266,6 +267,9 @@ func TestPackedImageExcludesBuildScratch(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "out.sqf")
 	if err := createSquashfs(t.Context(), b, false, b.ws.CntDir, metaDir, out); err != nil {
 		t.Fatalf("createSquashfs: %v", err)
+	}
+	if b.keys.Payload.Empty() {
+		t.Error("the payload was packed without a payload key")
 	}
 
 	list, err := exec.CommandContext(t.Context(), "unsquashfs", "-l", out).Output()

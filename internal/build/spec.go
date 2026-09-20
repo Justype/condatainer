@@ -59,10 +59,15 @@ type SourceSpec struct {
 	// TargetTemplate is the #TARGET: the name was rendered from; empty when the
 	// recipe is not a template.
 	TargetTemplate string
-	// RequiresInput reports that the recipe declared #INPUT: prompts. The
-	// answers are execution input and are never recorded — this says only that a
-	// rebuild needs a human.
+	// RequiresInput reports that the recipe declared #INPUT: or #SOURCE: ask:
+	// prompts. The answers are execution input and are never recorded — this
+	// says only that a rebuild needs a human.
 	RequiresInput bool
+	// Fetched are the #SOURCE: inputs this build downloaded, by name and digest,
+	// set once they have arrived. Empty before the fetch and for a recipe that
+	// declares none, which is why the identity of a source-declaring build
+	// cannot be predicted until then.
+	Fetched []meta.SourceFile
 	// Collection is the URL of the recipe collection this build came from,
 	// recorded as manifest build.source. Empty for a Conda build, a local file,
 	// or a collection that declares none.
@@ -83,7 +88,7 @@ type SourceFile struct {
 // ScriptSource is a recipe run as a shell script.
 type ScriptSource struct {
 	File    SourceFile
-	Prompts []string // #INPUT: declarations, in order; the answers are execution input
+	Prompts []string // every question put to the user, in answer order; the answers are execution input
 }
 
 // DefinitionSource is an Apptainer definition.
@@ -263,6 +268,7 @@ func (s Spec) sourceBlock() meta.Source {
 		Placeholders:   s.Source.Placeholders,
 		TargetTemplate: s.Source.TargetTemplate,
 		RequiresInput:  s.Source.RequiresInput,
+		Fetched:        s.Source.Fetched,
 	}
 }
 

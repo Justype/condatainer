@@ -36,6 +36,7 @@ type build struct {
 	recipe   string
 	from     string
 	ph       map[string]string
+	fetched  []meta.SourceFile
 	deps     []key.Dep
 	explicit string // set for a Conda app instead of a recipe
 	environ  string
@@ -91,13 +92,14 @@ func stage(t *testing.T, b build) (root, dir string) {
 		artifact := key.Artifact{
 			Name: b.name, Type: b.typ, Env: b.env,
 			Recipe: []byte(b.recipe), Placeholders: b.ph, Deps: b.deps,
-			From: b.from,
+			From: b.from, Fetched: b.fetched,
 		}
 		if err := meta.StageBytes(dir, meta.RecipeFileName, []byte(b.recipe)); err != nil {
 			t.Fatal(err)
 		}
 		manifest.Source.Files = []string{meta.RecipeFileName}
 		manifest.Source.Placeholders = b.ph
+		manifest.Source.Fetched = b.fetched
 		sources[meta.RecipeFileName] = []byte(b.recipe)
 		manifest.Dependencies, manifest.ProvenanceComplete = key.Manifest(artifact)
 		if b.from != "" {
@@ -228,6 +230,39 @@ func TestVerdicts(t *testing.T) {
 		}
 		if !hasDiff(got.Diffs, Diff{Field: "ph:gencode_version", Want: "49", Got: "47"}) {
 			t.Errorf("diffs = %v", got.Diffs)
+		}
+	})
+
+	// The case #SOURCE: exists for: same recipe, same placeholders, an upstream
+	// file re-cut under one name. Identity moves, equivalence does not, so the
+	// rebuild may substitute — and the diff has to say which input differs.
+	t.Run("a re-cut source is equivalent and names itself", func(t *testing.T) {
+		locked := starIndex()
+		locked.fetched = []meta.SourceFile{{Name: "gtf", SHA256: key.Sum([]byte("release 49"))}}
+		recut := starIndex()
+		recut.fetched = []meta.SourceFile{{Name: "gtf", SHA256: key.Sum([]byte("release 49, corrected"))}}
+
+		got := Compare(read(t, locked), read(t, recut))
+		if got.Verdict != Equivalent {
+			t.Fatalf("verdict = %s (%s)", got.Verdict, got.Reason)
+		}
+		want := Diff{
+			Field: "src:gtf",
+			Want:  short(key.Digest([]byte("release 49"))),
+			Got:   short(key.Digest([]byte("release 49, corrected"))),
+		}
+		if !hasDiff(got.Diffs, want) {
+			t.Errorf("diffs = %v, want %v", got.Diffs, want)
+		}
+	})
+
+	t.Run("a source that vanished or appeared is named", func(t *testing.T) {
+		with := starIndex()
+		with.fetched = []meta.SourceFile{{Name: "gtf", SHA256: key.Sum([]byte("x"))}}
+
+		got := Compare(read(t, with), read(t, starIndex()))
+		if !hasField(got.Diffs, "src:gtf") {
+			t.Errorf("diffs = %v, want the missing source named", got.Diffs)
 		}
 	})
 

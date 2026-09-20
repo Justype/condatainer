@@ -14,10 +14,10 @@ import (
 // projectCheck reports whether one script can run right now against the project
 // in the current directory, and returns false when there is no project here.
 //
-// This is the question neither project command answers. `project validate` is
-// checkout-only and never looks at an installed image; `project restore
-// --dry-run` answers for the whole project. This answers "can I run *this
-// script*", through the same resolution and the same anchor `run` uses —
+// The project commands answer for the whole lock: `project validate --installed`
+// and `project restore --dry-run` ask whether every pin is here. This answers
+// "can I run *this script*", through the same resolution and the same anchor
+// `run` uses —
 // including its live resolve of an unpinned #DEP: name — so the two cannot
 // disagree about whether a script is runnable.
 func projectCheck(ctx context.Context, scriptPaths []string, metaDeps []string) (handled bool, err error) {

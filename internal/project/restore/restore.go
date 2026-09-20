@@ -66,6 +66,13 @@ type Result struct {
 	// Transient reports that this artifact was produced only to build something
 	// else and no longer exists. --keep-build-deps installs it instead.
 	Transient bool `json:"transient,omitempty"`
+	// Diffs name the inputs an equivalent artifact was built from differently
+	// from the locked one. Empty for an exact match, and when the comparison
+	// could not be made: it explains a substitution and gates nothing.
+	Diffs []string `json:"diffs,omitempty"`
+	// PayloadDrift reports a rebuild whose identity matches the lock's but whose
+	// files do not: the recipe does not produce the same bytes twice.
+	PayloadDrift bool `json:"payload_drift,omitempty"`
 }
 
 // Failure is one artifact that could not be made available.
@@ -282,6 +289,9 @@ func execute(ctx context.Context, root string, verified *lock.Verified, step Ste
 	switch step.Action {
 	case ActionAdopt:
 		result.Outcome, result.Path, result.Layout = OutcomeAdopted, step.Path, step.Layout
+		if step.Found != "" {
+			result.Diffs = substituteDiffs(ctx, entry, step)
+		}
 		return result, nil
 	case ActionFetch:
 		return fetch(ctx, root, entry, step, match, result)
@@ -395,6 +405,10 @@ func rebuild(ctx context.Context, root string, entry *lock.Entry, step Step, mat
 	}
 	result.Verdict = verdict
 	result.Outcome = OutcomeBuilt
+	if verdict == compare.Equivalent {
+		result.Diffs = diffs
+	}
+	result.PayloadDrift = verdict == compare.Exact && payloadDrifted(entry, output)
 
 	if transient {
 		result.Path, result.Transient = output, true
@@ -418,6 +432,33 @@ func rebuild(ctx context.Context, root string, entry *lock.Entry, step Step, mat
 		result.Found = candidate.Identity.Digest()
 	}
 	return result, nil
+}
+
+// payloadDrifted reports whether a rebuilt artifact's payload key differs from
+// the one the lock's manifest recorded. Either side without a key says nothing.
+func payloadDrifted(entry *lock.Entry, path string) bool {
+	want := entry.Manifest.Keys.Payload
+	if want.Empty() {
+		return false
+	}
+	got, err := meta.ReadManifest(path)
+	if err != nil || got.Keys.Payload.Empty() {
+		return false
+	}
+	return got.Keys.Payload != want
+}
+
+// substituteDiffs names how an installed equivalent artifact differs from the
+// locked one. It reads the artifact's own records, so it costs an extraction and
+// is only asked for when something stands in. A failure gives no diffs rather
+// than failing the restore: this explains a substitution and decides nothing.
+func substituteDiffs(ctx context.Context, entry *lock.Entry, step Step) []string {
+	_, diffs, err := verify(entry, step.Path, MatchEquivalent)
+	if err != nil {
+		logging.FromContext(ctx).Debug("could not compare the substitute", "name", step.Name, "err", err)
+		return nil
+	}
+	return diffs
 }
 
 // isTransient reports that a rebuild is scaffolding: a closure node no pin

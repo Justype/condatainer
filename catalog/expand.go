@@ -51,6 +51,14 @@ func Expand(r *Recipe, vars map[string]string) (*Recipe, error) {
 		out.Env[i] = env
 	}
 
+	// A source URL is where a template varies most: one recipe covers the whole
+	// grid and its URL carries the release, so the name is all that survives
+	// expansion unchanged.
+	out.Sources = make([]SourceURL, len(r.Sources))
+	for i, src := range r.Sources {
+		out.Sources[i] = SourceURL{Name: src.Name, URL: replaceVars(src.URL, vars), Prompt: replaceVars(src.Prompt, vars)}
+	}
+
 	out.Inputs = slices.Clone(r.Inputs)
 	for i := range out.Inputs {
 		out.Inputs[i] = replaceVars(out.Inputs[i], vars)

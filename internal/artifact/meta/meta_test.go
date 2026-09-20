@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Justype/condatainer/catalog"
@@ -154,5 +155,36 @@ func TestNativeArchIsUnameForm(t *testing.T) {
 	}
 	if NativePlatform().OS != "linux" {
 		t.Errorf("platform OS = %q, want linux", NativePlatform().OS)
+	}
+}
+
+func TestStagePayloadKeyRecordsTheKeyInTheStagedManifest(t *testing.T) {
+	dir := t.TempDir()
+	if err := StageManifest(dir, validManifest()); err != nil {
+		t.Fatal(err)
+	}
+	ref := KeyRef{Scheme: "payload-tree-v1", SHA256: strings.Repeat("ab", 32)}
+	if err := StagePayloadKey(dir, ref); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := DecodeManifest(data, "staged")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Keys.Payload != ref {
+		t.Errorf("payload key = %+v, want %+v", m.Keys.Payload, ref)
+	}
+}
+
+func TestFrozenEnvironmentRefusesAPayloadKey(t *testing.T) {
+	m := validManifest()
+	m.Name, m.Type, m.BuildType = EnvName, catalog.TypeEnv, BuildTypeSnapshot
+	m.Keys = Keys{Payload: KeyRef{Scheme: "payload-tree-v1", SHA256: strings.Repeat("ab", 32)}}
+	if err := ValidateManifest(m); err == nil {
+		t.Error("a frozen environment with a payload key validated")
 	}
 }

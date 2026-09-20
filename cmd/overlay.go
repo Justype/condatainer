@@ -427,6 +427,7 @@ func init() {
 	overlayCmd.AddCommand(overlayCreateCmd)
 	overlayCmd.AddCommand(resizeCmd)
 	overlayCmd.AddCommand(infoCmd)
+	infoCmd.Flags().Bool("verify", false, "Also check the files against the payload key (reads every byte)")
 	overlayCmd.AddCommand(checkCmd)
 	overlayCmd.AddCommand(chownCmd)
 	overlayCmd.AddCommand(exportCmd)

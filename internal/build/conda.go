@@ -76,7 +76,7 @@ func (b *BuildObject) buildConda(ctx context.Context) error {
 	defer b.removeBuildLock()
 	preparedPath := b.tgt.Prepared
 
-	log.Info("building overlay", "kind", "note", "overlay", filepath.Base(targetPath), "mode", buildModeLabel(b))
+	log.Info("building overlay", "overlay", filepath.Base(targetPath))
 
 	if err := prepareBuildWorkspace(ctx, b); err != nil {
 		b.Cleanup(true) //nolint:errcheck
@@ -137,6 +137,20 @@ func buildChannelFlags() string {
 // Handles three modes: YAML file, comma-separated packages, and single package.
 func (b *BuildObject) buildInstallCmd() (cmd string, extraBindPaths []string, err error) {
 	return b.buildCreateCmd("/cnt/" + b.spec.Image.Name)
+}
+
+// micromambaEnv confines micromamba to the build's scratch, whatever the
+// invoking user's environment sets: the root the create command names, a package
+// cache beneath it, and no rc files. Apptainer passes the host environment
+// through, so an inherited CONDA_PKGS_DIRS would otherwise choose the cache.
+func micromambaEnv() []string {
+	return []string{
+		"TMPDIR=" + ScratchPath,
+		"MAMBA_ROOT_PREFIX=" + ScratchPath,
+		"CONDA_PKGS_DIRS=" + ScratchPath + "/pkgs",
+		"MAMBA_PKGS_DIRS=" + ScratchPath + "/pkgs",
+		"MAMBA_NO_RC=true",
+	}
 }
 
 // micromambaCmd names the micromamba binary a generated build script should
@@ -319,7 +333,7 @@ func (b *BuildObject) condaExecOpts(bashScript string, extraBindPaths []string) 
 		BaseImage:      b.spec.Base,
 		Overlays:       []string{},
 		BindPaths:      bindPaths,
-		EnvSettings:    []string{"TMPDIR=" + ScratchPath},
+		EnvSettings:    micromambaEnv(),
 		Command:        []string{"/bin/bash", "-c", bashScript},
 		HidePrompt:     true,
 		WritableImg:    false,
@@ -430,7 +444,7 @@ func (b *BuildObject) solveConda(ctx context.Context) ([]conda.Package, error) {
 		BaseImage:      b.spec.Base,
 		Overlays:       []string{},
 		BindPaths:      append(extraBindPaths, b.ws.Root+":"+ScratchPath),
-		EnvSettings:    []string{"TMPDIR=" + ScratchPath},
+		EnvSettings:    micromambaEnv(),
 		Command:        []string{"/bin/bash", "-c", cmd + " --dry-run --json"},
 		HidePrompt:     true,
 		WritableImg:    false,

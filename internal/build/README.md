@@ -82,14 +82,16 @@ Recipes support metadata headers:
 - `#DEP:name/version>=min` - Dependency with version constraint (range `[min, version]`)
 - `#SBATCH` / `#PBS` / `#BSUB` - Scheduler directives (HTCondor uses native `.sub` files)
 - `#ENV:VAR={prefix}/sub` - Environment variables to export; `{prefix}` is filled with the install prefix at load time
+- `#SOURCE:name url` / `#SOURCE:name ask:prompt` - A file the build downloads, fetched by the tool before the recipe runs and exposed read-only as `$CNT_SRC_<name>`; its digest enters the identity (see Sources)
 - `#INPUT:prompt` - User input, fed to the recipe on stdin in declaration order — read it with `IFS= read -r VAR` (collected locally before scheduler submission; embedded as a heredoc in the job script)
 
 Available variables: `$CNT_NAME` (complete name), `$CNT_TYPE`, `$CNT_PREFIX`, `$CNT_TMP` (also `$TMPDIR`, both `/cnt_tmp`),
 plus the scheduler's normalized `$NCPUS`, `$MEM`, `$MEM_GB`.
 Run as `bash -euo pipefail <recipe>` top to bottom — no `install()` wrapper.
 A script build also gets its `bin/` appended to `PATH` and
-`MAMBA_ROOT_PREFIX` set to the scratch path and `MAMBA_NO_RC=true`, the same root and rc handling as a Conda
-build, so `micromamba` is callable and its caches stay out of the user's home. A Conda or script build provisions a micromamba-only toolchain first when the host has none (a
+`MAMBA_ROOT_PREFIX` set to the scratch path, its package cache pinned beneath it (`CONDA_PKGS_DIRS`,
+`MAMBA_PKGS_DIRS`) and `MAMBA_NO_RC=true` — one `micromambaEnv` shared with the Conda build, because
+Apptainer passes the host environment through and an inherited cache variable would choose the cache — so `micromamba` is callable and its caches stay out of the user's home. A Conda or script build provisions a micromamba-only toolchain first when the host has none (a
 download, once); a failure to do so fails the build. A build submitted to the scheduler provisions it on
 the submitting host, before the job is queued, because the compute node may have no outbound access.
 
@@ -151,8 +153,8 @@ actually mounted and built, and the caller compares them against the lock — so
 disagreement surfaces as a key mismatch rather than as a plausible artifact under
 the right name. Construction therefore refuses only what would make that
 comparison uninterpretable: absent keys, a missing vendored source, a dependency
-count the recipe does not agree with, or an `#INPUT:` answer set that does not
-match the prompts.
+count the recipe does not agree with, or an answer set that does not match the
+prompts — `#INPUT:` first, then each `#SOURCE: … ask:`.
 
 ## Build Lock
 
@@ -206,14 +208,45 @@ directory got filled. Both end in `packOutput`.
    installed and stops here; absent, unsupported-platform, or unavailable
    artifacts fall through to the local build. Credential, schema, type, and key
    failures stop instead.
-5. Resolve the build base and create the temporary overlay
-6. Run recipe inside container. The payload directory is bound at
+5. Fetch each `#SOURCE:` into the workspace and record its digest
+6. Resolve the build base and create the temporary overlay
+7. Run recipe inside container. The payload directory is bound at
    `/cnt/<name>` — the leaf, not `/cnt`, so dependency overlays mounted beside
    it stay visible
-7. `stageMetadata`, then pack: verify the payload directory is non-empty, then
+8. `stageMetadata`, then pack: verify the payload directory is non-empty, then
    `mksquashfs` the host build dir (basename `cnt`, so the archive is exactly
    `cnt/<name>/…` — the build's `tmp/` is a sibling and never enters it)
-7. Atomic rename prepared → target; remove lock
+9. Atomic rename prepared → target; remove lock
+
+### Sources
+
+A `#SOURCE:` is fetched by the tool, not the recipe, because the tool can only hash what it
+downloaded. Each file lands in `<workspace>/sources`, is bound read-only at `/cnt_src`, and is named
+to the recipe as `$CNT_SRC_<name>`. Read-only, so a recipe cannot alter a file whose digest is
+already recorded. The digests go to `Spec.Source.Fetched`, where the manifest and both key paths
+read them.
+
+**Order.** The fetch sits after the prebuilt check and before `skipIfInstalled`. A published
+artifact is decided on equivalence, which no source enters, so nothing is downloaded to answer a
+question it could have answered. `PredictIdentity` needs the digests, so it cannot run earlier; it is
+reached only by `--store`, where fetching first turns a wasted rebuild into a wasted download. The
+fetch must stay below `createBuildLock`: on a compute node the lock adopts a scheduler lock and
+re-sites the workspace root, and the source directory is resolved from it afterwards.
+
+**Answers.** `ask:` prompts join the `#INPUT:` prompts in one list, `#INPUT:` first, collected
+before submission and carried in the job's heredoc like any answer. The recipe's stdin gets only the
+first `recipeInputs` of them and the fetch takes the rest, so a submitted build needs no terminal.
+An empty or non-http answer fails the fetch, which is what `--yes` produces.
+
+**Failure and secrecy.** A short read fails and deletes the partial file, since the digest of a
+truncated file is as good a digest as any and would fix an identity for bytes nobody wants. An
+answered link carries an auth token, so a log line names the host alone and the transport error is
+stripped of the request URL that `net/http` puts in it. The transport reads the proxy from the
+environment, which is how a node with no route out reaches the source. Compression is off, so the file
+is the bytes the server sent, and a transfer that receives nothing for five minutes fails rather than
+hanging the build; a slow steady one never does.
+
+Sources are transient. They live in the build workspace and go with it on success and failure alike.
 
 ### Staging and packing
 
@@ -235,6 +268,13 @@ which everything a key depends on is known. A script build calls it after the
 recipe has run, so every dependency it needed is installed and its exact identity can enter the
 identity scheme. A Conda app derives its two keys directly from the exports it
 already embeds.
+
+`createSquashfs` then keys the payload (`stagePayloadKey`) and rewrites the staged manifest with it,
+immediately before `mksquashfs` runs — the last moment the payload is final, and the same directory
+`mksquashfs` reads, so the key describes what the archive will hold. The payload directory is walked
+in Go with one worker per core the build was given. A build that cannot key its payload does
+not pack. Only a script build is keyed; a Conda or definition build skips the step. The
+payload key is not an input to identity or equivalence; see `internal/artifact`'s README.
 
 Every `.def` build is keyed the same way, `os` included — nothing distinguishes
 the configured default root from any other. Its `keys` block identifies the

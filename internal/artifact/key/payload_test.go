@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Justype/condatainer/catalog"
@@ -64,13 +65,13 @@ func rec(typ byte, mode uint32, p, id string) TreeRecord {
 	return TreeRecord{Type: typ, Mode: mode, Path: p, ID: id}
 }
 
-func TestSnapshotIdentityNamesTheScheme(t *testing.T) {
-	ref, err := SnapshotIdentity([]TreeRecord{rec('f', 0o644, "/cnt_env/a", "ab")})
+func TestPayloadKeyNamesTheScheme(t *testing.T) {
+	ref, err := PayloadKey([]TreeRecord{rec('f', 0o644, "/cnt_env/a", "ab")})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ref.Scheme != string(SnapshotEnvV1) {
-		t.Errorf("scheme = %q, want %q", ref.Scheme, SnapshotEnvV1)
+	if ref.Scheme != string(PayloadTreeV1) {
+		t.Errorf("scheme = %q, want %q", ref.Scheme, PayloadTreeV1)
 	}
 	if len(ref.SHA256) != 64 {
 		t.Errorf("sha256 = %q", ref.SHA256)
@@ -79,18 +80,18 @@ func TestSnapshotIdentityNamesTheScheme(t *testing.T) {
 
 // The ordering is the scheme's, not the walker's: an archive read in a different
 // order is the same archive.
-func TestSnapshotIdentityIgnoresRecordOrder(t *testing.T) {
+func TestPayloadKeyIgnoresRecordOrder(t *testing.T) {
 	a := []TreeRecord{
 		rec('d', 0o755, "/cnt_env", ""),
 		rec('f', 0o644, "/cnt_env/a", "aa"),
 		rec('f', 0o755, "/cnt_env/b", "bb"),
 	}
 	shuffled := []TreeRecord{a[2], a[0], a[1]}
-	first, err := SnapshotIdentity(a)
+	first, err := PayloadKey(a)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := SnapshotIdentity(shuffled)
+	second, err := PayloadKey(shuffled)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,9 +103,9 @@ func TestSnapshotIdentityIgnoresRecordOrder(t *testing.T) {
 // Each field is in the preimage because it changes what the environment does.
 // Mode is the one worth a test: identical bytes that cannot be executed are a
 // different environment.
-func TestSnapshotIdentityDistinguishesEveryField(t *testing.T) {
+func TestPayloadKeyDistinguishesEveryField(t *testing.T) {
 	base := []TreeRecord{rec('f', 0o755, "/cnt_env/bin/tool", "aa")}
-	want, err := SnapshotIdentity(base)
+	want, err := PayloadKey(base)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +116,7 @@ func TestSnapshotIdentityDistinguishesEveryField(t *testing.T) {
 		"type":    {rec('l', 0o755, "/cnt_env/bin/tool", "aa")},
 	} {
 		t.Run(name, func(t *testing.T) {
-			got, err := SnapshotIdentity(changed)
+			got, err := PayloadKey(changed)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -128,12 +129,12 @@ func TestSnapshotIdentityDistinguishesEveryField(t *testing.T) {
 
 // A path holding the field separator must not be able to shift the framing into
 // looking like a different tree.
-func TestSnapshotIdentityFramesHostilePaths(t *testing.T) {
-	a, err := SnapshotIdentity([]TreeRecord{rec('f', 0o644, "/cnt_env/a b", "cc")})
+func TestPayloadKeyFramesHostilePaths(t *testing.T) {
+	a, err := PayloadKey([]TreeRecord{rec('f', 0o644, "/cnt_env/a b", "cc")})
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := SnapshotIdentity([]TreeRecord{rec('f', 0o644, "/cnt_env/a", "b\x00cc")})
+	b, err := PayloadKey([]TreeRecord{rec('f', 0o644, "/cnt_env/a", "b\x00cc")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,8 +143,8 @@ func TestSnapshotIdentityFramesHostilePaths(t *testing.T) {
 	}
 }
 
-func TestSnapshotIdentityRefusesAnEmptyTree(t *testing.T) {
-	if _, err := SnapshotIdentity(nil); err == nil {
+func TestPayloadKeyRefusesAnEmptyTree(t *testing.T) {
+	if _, err := PayloadKey(nil); err == nil {
 		t.Error("an empty archive was given an identity")
 	}
 }
@@ -182,5 +183,41 @@ func TestSnapshotManifestRefusesAnotherName(t *testing.T) {
 	m.Name = "rnaseq/1.0"
 	if err := meta.ValidateManifest(m); err == nil {
 		t.Fatal("a frozen environment claiming its own name was accepted")
+	}
+}
+
+// The metadata directory is left out, so the manifest that carries the key can
+// live in the archive it describes; the key does not depend on how many
+// goroutines hashed.
+func TestTreeOfNamesEntriesAndSkipsTheMetadataDirectory(t *testing.T) {
+	root := t.TempDir()
+	for name, data := range map[string]string{"cnt/app/tool": "x", "cnt/app/data": "y", ".cnt/manifest.json": "{}"} {
+		p := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	one, err := TreeOf(t.Context(), root, "", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	many, err := TreeOf(t.Context(), root, "", 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if PayloadPreimage(one) != PayloadPreimage(many) {
+		t.Error("the key depends on the worker count")
+	}
+	for _, r := range one {
+		if r.Path == "/.cnt" || strings.HasPrefix(r.Path, "/.cnt/") {
+			t.Errorf("the metadata directory was keyed: %s", r.Path)
+		}
+	}
+	if len(one) != 4 { // /cnt, /cnt/app, and its two files
+		t.Errorf("got %d records, want 4: %v", len(one), one)
 	}
 }

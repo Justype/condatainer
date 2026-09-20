@@ -80,10 +80,12 @@ func ValidateDeps(name string, typ Type, deps []string) error {
 // once the recipe is fetched and about to be built, not while indexing: one bad
 // recipe must not take a whole collection out of a listing.
 //
-// The #DEP: rules live in ValidateDeps, which an external build shares. The one
-// rule that is only a recipe's is #ARCH:, which only app and data may declare,
-// and only as native or noarch: an OS is a root filesystem and is always
-// architecture-specific.
+// The #DEP: rules live in ValidateDeps, which an external build shares. The rules
+// that are only a recipe's are #ARCH:, which only app and data may declare, and
+// only as native or noarch — an OS is a root filesystem and is always
+// architecture-specific — and that a definition declares neither #SOURCE: nor
+// #INPUT:. A definition is built by apptainer from its own bootstrap rather than
+// run as a script, so nothing would fetch the source or read the answer.
 //
 // #REDISTRIBUTE: is rejected rather than ignored when it is neither yes nor no.
 // It decides whether a payload may be published, so a typo that silently read as
@@ -109,6 +111,20 @@ func (r *Recipe) Validate() error {
 		}
 	}
 
+	// #SOURCE: and #INPUT: belong to a script build, which fetches before its body
+	// and reads answers on stdin. A definition has neither, so declaring one would
+	// be silently ignored.
+	if strings.HasSuffix(r.Path, ".def") {
+		seen := map[string]bool{}
+		for _, a := range ScanAnnotations(r.Text) {
+			if (a.Key == "#SOURCE" || a.Key == "#INPUT") && !seen[a.Key] {
+				seen[a.Key] = true
+				errs = append(errs, fmt.Errorf("%w: %s is a definition and may not declare %s:; only a script recipe fetches sources or asks for input",
+					ErrInvalidRecipe, r.Name, a.Key))
+			}
+		}
+	}
+
 	// A #TYPE: that disagrees with the derived type is rejected rather than
 	// ignored, for the reason #REDISTRIBUTE: is: silence and a wrong answer must
 	// not look the same. DeriveType accepts only app and data, and a .def takes
@@ -127,6 +143,22 @@ func (r *Recipe) Validate() error {
 			errs = append(errs, fmt.Errorf("%w: %s declares #TYPE:%s but is %s; a recipe may declare %s or %s",
 				ErrInvalidRecipe, r.Name, r.DeclaredType, r.Type, TypeApp, TypeData))
 		}
+	}
+
+	// A source name becomes $CNT_SRC_<name> and addresses one record in the
+	// identity, so a malformed or repeated one is rejected rather than skipped:
+	// the body would otherwise run against an unset variable.
+	seenSource := make(map[string]bool, len(r.Sources))
+	for _, src := range r.Sources {
+		if seenSource[src.Name] {
+			errs = append(errs, fmt.Errorf("%w: %s declares #SOURCE:%s twice; one name is one input",
+				ErrInvalidRecipe, r.Name, src.Name))
+		}
+		seenSource[src.Name] = true
+	}
+	for _, raw := range scanMalformedSources(r.Text) {
+		errs = append(errs, fmt.Errorf("%w: %s declares #SOURCE:%s; the form is a name then one URL, or ask: and a prompt, and the name may hold only letters, digits and underscore",
+			ErrInvalidRecipe, r.Name, raw))
 	}
 
 	if r.Redistribute != "" && r.Redistribute != "yes" && r.Redistribute != "no" {

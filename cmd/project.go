@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/image/freeze"
 	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/project"
 	"github.com/Justype/condatainer/internal/project/lock"
@@ -912,7 +914,8 @@ func problemStrings(problems []lock.Problem) []string {
 }
 
 func newProjectValidateCmd() *cobra.Command {
-	var jsonOutput bool
+	var jsonOutput, installed, payload bool
+	var matchMode string
 	cmd := &cobra.Command{
 		Use:   "validate",
 		Short: "Check the lock is complete and consistent with the scripts",
@@ -923,11 +926,15 @@ func newProjectValidateCmd() *cobra.Command {
 - every recorded artifact still regenerates the keys it claims;
 - every dependency resolves to another recorded artifact.
 
-It looks at the lock only, never at what is installed here. To ask whether a
-script can actually run on this machine, use 'condatainer check <script>'.`,
+It looks at the lock only unless told otherwise, so it needs no overlays and
+runs anywhere.`,
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
-		RunE: func(_ *cobra.Command, _ []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			match, err := parseMatch(matchMode)
+			if err != nil {
+				return err
+			}
 			root, err := projectRoot(!jsonOutput)
 			if err != nil {
 				return err
@@ -943,12 +950,18 @@ script can actually run on this machine, use 'condatainer check <script>'.`,
 			_, problems := lock.Verify(root, current)
 			needPin := requestsNeedingPin(current, scanned)
 
-			total := len(problems) + len(scanned.Findings) + len(needPin)
+			// An installed check is only meaningful over a lock that verifies.
+			var notInstalled []string
+			if (installed || payload) && len(problems) == 0 {
+				notInstalled = installedProblems(cmd.Context(), root, current, match, payload)
+			}
+
+			total := len(problems) + len(scanned.Findings) + len(needPin) + len(notInstalled)
 			if missingBaseProblem(current) != "" {
 				total++
 			}
 			if jsonOutput {
-				if err := printJSON(validateReport(root, current, problems, needPin, scanned)); err != nil {
+				if err := printJSON(validateReport(root, current, problems, needPin, scanned, notInstalled)); err != nil {
 					return err
 				}
 				// The exit status is the answer; the format only changes how it
@@ -959,6 +972,9 @@ script can actually run on this machine, use 'condatainer check <script>'.`,
 				return nil
 			}
 			for _, problem := range projectProblems(current, scanned, problems) {
+				utils.PrintError("%s", problem)
+			}
+			for _, problem := range notInstalled {
 				utils.PrintError("%s", problem)
 			}
 			if total > 0 {
@@ -972,7 +988,37 @@ script can actually run on this machine, use 'condatainer check <script>'.`,
 		},
 	}
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Print JSON")
+	cmd.Flags().BoolVar(&installed, "installed", false, "Also require every pin to be installed here")
+	cmd.Flags().BoolVar(&payload, "payload", false,
+		"Also check installed files against the payload key (reads every byte; implies --installed)")
+	cmd.Flags().StringVar(&matchMode, "match", string(restore.MatchEquivalent),
+		"Key an installed artifact must agree with: equivalent or identity")
 	return cmd
+}
+
+// installedProblems reports each pin that is not installed here, as an artifact
+// that agrees with the lock under match, and with payload each installed one
+// whose files do not match its recorded payload key. A build dependency that
+// only a rebuild would need is not a problem.
+func installedProblems(ctx context.Context, root string, l *lock.Lock, match restore.Match, payload bool) []string {
+	plan := restore.Compute(root, l, restore.Options{Match: match})
+	problems := append([]string(nil), plan.Problems...)
+	for _, step := range plan.Steps {
+		if !step.Direct {
+			continue
+		}
+		if step.Action != restore.ActionAdopt {
+			problems = append(problems, fmt.Sprintf("%s is not installed here (restore would %s it)", step.Name, step.Action))
+			continue
+		}
+		if !payload || step.Path == "" {
+			continue
+		}
+		if err := freeze.VerifyPayload(ctx, step.Path); err != nil && !errors.Is(err, freeze.ErrNoPayloadKey) {
+			problems = append(problems, fmt.Sprintf("%s: %v", step.Name, err))
+		}
+	}
+	return problems
 }
 
 // requestsNeedingPin reports declarations with no pin, without mutating
@@ -1001,7 +1047,7 @@ type requestReport struct {
 	Pinnable bool `json:"pinnable"`
 }
 
-func validateReport(root string, l *lock.Lock, problems []lock.Problem, needPin []lock.Request, scanned *lock.ScanResult) any {
+func validateReport(root string, l *lock.Lock, problems []lock.Problem, needPin []lock.Request, scanned *lock.ScanResult, notInstalled []string) any {
 	report := struct {
 		Root       string          `json:"root"`
 		Valid      bool            `json:"valid"`
@@ -1016,6 +1062,7 @@ func validateReport(root string, l *lock.Lock, problems []lock.Problem, needPin 
 	if reason := missingBaseProblem(l); reason != "" {
 		report.Problems = append(report.Problems, reason)
 	}
+	report.Problems = append(report.Problems, notInstalled...)
 	for _, request := range needPin {
 		report.Unselected = append(report.Unselected, requestReport{
 			Request: request.Key, Kind: string(request.Kind), Scripts: request.Scripts,
@@ -1248,9 +1295,13 @@ func reportRestore(report *restore.Report, jsonOutput bool) error {
 			line += " (build dep, discarded)"
 		}
 		if result.Found != "" {
-			line += utils.StyleWarning(fmt.Sprintf(" (equivalent, not %s)", short(result.Identity)))
+			line += utils.StyleWarning(equivalentNote(result))
 		}
 		utils.PrintMessage("%s", line)
+		if result.PayloadDrift {
+			utils.PrintWarning("%s rebuilt with the locked identity but different files: its recipe does not produce the same output twice",
+				utils.StyleName(result.Name))
+		}
 	}
 	for _, problem := range report.Problems {
 		utils.PrintError("%s", problem)
@@ -1281,6 +1332,29 @@ func reportRestore(report *restore.Report, jsonOutput bool) error {
 		utils.PrintSuccess("Project restored: %d artifact(s).", len(report.Results))
 	}
 	return nil
+}
+
+// equivalentNote says an equivalent artifact stands in, and which inputs it was
+// built from differently. Names only: the digests are in --json, and a line per
+// input would bury a restore of many artifacts.
+func equivalentNote(result restore.Result) string {
+	note := fmt.Sprintf(" (equivalent, not %s", short(result.Identity))
+	if fields := diffFields(result.Diffs); len(fields) > 0 {
+		note += "; differs: " + strings.Join(fields, ", ")
+	}
+	return note + ")"
+}
+
+// diffFields names the inputs in compare's "field: want -> got" lines. The field
+// itself holds colons (src:gtf, ph:gencode_version), so the split is on the
+// colon-and-space that ends it.
+func diffFields(diffs []string) []string {
+	var out []string
+	for _, diff := range diffs {
+		field, _, _ := strings.Cut(diff, ": ")
+		out = append(out, field)
+	}
+	return out
 }
 
 // planDestination says where a step's result will land, which differs by what

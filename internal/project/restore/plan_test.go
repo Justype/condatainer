@@ -63,11 +63,11 @@ func vendor(t *testing.T, root string, manifest meta.Manifest, recipe string) st
 	return relative
 }
 
-// A frozen environment records one key under snapshot-env-v1 and vendors no
+// A frozen environment records one key under payload-tree-v1 and vendors no
 // source: it was captured, not built.
 func frozenEnv(t *testing.T, root string) string {
 	t.Helper()
-	ref := meta.KeyRef{Scheme: string(key.SnapshotEnvV1), SHA256: strings.Repeat("c", 64)}
+	ref := meta.KeyRef{Scheme: string(key.PayloadTreeV1), SHA256: strings.Repeat("c", 64)}
 	manifest := meta.Manifest{
 		SchemaVersion: meta.SchemaVersion,
 		Name:          meta.EnvName,

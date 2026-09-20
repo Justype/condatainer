@@ -44,6 +44,14 @@ type PlaceholderValue struct {
 	Value string
 }
 
+// SourceValue is one #SOURCE: input: the name the recipe gave it and the digest
+// of the bytes that arrived. The URL never appears — the same file fetched from
+// a mirror, or through a per-user vendor link, is the same input.
+type SourceValue struct {
+	Name   string
+	Digest string
+}
+
 // DependencyValue is one dependency line. What the fields mean is per-kind and decided
 // elsewhere; here they are opaque space-free tokens, which is what lets identity
 // and equivalence use the same line shape for different content.
@@ -58,9 +66,9 @@ func (d DependencyValue) text() string {
 }
 
 // Model is one canonical identity or equivalence model. Fields are written in this
-// order — type, env, source, ph, dep — and repeated keys sort within their own
-// group. No key preimage carries a name or a prefix: a key describes what was
-// built, and the name is what it was called.
+// order — type, env, recipe, from, src, ph, dep — and repeated keys sort within
+// their own group. No key preimage carries a name or a prefix: a key describes
+// what was built, and the name is what it was called.
 type Model struct {
 	Kind Kind
 	Type catalog.Type
@@ -70,7 +78,11 @@ type Model struct {
 	// From is the digest of the upstream image a definition bootstrapped from,
 	// empty when there is none. Identity models only: the reference as written
 	// is already inside the recipe, so this adds which bytes it meant that day.
-	From         string
+	From string
+	// Sources are the #SOURCE: inputs the build fetched, by name and digest.
+	// Identity models only: a re-cut upstream file makes a different build, but
+	// not one that stops substituting for what a recipe asks for.
+	Sources      []SourceValue
 	Placeholders []PlaceholderValue
 	Deps         []DependencyValue
 }
@@ -85,6 +97,8 @@ func Marshal(r Model) ([]byte, error) {
 
 	env := append([]EnvValue(nil), r.Env...)
 	sort.Slice(env, func(i, j int) bool { return env[i].Key < env[j].Key })
+	src := append([]SourceValue(nil), r.Sources...)
+	sort.Slice(src, func(i, j int) bool { return src[i].Name < src[j].Name })
 	ph := append([]PlaceholderValue(nil), r.Placeholders...)
 	sort.Slice(ph, func(i, j int) bool { return ph[i].Name < ph[j].Name })
 	deps := append([]DependencyValue(nil), r.Deps...)
@@ -100,6 +114,9 @@ func Marshal(r Model) ([]byte, error) {
 	}
 	if r.From != "" {
 		fmt.Fprintf(&sb, "from=%s\n", r.From)
+	}
+	for _, s := range src {
+		fmt.Fprintf(&sb, "src=%s=%s\n", s.Name, s.Digest)
 	}
 	for _, p := range ph {
 		fmt.Fprintf(&sb, "ph=%s=%s\n", p.Name, p.Value)
@@ -169,6 +186,9 @@ func validate(r Model) error {
 	if r.From != "" && r.Kind != KindIdentity {
 		return fmt.Errorf("%w: from belongs to identity only", ErrInvalid)
 	}
+	if len(r.Sources) > 0 && r.Kind != KindIdentity {
+		return fmt.Errorf("%w: src belongs to identity only", ErrInvalid)
+	}
 
 	seenEnv := make(map[string]bool, len(r.Env))
 	for _, e := range r.Env {
@@ -197,6 +217,20 @@ func validate(r Model) error {
 		if strings.HasPrefix(r.From, DigestPrefix) && !ValidDigest(r.From) {
 			return fmt.Errorf("%w: from %q is not a sha256 digest", ErrInvalid, r.From)
 		}
+	}
+
+	seenSrc := make(map[string]bool, len(r.Sources))
+	for _, s := range r.Sources {
+		if !validToken(s.Name) || strings.Contains(s.Name, "=") {
+			return fmt.Errorf("%w: %q is not a usable source name", ErrInvalid, s.Name)
+		}
+		if !ValidDigest(s.Digest) {
+			return fmt.Errorf("%w: source %s has digest %q, not a sha256 digest", ErrInvalid, s.Name, s.Digest)
+		}
+		if seenSrc[s.Name] {
+			return fmt.Errorf("%w: source %s appears more than once", ErrInvalid, s.Name)
+		}
+		seenSrc[s.Name] = true
 	}
 
 	seenPH := make(map[string]bool, len(r.Placeholders))

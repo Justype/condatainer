@@ -75,9 +75,18 @@ func (b *BuildObject) buildScript(ctx context.Context, buildDeps bool) error {
 		return err
 	}
 
-	// Dependencies are resolved by now, so the identity this build would produce
-	// is fully determined — and under --store that, not the name, decides whether
-	// there is anything to do.
+	// Sources are part of the identity, so they must arrive before it can be
+	// predicted. This costs a download that an installed artifact would have
+	// made unnecessary, and saves the build behind it — which for the recipes
+	// that declare sources is hours against gigabytes.
+	if err := b.fetchDeclaredSources(ctx); err != nil {
+		b.Cleanup(true) //nolint:errcheck
+		return err
+	}
+
+	// Dependencies are resolved and sources fetched by now, so the identity this
+	// build would produce is fully determined — and under --store that, not the
+	// name, decides whether there is anything to do.
 	if b.skipIfInstalled(ctx) {
 		b.Cleanup(false) //nolint:errcheck
 		return nil
@@ -90,7 +99,7 @@ func (b *BuildObject) buildScript(ctx context.Context, buildDeps bool) error {
 		return err
 	}
 
-	log.Info("building overlay", "kind", "note", "overlay", filepath.Base(targetPath), "mode", buildModeLabel(b))
+	log.Info("building overlay", "overlay", filepath.Base(targetPath))
 
 	if err := prepareBuildWorkspace(ctx, b); err != nil {
 		b.Cleanup(true) //nolint:errcheck
@@ -228,7 +237,7 @@ func (b *BuildObject) buildExecOpts() (execpkg.Options, execpkg.IO, error) {
 	// micromamba where Conda's own path cannot do what it needs.
 	toolchainDir, toolchainBin, hasToolchain := toolchain()
 	if hasToolchain {
-		envSettings = append(envSettings, "MAMBA_ROOT_PREFIX="+ScratchPath, "MAMBA_NO_RC=true")
+		envSettings = append(envSettings, micromambaEnv()...)
 	}
 
 	bashScript := fmt.Sprintf(`
@@ -260,6 +269,15 @@ fi
 		filepath.Join(b.ws.CntDir, b.spec.Image.Name)+":"+prefix,
 		b.ws.TmpDir+":"+ScratchPath)
 
+	// Fetched sources, read-only: the digest recorded for each describes the
+	// bytes that arrived, so a recipe that rewrote one in place would leave the
+	// record naming something that is gone. A recipe that needs to alter a
+	// source copies it into $CNT_TMP first.
+	if len(b.spec.Source.Fetched) > 0 {
+		bindDirs = append(bindDirs, b.sourceDir()+":"+SourcePath+":ro")
+		envSettings = append(envSettings, sourceEnvFor(b.spec.Source.Fetched)...)
+	}
+
 	opts := execpkg.Options{
 		BaseImage:   b.spec.Base,
 		Overlays:    overlays,
@@ -277,8 +295,8 @@ fi
 	// in a pasted URL would be mangled or executed.
 	opts.PassThruStdin = true
 	var ioStreams execpkg.IO
-	if len(b.inputAnswers) > 0 {
-		ioStreams.Stdin = strings.NewReader(strings.Join(b.inputAnswers, "\n") + "\n")
+	if recipeAnswers := b.recipeAnswers(); len(recipeAnswers) > 0 {
+		ioStreams.Stdin = strings.NewReader(strings.Join(recipeAnswers, "\n") + "\n")
 	}
 
 	return opts, ioStreams, nil

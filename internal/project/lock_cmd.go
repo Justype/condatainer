@@ -117,7 +117,7 @@ func unpinnedRequests(l *lock.Lock, scanned *lock.ScanResult) []string {
 func UnpublishedFrozenEnv(l *lock.Lock, pinned []*lock.Pinned) []string {
 	var out []string
 	for _, p := range pinned {
-		if p.Identity.Scheme == string(key.SnapshotEnvV1) && len(l.Remotes[p.Artifact]) == 0 {
+		if p.Identity.Scheme == string(key.PayloadTreeV1) && len(l.Remotes[p.Artifact]) == 0 {
 			out = append(out, p.Artifact)
 		}
 	}

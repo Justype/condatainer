@@ -7,6 +7,7 @@
 // Usage:
 //
 //	mountharness _mount_sentinel <fuseBin> <mnt> [fuseArgs...]   see freeze.RunSentinel; work comes from $CNT_MOUNT_WORK
+//	mountharness _payload_key <dir> <base> <workers>             prints the payload key of dir, as the hidden command does
 //	mountharness drive <fuseBin> <sqf> <mnt> <work>              calls freeze.MountedRun directly and blocks until it returns
 package main
 
@@ -14,7 +15,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 
+	"github.com/Justype/condatainer/internal/artifact/key"
 	"github.com/Justype/condatainer/internal/image/freeze"
 	execpkg "github.com/Justype/condatainer/internal/runtime/exec"
 )
@@ -34,6 +37,23 @@ func main() {
 		if err := freeze.RunSentinel(fuseBin, mnt, os.Getenv(freeze.EnvSentinelWork), fuseArgs); err != nil {
 			fail("%v", err)
 		}
+	case "_payload_key":
+		if len(os.Args) != 5 {
+			fail("usage: mountharness _payload_key <dir> <base> <workers>")
+		}
+		workers, err := strconv.Atoi(os.Args[4])
+		if err != nil {
+			fail("workers: %v", err)
+		}
+		records, err := key.TreeOf(context.Background(), os.Args[2], os.Args[3], workers)
+		if err != nil {
+			fail("%v", err)
+		}
+		ref, err := key.PayloadKey(records)
+		if err != nil {
+			fail("%v", err)
+		}
+		fmt.Println(ref.SHA256)
 	case "drive":
 		if len(os.Args) != 6 {
 			fail("usage: mountharness drive <fuseBin> <sqf> <mnt> <work>")

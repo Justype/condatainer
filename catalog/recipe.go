@@ -24,9 +24,10 @@ type Entry struct {
 type Recipe struct {
 	Entry
 	Env        []EnvVar
-	Inputs     []string // #INPUT: prompts, in order
-	Directives []string // #SBATCH / #PBS / #BSUB, verbatim
-	Arch       Arch     // #ARCH:; empty means the default, ArchNative
+	Sources    []SourceURL // #SOURCE: declarations, in order
+	Inputs     []string    // #INPUT: prompts, in order
+	Directives []string    // #SBATCH / #PBS / #BSUB, verbatim
+	Arch       Arch        // #ARCH:; empty means the default, ArchNative
 	// License is #LICENSE: as written — an SPDX expression, kept verbatim and
 	// never parsed. Deriving redistribution permission from a licence
 	// expression is a judgement a tool gets wrong in the permissive direction,
@@ -168,6 +169,10 @@ func ParseRecipe(path string, r io.Reader) (*Recipe, error) {
 			if env, ok := parseEnv(value, note); ok {
 				rec.Env = append(rec.Env, env)
 			}
+		case "#SOURCE":
+			if src, ok := parseSource(value); ok {
+				rec.Sources = append(rec.Sources, src)
+			}
 		case "#INPUT":
 			if prompt := strings.TrimSpace(value); prompt != "" {
 				rec.Inputs = append(rec.Inputs, prompt)
@@ -250,6 +255,90 @@ func splitNote(s string) (value, note string) {
 		return strings.TrimSpace(before), strings.TrimSpace(after)
 	}
 	return strings.TrimSpace(s), ""
+}
+
+// SourceURL is one #SOURCE: declaration: a name the recipe body refers to as
+// $CNT_SRC_<name>, and where the file comes from.
+//
+// A link only the user holds — expiring, per-user, EULA-gated — is declared with
+// a Prompt instead of a URL, and the tool asks for it. The answer is never
+// recorded.
+type SourceURL struct {
+	Name   string
+	URL    string
+	Prompt string
+}
+
+// askPrefix marks a #SOURCE: whose link is asked for rather than written down.
+const askPrefix = "ask:"
+
+// parseSource splits "name url" or "name ask:prompt".
+//
+// The name becomes an environment variable, so it is restricted to what one can
+// hold. A malformed declaration is skipped here and reported by Validate, which
+// is where an author is told rather than left with an unset variable.
+func parseSource(value string) (SourceURL, bool) {
+	name, rest, _ := strings.Cut(strings.TrimSpace(value), " ")
+	rest = strings.TrimSpace(rest)
+	if !validSourceName(name) || rest == "" {
+		return SourceURL{}, false
+	}
+	if prompt, ok := strings.CutPrefix(rest, askPrefix); ok {
+		prompt = strings.TrimSpace(prompt)
+		if prompt == "" {
+			return SourceURL{}, false
+		}
+		return SourceURL{Name: name, Prompt: prompt}, true
+	}
+	if strings.ContainsAny(rest, " \t") {
+		return SourceURL{}, false
+	}
+	return SourceURL{Name: name, URL: rest}, true
+}
+
+// Prompts returns every question a build must put to the user, in the order the
+// answers are supplied: the #INPUT: prompts, then each #SOURCE: ask: in
+// declaration order. #INPUT: answers reach the recipe; the rest are consumed by
+// the fetch and never reach it.
+func (r *Recipe) Prompts() []string {
+	out := append([]string(nil), r.Inputs...)
+	for _, src := range r.Sources {
+		if src.Prompt != "" {
+			out = append(out, src.Prompt)
+		}
+	}
+	return out
+}
+
+// scanMalformedSources returns the #SOURCE: values parseSource refused, as
+// written. Parsing skips them so one bad line cannot take a collection out of a
+// listing; Validate reads them back here to tell the author.
+func scanMalformedSources(text []byte) []string {
+	var out []string
+	for _, annotation := range ScanAnnotations(text) {
+		if annotation.Key != "#SOURCE" {
+			continue
+		}
+		if _, ok := parseSource(annotation.Value); !ok {
+			out = append(out, annotation.Value)
+		}
+	}
+	return out
+}
+
+// validSourceName reports whether name can be the tail of $CNT_SRC_<name>.
+func validSourceName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_':
+		default:
+			return false
+		}
+	}
+	return name[0] < '0' || name[0] > '9'
 }
 
 // parseEnv splits KEY=value and tokenizes the value on {name}.
