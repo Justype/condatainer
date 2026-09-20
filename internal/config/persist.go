@@ -125,9 +125,7 @@ func setDefaults() {
 	viper.SetDefault("build.compress_args", ArgsForCompress("zstd-medium"))
 	viper.SetDefault("build.block_size", DefaultBlockSize)
 	viper.SetDefault("build.data_block_size", DefaultDataBlockSize)
-	viper.SetDefault("build.app_tmp_overlay", false)
 	viper.SetDefault("build.always_submit", false)
-	viper.SetDefault("build.app_tmp_overlay_size", DefaultAppTmpOverlaySizeMB)
 
 	// Scheduler config defaults
 	viper.SetDefault("scheduler.bin", "")
@@ -974,12 +972,6 @@ func LoadFromViper() {
 		}
 	}
 
-	if tmpStr := layerString("build.app_tmp_overlay_size"); tmpStr != "" {
-		if tmpSizeMB, err := utils.ParseMemoryMB(tmpStr); err == nil && tmpSizeMB > 0 {
-			Global.Build.AppTmpOverlaySizeMB = int(tmpSizeMB)
-		}
-	}
-
 	// Only override compress_args if explicitly set in config; otherwise
 	// LoadDefaults' unconditional zstd-medium stands.
 	if compressArgs := layerString("build.compress_args"); compressArgs != "" {
@@ -1001,10 +993,6 @@ func LoadFromViper() {
 			slog.Default().Warn("invalid build.data_block_size, using default", "value", v, "default", DefaultDataBlockSize)
 			Global.Build.DataBlockSize = DefaultDataBlockSize
 		}
-	}
-
-	if useTmpOverlay, ok := layerBool("build.app_tmp_overlay"); ok {
-		Global.Build.AppTmpOverlay = useTmpOverlay
 	}
 
 	if alwaysSubmit, ok := layerBool("build.always_submit"); ok {

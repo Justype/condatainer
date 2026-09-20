@@ -164,9 +164,7 @@ which CondaTainer never reads or changes. See
 | `build.compress_args` | `zstd-medium` | mksquashfs compression arguments |
 | `build.block_size` | `128k` | mksquashfs block size for app/env/external overlays (e.g. `128k`, `512k`) |
 | `build.data_block_size` | `512k` | mksquashfs block size for data overlays (e.g. `512k`, `1m`) |
-| `build.app_tmp_overlay` | `false` | Assemble an **app** build inside a temporary ext3 overlay instead of host directories. Ignored for `data` and `os` |
 | `build.always_submit` | `false` | Always submit builds as scheduler jobs even if the script has no scheduler directives |
-| `build.app_tmp_overlay_size` | `20480` | Size of that overlay (supports units: `20g`, `20480`); only used when `app_tmp_overlay` is `true` |
 | `channels` | `[conda-forge, bioconda]` | Conda channels passed to micromamba in priority order (first = highest priority) |
 
 > `build.compress_args` also accepts shortcuts: `gzip`, `lz4`, `zstd`, `zstd-fast`, `zstd-medium`, `zstd-high`
@@ -268,7 +266,6 @@ upper‑casing, replacing `.` with `_`, and prefixing with
 
 * `logs_dir` → `CNT_LOGS_DIR`
 * `build.mem` → `CNT_BUILD_MEM`
-* `build.app_tmp_overlay_size` → `CNT_BUILD_APP_TMP_OVERLAY_SIZE`
 
 You can list the supported variables with
 `condatainer config show` (it prints any that are currently set).
@@ -428,9 +425,7 @@ build:
   compress_args: -comp zstd -Xcompression-level 8
   block_size: 128k       # SquashFS block size for app/env/external overlays
   data_block_size: 512k  # SquashFS block size for data overlays
-  app_tmp_overlay: false   # Assemble an app build inside an ext3 overlay (app only)
   always_submit: false    # Always submit as scheduler jobs even without directives
-  app_tmp_overlay_size: 20g  # Only used when app_tmp_overlay is true
 
 # Scheduler configuration
 scheduler:

@@ -528,12 +528,8 @@ Check the layer if it matters who can see the result — `(app-root)` or `(extra
 
 **Build Flags:**
 
-* `--app-tmp-overlay-size [SIZE]`: Size of the temporary build overlay (default: 20G). Only used when `--app-tmp-overlay` is active. Given on the command line it overrides `build.app_tmp_overlay_size`; left off, the config value stands.
 * `--block-size [SIZE]`: SquashFS block size for app/env/external overlays (e.g. `128k`, `512k`; default: `128k`). Must be a power of two between `4k` and `1m`.
 * `--data-block-size [SIZE]`: SquashFS block size for data/reference overlays (e.g. `512k`, `1m`; default: `512k`). Must be a power of two between `4k` and `1m`.
-* `--app-tmp-overlay`: Assemble an **app** build inside a temporary ext3 overlay instead of host directories. Equivalent to setting `build.app_tmp_overlay = true` in config. Can be substantially faster when the build tmp directory is on a network filesystem, and keeps a conda environment's many small files off its inode quota.
-
-  Applies to `app` builds only. A `data` build stages its payload on the host either way — it is a few large files, so an image would buy nothing — and `os` is a definition build where Apptainer writes the image itself.
 * `--store`: Build into the [store](#store), filed under this build's identity instead of taking the plain name.
 
   It never skips and never replaces. Ordinarily a build of an already-installed name is skipped, and `-u` swaps the installed one out; `--store` is how you get a second build of that name installed alongside the first. It behaves the same when nothing holds the name yet — the build is filed by identity either way, so it stays out of `condatainer list` and out of `exec -o <name>` until you promote it with [`store use`](#store). That is the point of the flag: a build that changes nothing anyone else resolves.

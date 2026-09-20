@@ -16,14 +16,13 @@ import (
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/config"
-	"github.com/Justype/condatainer/internal/image/ext3"
 	"github.com/Justype/condatainer/internal/image/producer"
 	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
-var ErrTmpOverlayExists = errors.New("temporary overlay already exists")
+var ErrBuildDirExists = errors.New("build directory already exists")
 var ErrBuildCancelled = errors.New("build cancelled by user")
 
 // BuildType is how a target is built — the shape of its source, nothing more.
@@ -170,7 +169,6 @@ func (b *BuildObject) NameVersion() string       { return b.spec.Image.Name }
 func (b *BuildObject) BuildSource() string       { return b.buildSource }
 func (b *BuildObject) Dependencies() []string    { return b.spec.Dependencies }
 func (b *BuildObject) TmpDir() string            { return b.ws.Root }
-func (b *BuildObject) TmpOverlayPath() string    { return b.ws.Overlay }
 func (b *BuildObject) TargetOverlayPath() string { return b.tgt.Path }
 func (b *BuildObject) CntDirPath() string        { return b.ws.CntDir }
 func (b *BuildObject) ScriptSpecs() *ScriptSpecs { return b.scriptSpecs }
@@ -192,12 +190,11 @@ func (b *BuildObject) String() string {
 		build_source: %s
 		dependencies: %v
 		script_specs: %v
-		tmp_overlay_path: %s
 		target_overlay_path: %s
 		cnt_dir_path: %s`,
 		b.spec.Image.Name, b.buildType, b.buildSource,
 		b.spec.Dependencies, b.scriptSpecs,
-		b.ws.Overlay, b.tgt.Path, b.ws.CntDir,
+		b.tgt.Path, b.ws.CntDir,
 	)
 }
 
@@ -396,7 +393,7 @@ func (b *BuildObject) createBuildLock() error {
 // lock. Local builds normally already use this path; scheduler jobs move their
 // process-private resolved recipe to the adopted scheduler-job workspace.
 func (b *BuildObject) adoptWorkspace(info BuildLockInfo) error {
-	next := workspaceForOwner(b.spec.Image.Name, b.ws.BaseRoot, b.ws.imageExt, b.ws.isDef, info)
+	next := workspaceForOwner(b.spec.Image.Name, b.ws.BaseRoot, b.ws.isDef, info)
 	if next.Root == b.ws.Root {
 		return nil
 	}
@@ -417,7 +414,7 @@ func (b *BuildObject) adoptWorkspace(info BuildLockInfo) error {
 }
 
 func (b *BuildObject) removeOwnerWorkspace(info BuildLockInfo) {
-	ws := workspaceForOwner(b.spec.Image.Name, b.ws.BaseRoot, b.ws.imageExt, b.ws.isDef, info)
+	ws := workspaceForOwner(b.spec.Image.Name, b.ws.BaseRoot, b.ws.isDef, info)
 	utils.RemoveAllWritable(ws.Root) //nolint:errcheck
 	utils.RemoveDirIfEmpty(filepath.Dir(ws.Root))
 }
@@ -512,55 +509,16 @@ func (b *BuildObject) GetMissingDependencies() ([]string, error) {
 	return missing, nil
 }
 
-func (b *BuildObject) CreateTmpOverlay(ctx context.Context, force bool) error {
-	// Check both ext3-mode artifact (.img) and dir-mode artifact (buildDir) for cross-mode stale detection
-	buildDir := b.ws.BuildDir
-	stale := utils.FileExists(b.ws.Overlay) || (b.ws.CntDir != "" && utils.DirExists(buildDir))
-	if stale {
-		if !force {
-			return fmt.Errorf("%w: %s", ErrTmpOverlayExists, b.ws.Overlay)
-		}
-		if err := os.Remove(b.ws.Overlay); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("failed to remove existing tmp overlay: %w", err)
-		}
-		os.RemoveAll(buildDir) //nolint:errcheck
-	}
-
-	// Ensure parent directory for tmp overlay exists (mkdir -p)
-	parentDir := filepath.Dir(b.ws.Overlay)
-	if parentDir != "" {
-		if err := utils.MkdirAllShared(parentDir); err != nil {
-			return fmt.Errorf("failed to create tmp overlay parent dir %s: %w", parentDir, err)
-		}
-	}
-
-	logging.FromContext(ctx).Debug("creating temporary overlay", "path", b.ws.Overlay)
-
-	// Sparse for speed, quiet because a scratch image's specs are noise.
-	if err := ext3.CreateWithOptions(ctx, &ext3.CreateOptions{
-		Path: b.ws.Overlay, SizeMB: config.Global.Build.AppTmpOverlaySizeMB,
-		UID: os.Getuid(), GID: os.Getgid(),
-		Profile: ext3.ProfileDefault, Sparse: true, FilesystemType: "ext3", Quiet: true,
-	}); err != nil {
-		return fmt.Errorf("failed to create temporary overlay: %w", err)
-	}
-
-	return nil
-}
-
-// CreateBuildDirs creates host directories for dir-mode builds (app_tmp_overlay=false).
+// CreateBuildDirs creates the host directories of a build.
 // Layout: <buildDir>/cnt/ (bound as /cnt) and <buildDir>/tmp/ (bound as ScratchPath).
-// Checks both dir-mode (buildDir) and ext3-mode (.img) artifacts for cross-mode stale detection.
+// A directory left by an earlier build is refused unless force removes it.
 func (b *BuildObject) CreateBuildDirs(ctx context.Context, force bool) error {
 	buildDir := b.ws.BuildDir
-	// Check both dir-mode artifact (buildDir) and ext3-mode artifact (.img)
-	stale := utils.DirExists(buildDir) || utils.FileExists(b.ws.Overlay)
-	if stale {
+	if utils.DirExists(buildDir) {
 		if !force {
-			return fmt.Errorf("%w: %s", ErrTmpOverlayExists, buildDir)
+			return fmt.Errorf("%w: %s", ErrBuildDirExists, buildDir)
 		}
-		os.RemoveAll(buildDir)  //nolint:errcheck — clean dir-mode artifact
-		os.Remove(b.ws.Overlay) //nolint:errcheck — clean ext3-mode artifact (no-op if "")
+		os.RemoveAll(buildDir) //nolint:errcheck
 	}
 
 	if err := ensureWorkspaceRoot(b); err != nil {
@@ -586,9 +544,7 @@ func (b *BuildObject) retargetWorkspace() {
 	if abs, err := filepath.Abs(root); err == nil {
 		root = abs
 	}
-	// Re-derived from the type, not carried over: a guess of app corrected to
-	// data must lose its ext3 image, not just move it to another root.
-	b.ws = workspaceFor(b.spec.Image.Name, root, appExt3ScratchExt(typ), false)
+	b.ws = workspaceFor(b.spec.Image.Name, root, false)
 }
 
 // Cleanup removes the build workspace (materialized recipe, tmp overlay, build dir), plus
@@ -598,7 +554,7 @@ func (b *BuildObject) retargetWorkspace() {
 func (b *BuildObject) Cleanup(failed bool) error {
 	log := slog.Default()
 
-	willClean := (b.tempSource && b.buildSource != "") || b.ws.Overlay != "" || b.ws.CntDir != ""
+	willClean := (b.tempSource && b.buildSource != "") || b.ws.CntDir != ""
 	if willClean {
 		log.Info("cleaning up temporary files")
 	}
@@ -739,16 +695,6 @@ func (b *BuildObject) resolveResourceSpec() error {
 	return nil
 }
 
-// appExt3ScratchExt returns the ext3 scratch-image extension for a build: ".img"
-// for an app under build.app_tmp_overlay, "" for every other type whatever the config
-// says. See the README's Workspace Strategy.
-func appExt3ScratchExt(typ catalog.Type) string {
-	if typ != catalog.TypeApp || !config.Global.Build.AppTmpOverlay {
-		return ""
-	}
-	return ".img"
-}
-
 // NewBuildObject creates a BuildObject from a name/version string
 // Format: "name/version" for conda/shell, "name" for def, "prefix/name/version" for ref
 // All overlays are stored in imagesDir regardless of type
@@ -792,11 +738,11 @@ func NewBuildObject(ctx context.Context, nameVersion string, external bool, imag
 		targetOverlay = filepath.Join(real, filepath.Base(targetOverlay))
 	}
 
-	ws := workspaceFor(normalized, tmpDir, appExt3ScratchExt(typ), false)
+	ws := workspaceFor(normalized, tmpDir, false)
 
 	logging.FromContext(ctx).Debug("creating build object",
 		"input", nameVersion, "nameVersion", normalized,
-		"targetOverlay", targetOverlay, "tmpOverlay", ws.Overlay, "cntDir", ws.CntDir)
+		"targetOverlay", targetOverlay, "cntDir", ws.CntDir)
 
 	base := &BuildObject{
 		spec:            Spec{Image: ImageSpec{Name: normalized, Type: typ}},
@@ -846,11 +792,11 @@ func NewCondaObjectWithSource(nameVersion, buildSource, imagesDir string, update
 		targetOverlay = abs
 	}
 
-	ws := workspaceFor(normalized, tmpDir, appExt3ScratchExt(catalog.TypeApp), false)
+	ws := workspaceFor(normalized, tmpDir, false)
 
 	slog.Default().Debug("creating conda build object",
 		"nameVersion", nameVersion, "buildSource", buildSource,
-		"targetOverlay", targetOverlay, "tmpOverlay", ws.Overlay, "cntDir", ws.CntDir)
+		"targetOverlay", targetOverlay, "cntDir", ws.CntDir)
 
 	base := &BuildObject{
 		spec:        Spec{Image: ImageSpec{Name: normalized, Type: catalog.TypeApp}},
@@ -968,17 +914,11 @@ func FromExternalSource(ctx context.Context, targetPrefix, source string, isAppt
 	if absDir, err := filepath.Abs(targetDir); err == nil {
 		targetDir = absDir
 	}
-	// A definition gets no scratch image: apptainer writes its root as a sandbox
-	// directory, which workspaceFor sites from isDef.
-	ext := appExt3ScratchExt(externalTyp)
-	if isDef {
-		ext = ""
-	}
-	ws := workspaceFor(nameVersion, targetDir, ext, isDef)
+	ws := workspaceFor(nameVersion, targetDir, isDef)
 
 	logging.FromContext(ctx).Debug("creating external build object",
 		"nameVersion", nameVersion, "source", source,
-		"targetPrefix", targetPrefix, "tmpOverlay", ws.Overlay, "cntDir", ws.CntDir)
+		"targetPrefix", targetPrefix, "cntDir", ws.CntDir)
 
 	base := &BuildObject{
 		spec:        Spec{Image: ImageSpec{Name: nameVersion, Type: externalTyp}},
@@ -1063,7 +1003,7 @@ func (b *BuildObject) asDefinitionBuild() {
 	if abs, err := filepath.Abs(dir); err == nil {
 		dir = abs
 	}
-	b.ws = workspaceFor(b.spec.Image.Name, dir, "", true)
+	b.ws = workspaceFor(b.spec.Image.Name, dir, true)
 	b.buildType = BuildTypeDef
 	if b.spec.Source.BuildType() == "" {
 		// A definition given as a path or a scheme:// URI, so resolution never

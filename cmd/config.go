@@ -27,35 +27,33 @@ var (
 // configKeyDefs maps every known config key to whether it holds a string slice (array).
 // true = array key (use append/prepend/remove); false = scalar key (use set).
 var configKeyDefs = map[string]bool{
-	"logs_dir":                   false,
-	"default_distro":             false,
-	"submit_job":                 false,
-	"sources":                    true,
-	"autoload_gpu":               false,
-	"nested_run":                 false,
-	"notification":               false,
-	"metadata_cache_ttl":         false,
-	"store_gc_grace":             false,
-	"proxy_perjob":               false,
-	"helper_bind_all":            false,
-	"build.system_apptainer":     false,
-	"build.ncpus":                false,
-	"build.mem":                  false,
-	"build.time":                 false,
-	"build.compress_args":        false,
-	"build.block_size":           false,
-	"build.data_block_size":      false,
-	"build.app_tmp_overlay":      false,
-	"build.always_submit":        false,
-	"build.app_tmp_overlay_size": false,
-	"scheduler.bin":              false,
-	"scheduler.timeout":          false,
-	"scheduler.account":          false,
-	"scheduler.partition":        false,
-	"scheduler.ncpus":            false,
-	"scheduler.mem":              false,
-	"scheduler.time":             false,
-	"channels":                   true,
+	"logs_dir":               false,
+	"default_distro":         false,
+	"submit_job":             false,
+	"sources":                true,
+	"autoload_gpu":           false,
+	"nested_run":             false,
+	"notification":           false,
+	"metadata_cache_ttl":     false,
+	"store_gc_grace":         false,
+	"proxy_perjob":           false,
+	"helper_bind_all":        false,
+	"build.system_apptainer": false,
+	"build.ncpus":            false,
+	"build.mem":              false,
+	"build.time":             false,
+	"build.compress_args":    false,
+	"build.block_size":       false,
+	"build.data_block_size":  false,
+	"build.always_submit":    false,
+	"scheduler.bin":          false,
+	"scheduler.timeout":      false,
+	"scheduler.account":      false,
+	"scheduler.partition":    false,
+	"scheduler.ncpus":        false,
+	"scheduler.mem":          false,
+	"scheduler.time":         false,
+	"channels":               true,
 }
 
 func isArrayKey(key string) bool { return configKeyDefs[key] }
@@ -63,7 +61,7 @@ func isArrayKey(key string) bool { return configKeyDefs[key] }
 func isBoolKey(key string) bool {
 	switch key {
 	case "submit_job", "proxy_perjob", "helper_bind_all", "autoload_gpu",
-		"build.app_tmp_overlay", "build.always_submit":
+		"build.always_submit":
 		return true
 	}
 	return false
@@ -228,10 +226,8 @@ func configValueCompletion(key string) []string {
 		return config.CompressNames()
 	case "build.block_size", "build.data_block_size":
 		return config.BlockSizeCompletions
-	case "build.app_tmp_overlay", "build.always_submit":
+	case "build.always_submit":
 		return []string{"true", "false"}
-	case "build.app_tmp_overlay_size":
-		return []string{"10g", "20g", "40g"}
 	case "scheduler.ncpus":
 		return []string{"1", "2", "4", "8"}
 	case "scheduler.mem":
@@ -494,7 +490,7 @@ var configShowCmd = &cobra.Command{
 		printOverridden("                       ", "notification")
 		fmt.Println()
 
-		// Build settings (longest key: app_tmp_overlay_size = 20 chars)
+		// Build settings
 		fmt.Printf("%s %s\n", utils.StyleTitle("Build Configuration:"), "build.*")
 		fmt.Printf("  %-21s %s%s\n", "system_apptainer:", config.Global.Build.SystemApptainer, srcTag("build.system_apptainer"))
 		printOverridden("                        ", "build.system_apptainer")
@@ -520,10 +516,6 @@ var configShowCmd = &cobra.Command{
 		printOverridden("                        ", "build.block_size")
 		fmt.Printf("  %-21s %s%s\n", "data_block_size:", config.Global.Build.DataBlockSize, srcTag("build.data_block_size"))
 		printOverridden("                        ", "build.data_block_size")
-		fmt.Printf("  %-21s %v%s\n", "app_tmp_overlay:", config.Global.Build.AppTmpOverlay, srcTag("build.app_tmp_overlay"))
-		printOverridden("                        ", "build.app_tmp_overlay")
-		fmt.Printf("  %-21s %s%s\n", "app_tmp_overlay_size:", utils.FormatMemoryMB(int64(config.Global.Build.AppTmpOverlaySizeMB)), srcTag("build.app_tmp_overlay_size"))
-		printOverridden("                        ", "build.app_tmp_overlay_size")
 		fmt.Println()
 
 		// Scheduler settings (longest key: partition = 10 chars)
@@ -775,16 +767,6 @@ Time duration format (for build.time):
 			if mb, err := utils.ParseMemoryMB(value); err != nil || mb <= 0 {
 				utils.PrintError("Invalid memory format: %s", value)
 				utils.PrintHint("Use format like: 8GB, 16384MB, 8192")
-				os.Exit(ExitCodeError)
-			} else {
-				value = fmt.Sprintf("%d", mb)
-			}
-		}
-
-		if key == "build.app_tmp_overlay_size" {
-			if mb, err := utils.ParseMemoryMB(value); err != nil || mb <= 0 {
-				utils.PrintError("Invalid memory format: %s", value)
-				utils.PrintHint("Use format like: 10g, 20480m, 20480, 1t")
 				os.Exit(ExitCodeError)
 			} else {
 				value = fmt.Sprintf("%d", mb)

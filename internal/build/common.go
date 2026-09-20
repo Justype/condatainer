@@ -199,43 +199,28 @@ func atomicInstall(preparedPath, targetPath string) error {
 	return nil
 }
 
-// prepareBuildWorkspace creates the build workspace: an ext3 scratch image, or
-// host directories. Script and Conda builds only. A stale workspace is warned
-// about and re-created, leaving a fetched build source intact.
+// prepareBuildWorkspace creates the build's host directories. Script and Conda
+// builds only. A stale workspace is warned about and re-created, leaving a
+// fetched build source intact.
 func prepareBuildWorkspace(ctx context.Context, b *BuildObject) error {
 	if err := ensureWorkspaceRoot(b); err != nil {
 		return err
 	}
-	if !b.ws.UsesImage() {
-		if err := b.CreateBuildDirs(ctx, false); err != nil {
-			if !errors.Is(err, ErrTmpOverlayExists) {
-				return fmt.Errorf("failed to create build dirs: %w", err)
-			}
-			logging.FromContext(ctx).Warn("stale build directory found, cleaning up", "name", b.spec.Image.Name)
-			if err := b.CreateBuildDirs(ctx, true); err != nil {
-				return fmt.Errorf("failed to create build dirs: %w", err)
-			}
+	if err := b.CreateBuildDirs(ctx, false); err != nil {
+		if !errors.Is(err, ErrBuildDirExists) {
+			return fmt.Errorf("failed to create build dirs: %w", err)
 		}
-	} else {
-		if err := b.CreateTmpOverlay(ctx, false); err != nil {
-			if !errors.Is(err, ErrTmpOverlayExists) {
-				return fmt.Errorf("failed to create temporary overlay: %w", err)
-			}
-			logging.FromContext(ctx).Warn("stale temporary overlay found, cleaning up", "name", b.spec.Image.Name)
-			if err := b.CreateTmpOverlay(ctx, true); err != nil {
-				return fmt.Errorf("failed to create temporary overlay: %w", err)
-			}
+		logging.FromContext(ctx).Warn("stale build directory found, cleaning up", "name", b.spec.Image.Name)
+		if err := b.CreateBuildDirs(ctx, true); err != nil {
+			return fmt.Errorf("failed to create build dirs: %w", err)
 		}
 	}
 
-	// A host payload is bound over the install prefix, so its leaf has to exist
-	// before the container starts. In ext3 mode CreateTmpOverlay makes no host
-	// directories at all, which is why this is here and not in either branch.
-	if b.ws.HostPayload() {
-		payloadDir := filepath.Join(b.ws.CntDir, b.spec.Image.Name)
-		if err := utils.MkdirAllShared(payloadDir); err != nil {
-			return fmt.Errorf("failed to create payload dir %s: %w", payloadDir, err)
-		}
+	// The payload is bound over the install prefix, so its leaf has to exist
+	// before the container starts.
+	payloadDir := filepath.Join(b.ws.CntDir, b.spec.Image.Name)
+	if err := utils.MkdirAllShared(payloadDir); err != nil {
+		return fmt.Errorf("failed to create payload dir %s: %w", payloadDir, err)
 	}
 	return nil
 }

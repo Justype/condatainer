@@ -29,7 +29,6 @@ var (
 	createPrefix        string
 	createFile          string
 	createFrom          string
-	createAppTmpOvlSize string
 	createBlockSize     string
 	createDataBlockSize string
 	createChannels      []string
@@ -37,7 +36,6 @@ var (
 	createUpdate        bool
 	createStore         bool
 	createLayer         string
-	createAppTmpOverlay bool
 	createAlwaysSubmit  bool
 
 	// compression flags are generated dynamically from config.CompressOptions
@@ -46,7 +44,7 @@ var (
 
 	// buildFlagNames is the set of flags shown under "Build Flags:" in help.
 	buildFlagNames = map[string]bool{
-		"app-tmp-overlay": true, "app-tmp-overlay-size": true, "block-size": true,
+		"block-size":      true,
 		"data-block-size": true, "always-submit": true, "no-submit": true, "store": true,
 	}
 )
@@ -146,17 +144,7 @@ Submitted build jobs exit with code 3 (useful for scripts).`,
 			config.Global.Build.Channels = createChannels
 		}
 
-		// 5. Handle the app build overlay size. Only when the flag was given:
-		// its default would otherwise outrank build.app_tmp_overlay_size.
-		if cmd.Flags().Changed("app-tmp-overlay-size") {
-			sizeMB, err := utils.ParseSizeToMB(createAppTmpOvlSize)
-			if err != nil {
-				ExitWithError("Invalid --app-tmp-overlay-size: %v", err)
-			}
-			config.Global.Build.AppTmpOverlaySizeMB = sizeMB
-		}
-
-		// 5b. Handle block sizes
+		// 5. Handle block sizes
 		if createBlockSize != "" {
 			if !config.IsValidBlockSize(createBlockSize) {
 				ExitWithError("Invalid --block-size %q: must be a power of two between 4096 and 1M (e.g. 64k, 128k, 512k, 1m)", createBlockSize)
@@ -168,11 +156,6 @@ Submitted build jobs exit with code 3 (useful for scripts).`,
 				ExitWithError("Invalid --data-block-size %q: must be a power of two between 4096 and 1M (e.g. 64k, 128k, 512k, 1m)", createDataBlockSize)
 			}
 			config.Global.Build.DataBlockSize = createDataBlockSize
-		}
-
-		// 5c. Handle the app build overlay mode
-		if createAppTmpOverlay {
-			config.Global.Build.AppTmpOverlay = true
 		}
 
 		// 6. Normalize package names (only for build-script mode, not for conda/prefix/source modes)
@@ -239,8 +222,6 @@ func init() {
 	f.BoolVarP(&createUpdate, "update", "u", false, "Rebuild overlays even if they already exist")
 	f.BoolVar(&createStore, "store", false, "Build into the store, filed under its identity")
 	f.StringVarP(&createLayer, "layer", "l", "", "Build into this data layer: u/user, r/app-root, e/extra-root")
-	f.BoolVar(&createAppTmpOverlay, "app-tmp-overlay", false, "Assemble an app build in a temporary ext3 overlay instead of host path")
-	f.StringVar(&createAppTmpOvlSize, "app-tmp-overlay-size", "20G", "Size of that temporary overlay")
 	f.BoolVar(&createAlwaysSubmit, "always-submit", false, "Submit all builds as scheduler jobs, even no directives")
 	f.BoolVar(&noSubmitMode, "no-submit", false, "Disable job submission (build locally)")
 

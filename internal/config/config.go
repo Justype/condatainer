@@ -27,15 +27,13 @@ const GitHubRepo = "Justype/condatainer"
 
 // BuildConfig holds default settings for build operations
 type BuildConfig struct {
-	Defaults            scheduler.ResourceSpec // Default resource spec for build job submissions
-	CompressArgs        string                 // mksquashfs compression arguments
-	BlockSize           string                 // mksquashfs block size for app/env/external overlays (DefaultBlockSize)
-	DataBlockSize       string                 // mksquashfs block size for data/ref overlays (DefaultDataBlockSize)
-	AppTmpOverlay       bool                   // Assemble an app build's payload in a temporary ext3 overlay (default: false)
-	AppTmpOverlaySizeMB int                    // Size of that overlay in MB (MiB)
-	AlwaysSubmit        bool                   // Always submit builds as scheduler jobs even without script directives (default: false)
-	Channels            []string               // conda channels in priority order (default: [conda-forge, bioconda])
-	SystemApptainer     string                 // Path to the system/module apptainer or singularity binary (auto-detected if empty)
+	Defaults        scheduler.ResourceSpec // Default resource spec for build job submissions
+	CompressArgs    string                 // mksquashfs compression arguments
+	BlockSize       string                 // mksquashfs block size for app/env/external overlays (DefaultBlockSize)
+	DataBlockSize   string                 // mksquashfs block size for data/ref overlays (DefaultDataBlockSize)
+	AlwaysSubmit    bool                   // Always submit builds as scheduler jobs even without script directives (default: false)
+	Channels        []string               // conda channels in priority order (default: [conda-forge, bioconda])
+	SystemApptainer string                 // Path to the system/module apptainer or singularity binary (auto-detected if empty)
 }
 
 // SchedulerConfig holds scheduler binary/submission settings shared by every
@@ -158,14 +156,13 @@ const (
 	DefaultBlockSize     = "128k"
 	DefaultDataBlockSize = "512k"
 
-	DefaultNcpus               = 4     // CPUs for a build job
-	DefaultMemMB               = 8192  // memory for a build job
-	DefaultBuildTime           = "2h"  // walltime for a build job
-	DefaultAppTmpOverlaySizeMB = 20480 // app build's temporary ext3 overlay, 20GB
-	DefaultCacheTTLDay         = 7     // remote recipe metadata cache, 1 week
-	DefaultGCGraceDay          = 30    // store gc: age below which an entry is never collectable
-	DefaultNotification        = "web"
-	DefaultNestedRun           = NestedRunAuto
+	DefaultNcpus        = 4    // CPUs for a build job
+	DefaultMemMB        = 8192 // memory for a build job
+	DefaultBuildTime    = "2h" // walltime for a build job
+	DefaultCacheTTLDay  = 7    // remote recipe metadata cache, 1 week
+	DefaultGCGraceDay   = 30   // store gc: age below which an entry is never collectable
+	DefaultNotification = "web"
+	DefaultNestedRun    = NestedRunAuto
 
 	DefaultSchedulerNcpus = 1    // CPUs for a job with no script directives
 	DefaultSchedulerMemMB = 2048 // memory for a job with no script directives
@@ -240,7 +237,6 @@ func LoadDefaults(executablePath string) {
 				MemPerNodeMB: DefaultMemMB,
 				Time:         DefaultBuildDuration,
 			},
-			AppTmpOverlaySizeMB: DefaultAppTmpOverlaySizeMB,
 			// Every reader is >= 1.4: libexec's apptainer (verified at provision
 			// time) or a version-checked system apptainer (apptainer.Normal).
 			// A registry consumer outside condatainer's own exec/run is

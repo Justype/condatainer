@@ -28,44 +28,13 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// Test that CreateTmpOverlay creates parent directory when it does not exist
-// even if overlay creation fails (system tools may not be present in test env).
-func TestCreateTmpOverlay_CreatesParentDir(t *testing.T) {
-	base := &BuildObject{
-		spec: Spec{Image: ImageSpec{Name: "foo/bar"}},
-		ws:   Workspace{Overlay: filepath.Join(t.TempDir(), "nonexistent", "foo.img")},
-	}
-
-	// Ensure parent dir does not exist initially
-	parent := filepath.Dir(base.ws.Overlay)
-	if _, err := os.Stat(parent); !os.IsNotExist(err) {
-		// If it exists, remove to ensure test validity
-		_ = os.RemoveAll(parent)
-	}
-
-	err := base.CreateTmpOverlay(context.Background(), false)
-	// We expect an error from overlay creation in CI environments where dd/mke2fs/debugfs might be missing
-	if err == nil {
-		// If overlay creation succeeded unexpectedly, cleanup the file and return success
-		_ = os.Remove(base.ws.Overlay)
-		return
-	}
-
-	// Parent directory should have been created regardless
-	if info, err := os.Stat(parent); err != nil {
-		t.Fatalf("expected parent dir %s to exist, got error: %v", parent, err)
-	} else if !info.IsDir() {
-		t.Fatalf("expected %s to be a directory", parent)
-	}
-}
-
 // TestCreateBuildDirs_CreatesDirs verifies that CreateBuildDirs creates both
 // cnt/ and tmp/ subdirectories under the build directory.
 func TestCreateBuildDirs_CreatesDirs(t *testing.T) {
 	tmpDir := t.TempDir()
 	base := &BuildObject{
 		spec: Spec{Image: ImageSpec{Name: "foo/bar"}},
-		ws:   workspaceFor("foo/bar", tmpDir, "", false),
+		ws:   workspaceFor("foo/bar", tmpDir, false),
 	}
 
 	if err := base.CreateBuildDirs(context.Background(), false); err != nil {
@@ -89,7 +58,7 @@ func TestCreateBuildDirs_StaleDir(t *testing.T) {
 	tmpDir := t.TempDir()
 	base := &BuildObject{
 		spec: Spec{Image: ImageSpec{Name: "foo/bar"}},
-		ws:   workspaceFor("foo/bar", tmpDir, "", false),
+		ws:   workspaceFor("foo/bar", tmpDir, false),
 	}
 
 	// Pre-create the build dir to simulate a stale build
@@ -97,7 +66,7 @@ func TestCreateBuildDirs_StaleDir(t *testing.T) {
 
 	err := base.CreateBuildDirs(context.Background(), false)
 	if err == nil {
-		t.Fatal("expected ErrTmpOverlayExists when buildDir already exists, got nil")
+		t.Fatal("expected ErrBuildDirExists when buildDir already exists, got nil")
 	}
 }
 
@@ -106,7 +75,7 @@ func TestCreateBuildDirs_ForceRemovesStale(t *testing.T) {
 	tmpDir := t.TempDir()
 	base := &BuildObject{
 		spec: Spec{Image: ImageSpec{Name: "foo/bar"}},
-		ws:   workspaceFor("foo/bar", tmpDir, "", false),
+		ws:   workspaceFor("foo/bar", tmpDir, false),
 	}
 
 	// Pre-create the build dir with a marker file to simulate stale state

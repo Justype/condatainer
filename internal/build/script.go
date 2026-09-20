@@ -247,25 +247,18 @@ fi
 		slog.Default().Warn("failed to resolve dependency overlays", "err", err)
 	}
 
-	var overlays []string
-	if b.ws.UsesImage() {
-		overlays = []string{b.ws.Overlay}
-	}
-	overlays = append(overlays, depOverlays...)
+	overlays := depOverlays
 
 	baseDirs := getAllBaseDirs()
 	if hasToolchain {
 		baseDirs = append(baseDirs, toolchainDir)
 	}
 	bindDirs := container.DeduplicateBindPaths(baseDirs)
-	if b.ws.HostPayload() {
-		// Bind the leaf, not /cnt: covering /cnt would hide every dependency
-		// overlay mounted beside it. prepareBuildWorkspace created it.
-		bindDirs = append(bindDirs, filepath.Join(b.ws.CntDir, b.spec.Image.Name)+":"+prefix)
-	}
-	if !b.ws.UsesImage() {
-		bindDirs = append(bindDirs, b.ws.TmpDir+":"+ScratchPath)
-	}
+	// Bind the leaf, not /cnt: covering /cnt would hide every dependency overlay
+	// mounted beside it. prepareBuildWorkspace created it.
+	bindDirs = append(bindDirs,
+		filepath.Join(b.ws.CntDir, b.spec.Image.Name)+":"+prefix,
+		b.ws.TmpDir+":"+ScratchPath)
 
 	opts := execpkg.Options{
 		BaseImage:   b.spec.Base,
@@ -274,10 +267,9 @@ fi
 		EnvSettings: envSettings,
 		Command:     []string{"/bin/bash", "-c", bashScript},
 		HidePrompt:  true,
-		WritableImg: b.ws.UsesImage(),
-	}
-	if !b.ws.UsesImage() {
-		opts.ApptainerFlags = []string{"--writable-tmpfs"}
+		WritableImg: false,
+
+		ApptainerFlags: []string{"--writable-tmpfs"},
 	}
 
 	// #INPUT: answers go in on stdin, one line each, for the recipe to `read`.
@@ -319,28 +311,19 @@ func (b *BuildObject) runBuildScript(ctx context.Context) error {
 }
 
 // packOutput squashes the payload and the staged metadata into the target image.
-// A host payload is packed from its build directory, whose basename is cnt.
+// The payload is packed from its build directory, whose basename is cnt.
 // metaDir is a second archive root and may be empty.
 func (b *BuildObject) packOutput(ctx context.Context, metaDir, preparedPath string) error {
 	log := logging.FromContext(ctx)
 	isData := b.spec.Image.Type == catalog.TypeData
 
-	if b.ws.HostPayload() {
-		payloadDir := filepath.Join(b.ws.CntDir, b.spec.Image.Name)
-		if entries, err := os.ReadDir(payloadDir); err != nil || len(entries) == 0 {
-			b.Cleanup(true)
-			return fmt.Errorf("build produced no files in %s", payloadDir)
-		}
-		log.Info("creating SquashFS", "source", b.ws.CntDir, "overlay", filepath.Base(b.tgt.Path))
-		if err := createSquashfs(ctx, b, isData, b.ws.CntDir, metaDir, preparedPath); err != nil {
-			b.Cleanup(true)
-			return err
-		}
-		return nil
+	payloadDir := filepath.Join(b.ws.CntDir, b.spec.Image.Name)
+	if entries, err := os.ReadDir(payloadDir); err != nil || len(entries) == 0 {
+		b.Cleanup(true)
+		return fmt.Errorf("build produced no files in %s", payloadDir)
 	}
-
-	log.Info("preparing SquashFS from /cnt", "overlay", filepath.Base(b.tgt.Path))
-	if err := createSquashfs(ctx, b, isData, "/cnt", metaDir, preparedPath); err != nil {
+	log.Info("creating SquashFS", "source", b.ws.CntDir, "overlay", filepath.Base(b.tgt.Path))
+	if err := createSquashfs(ctx, b, isData, b.ws.CntDir, metaDir, preparedPath); err != nil {
 		b.Cleanup(true)
 		return err
 	}

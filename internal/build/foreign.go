@@ -70,7 +70,7 @@ func FromForeignRoot(ctx context.Context, targetPrefix, source, imagesDir string
 	// isDef=false here, deliberately unlike targetDir's selection above: this
 	// build never asks Apptainer to write a sandbox, so ws.Sandbox must stay
 	// empty — packSources reads straight from the foreign root instead.
-	ws := workspaceFor(nameVersion, targetDir, "", false)
+	ws := workspaceFor(nameVersion, targetDir, false)
 
 	logging.FromContext(ctx).Debug("creating foreign-root build object",
 		"nameVersion", nameVersion, "source", source, "sandbox", sandbox, "targetPrefix", targetPrefix)
@@ -259,9 +259,7 @@ func (b *BuildObject) buildForeign(ctx context.Context) error {
 
 // packFromSIF mounts a .sif's primary SquashFS partition read-only via
 // squashfuse, at the partition's own byte offset, inside freeze.MountedRun's
-// unprivileged namespace, and packs it plus metaDir directly — the same shape
-// packFromScratchImage uses for a scratch .img, with squashfuse and an offset
-// standing in for fuse2fs and 0.
+// unprivileged namespace, and packs it plus metaDir directly.
 func packFromSIF(ctx context.Context, b *BuildObject, sifPath, metaDir, targetPath string) error {
 	if absTarget, err := filepath.Abs(targetPath); err == nil {
 		targetPath = absTarget

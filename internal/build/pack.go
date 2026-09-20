@@ -25,8 +25,7 @@ func stageMetadata(ctx context.Context, b *BuildObject) (string, error) {
 		return "", fmt.Errorf("refusing to pack %s: %w", b.spec.Image.Name, err)
 	}
 
-	// In ext3 mode the payload is inside the temporary image, so nothing has
-	// created the host build directory yet.
+	// The build directory may not exist yet if the recipe never ran.
 	if err := ensureWorkspaceRoot(b); err != nil {
 		return "", err
 	}

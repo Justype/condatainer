@@ -99,33 +99,6 @@ func (b *BuildObject) captureMksquashfsVersion(ctx context.Context, mksquashfsBi
 	}
 }
 
-// captureFuse2fsVersion runs fuse2fsBin's own -V and records the first line of
-// its stderr, where e2fsprogs tools print their version banner. fuse2fsBin is
-// already resolved by the caller (squashfs.go), same shape as
-// captureMksquashfsVersion.
-func (b *BuildObject) captureFuse2fsVersion(ctx context.Context, fuse2fsBin string) {
-	log := logging.FromContext(ctx)
-	version := meta.Unrecorded
-
-	var errOut bytes.Buffer
-	cmd := osexec.CommandContext(ctx, fuse2fsBin, "-V")
-	cmd.Stderr = &errOut
-	err := cmd.Run()
-	if err == nil {
-		firstLine, _, _ := strings.Cut(errOut.String(), "\n")
-		if captured, ok := normalizedToolVersion(firstLine); ok {
-			version = captured
-		} else {
-			err = errEmptyToolVersion
-		}
-	}
-
-	b.buildTools.Fuse2fs = meta.Tool{Version: version}
-	if err != nil {
-		log.Warn("could not record fuse2fs version", "name", b.spec.Image.Name, "err", err)
-	}
-}
-
 // normalizedToolVersion accepts one short, printable line. Tool output is
 // diagnostic data, but it is still embedded metadata and must not become an
 // unbounded or multiline log fragment.

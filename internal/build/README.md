@@ -190,7 +190,7 @@ directory got filled. Both end in `packOutput`.
 **Conda:**
 1. Check if overlay exists (skip if not updating)
 2. If updating existing overlay: probe exclusive lock — fail immediately if in use
-3. Create build lock (local); create the workspace (ext3 image, or host dirs)
+3. Create build lock (local); create the host workspace directories
 4. `installConda`: `micromamba create` inside container, and nothing else. The
    install run never sees the output path or binds the images directory, so a
    cancelled install cannot leave anything beside the installed images
@@ -223,9 +223,7 @@ is the whole trick: `mksquashfs` makes one archive root per source, so handing i
 the payload dir and the `.cnt` dir as two sources yields `/cnt/<name>/…` and
 `/.cnt/*.json` at the same level, without the payload ever containing a directory
 the recipe did not create. There is no option to rename a source, so the staged
-directory must already be called `.cnt` when `mksquashfs` sees it — which is why
-the ext3 mode, where the payload is inside the temporary image, binds the host dir
-to `/.cnt`.
+directory must already be called `.cnt` when `mksquashfs` sees it.
 
 The recipe is staged **as it was fetched**. A template keeps its `{placeholder}`
 tokens: the expansion goes to the workspace file the build executes and is never
@@ -413,10 +411,7 @@ all, for any workspace mode.** A sandbox and a dir-mode payload are already
 plain host directories — `mksquashfs`, resolved via `toolpath.Resolve` and
 run directly on the host, reads them exactly as it would through a bind
 mount, since a bind mount contributes nothing a direct read doesn't already
-see. An ext3-mode scratch `.img` is read the same apptainer-free way
-`internal/image/freeze` reads one: mounted read-only with `fuse2fs` inside
-`freeze.MountedRun`'s unprivileged namespace (`packFromScratchImage`), never
-through Apptainer's own `--overlay`.
+see.
 
 **The reason a Script/Conda build's *install* step still runs inside a
 container is not tool availability — it's that `$CNT_PREFIX` is baked into
@@ -482,7 +477,6 @@ is-definition, producer identity)`. Each producer owns one directory:
 ```text
 <tmp-root>/build_<name>/<local-host-pid|scheduler-jobid>/
   cnt--<name>.sh|.def
-  rootfs.img          ext3 scratch, an app build only
   rootfs/             sandbox, a definition only
   work/
     cnt/
@@ -506,29 +500,12 @@ The final `.part` remains beside the installed target for atomic rename, but it
 uses the same owner tag. Cleanup removes only the current owner's directory;
 stale-lock cleanup reconstructs the stale owner's directory from the lock.
 
-The selected tmp root and the mode are both functions of the type:
-
-| type | scratch image | payload |
-|---|---|---|
-| `app` | `.img` under `build.app_tmp_overlay`, else none | in the image, or host in directory mode |
-| `data` | **never** — see below | always host |
-| `os` | **never** | the sandbox apptainer writes |
-
-The ext3 image is an app-build optimisation: it keeps a conda environment's
-thousands of small files off the host's inode budget. A data payload is a few
-large files staged on the host, so an image would be created, mounted and
-discarded holding nothing. So `appExt3ScratchExt` returns `""` for every type but
-`app`, whatever the config says, and `Workspace.UsesImage()` is the mode
-everything downstream reads — never `config.Global` a second time.
-
-A definition's sandbox is thousands of small files too, and gets no image
-regardless — it cannot. Creating one needs `dd`, `mke2fs` and `debugfs` on the
-host, and writing into one needs it mounted, which needs a container root. The
-very first `.def` build a fresh install ever runs has neither.
-`Workspace.UsesSandbox()` is that mode, and the pack reads the sandbox
-directly on the host — no container, no bind — unwrapping its contents
-straight into the archive root (`packSources`'s `keepAsDirectory=false`)
-rather than nesting them under the sandbox directory's own name.
+Every payload is written to host directories: a script or Conda build's under `work/cnt`, bound
+into the container, and a definition's in the sandbox apptainer writes. The pack reads either
+directly on the host — no container, no bind. A sandbox is unwrapped straight into the archive root
+(`packSources`'s `keepAsDirectory=false`) rather than nested under the sandbox directory's own name.
+There is no scratch image: a build that must keep its small files off a quota-limited filesystem
+points `$CNT_TMPDIR` at local scratch instead.
 
 Each build type also uses a different base directory for build artifacts:
 

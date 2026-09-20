@@ -35,10 +35,9 @@ SquashFS is 2.4x cheaper to read than a mounted `.img`'s `fuse2fs`, and
 device nodes via `stat()` that an unprivileged extraction (`unsquashfs -d`)
 cannot create at all (see `Unfreeze`'s doc comment). That mount is `mount.go`'s
 `MountedRun`, and it needs no container either. Exported — `internal/build`'s
-own SquashFS packer (`squashfs.go`'s `packFromScratchImage`) reuses it
-directly to read a build's scratch `.img`, the same apptainer-free way, so
-mksquashfs's package-time reads never need a container any more than this
-package's own do.
+foreign-root import (`packFromSIF`) reuses it to read a `.sif`, the same
+apptainer-free way, so mksquashfs's package-time reads never need a container
+any more than this package's own do.
 
 ## `Build.Tools` records only what actually ran
 

@@ -116,7 +116,7 @@ func NewLockedObject(ctx context.Context, spec LockedSpec) (*BuildObject, error)
 			Type:   manifest.Type,
 			Prefix: meta.Prefix(manifest.Name, manifest.Type),
 		}, Base: spec.Base},
-		ws:           workspaceFor(manifest.Name, tmpRoot, appExt3ScratchExt(manifest.Type), false),
+		ws:           workspaceFor(manifest.Name, tmpRoot, false),
 		tgt:          targetFor(output),
 		submitJob:    config.Global.SubmitJob,
 		locked:       true,

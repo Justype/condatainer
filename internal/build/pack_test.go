@@ -2,7 +2,6 @@ package build
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,24 +12,8 @@ import (
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/config"
-	"github.com/Justype/condatainer/internal/image/freeze"
-	"github.com/Justype/condatainer/internal/toolpath"
 	"github.com/Justype/condatainer/internal/utils"
 )
-
-// buildMountHarness compiles internal/image/freeze/testdata/mountharness, a
-// stand-in condatainer binary. createSquashfs's ext3 route reads the scratch
-// .img through freeze.MountedRun, which re-execs os.Executable() into the
-// hidden _mount_sentinel command; the `go test` binary can't play that role.
-func buildMountHarness(t *testing.T) string {
-	t.Helper()
-	bin := filepath.Join(t.TempDir(), "mountharness")
-	out, err := exec.Command("go", "build", "-o", bin, "github.com/Justype/condatainer/internal/image/freeze/testdata/mountharness").CombinedOutput()
-	if err != nil {
-		t.Fatalf("building test harness: %v\n%s", err, out)
-	}
-	return bin
-}
 
 // withProvisionedLibexec points the scratch tier at a fresh temp directory and
 // drops stub bin/apptainer and bin/micromamba there, satisfying libexec.Dir's
@@ -64,7 +47,7 @@ func newPackObject(t *testing.T, typ catalog.Type) *BuildObject {
 	tmpDir := t.TempDir()
 	name := "samtools/1.21"
 	b := &BuildObject{
-		ws: workspaceFor(name, tmpDir, appExt3ScratchExt(typ), false),
+		ws: workspaceFor(name, tmpDir, false),
 		spec: Spec{
 			Image:  ImageSpec{Name: name, Type: typ, Description: "SAMtools", Prefix: meta.Prefix(name, typ)},
 			Source: SourceSpec{Conda: &CondaSource{Package: &CondaPackage{Name: "samtools", Version: "1.21"}}},
@@ -73,13 +56,12 @@ func newPackObject(t *testing.T, typ catalog.Type) *BuildObject {
 	return b
 }
 
-// withAppTmpOverlay flips the global build mode for one test and restores it. The
-// pack settings come along because the zero value is not a legal mksquashfs
-// argument, and a test that runs the real command needs them.
-func withAppTmpOverlay(t *testing.T, on bool) {
+// withPackSettings gives one test the block sizes the packer reads and restores
+// them afterwards. The zero value is not a legal mksquashfs argument, and a test
+// that runs the real command needs them.
+func withPackSettings(t *testing.T) {
 	t.Helper()
 	prev := config.Global.Build
-	config.Global.Build.AppTmpOverlay = on
 	if config.Global.Build.BlockSize == "" {
 		config.Global.Build.BlockSize = config.DefaultBlockSize
 	}
@@ -159,51 +141,32 @@ func TestStageMetadataRejectsInvalidMetadata(t *testing.T) {
 	}
 }
 
-// The staged directory has to reach mksquashfs still called .cnt, in both modes,
-// because mksquashfs names an archive root after its source's basename.
+// The staged directory has to reach mksquashfs still called .cnt, because
+// mksquashfs names an archive root after its source's basename.
 func TestSquashfsSourcesCarryMetaDirName(t *testing.T) {
-	tests := []struct {
-		name      string
-		appTmpOvl bool
-		sourceDir string
-		ext3Base  string
-	}{
-		{name: "dir mode", appTmpOvl: false, sourceDir: "/host/build/cnt"},
-		{name: "ext3 payload in image", appTmpOvl: true, ext3Base: "/mnt/upper"},
+	b := newPackObject(t, catalog.TypeApp)
+	metaDir := b.ws.MetaDir
+
+	sources, keepAsDirectory := packSources(b, "/host/build/cnt", metaDir)
+
+	if len(sources) != 2 || sources[0] != "/host/build/cnt" || sources[1] != metaDir {
+		t.Errorf("sources = %v, want [%q %q]", sources, "/host/build/cnt", metaDir)
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			withAppTmpOverlay(t, tt.appTmpOvl)
-			b := newPackObject(t, catalog.TypeApp)
-			metaDir := b.ws.MetaDir
-
-			sources, keepAsDirectory := packSources(b, tt.sourceDir, metaDir, tt.ext3Base)
-
-			wantFirst := tt.sourceDir
-			if tt.appTmpOvl {
-				wantFirst = filepath.Join(tt.ext3Base, "cnt")
-			}
-			if len(sources) != 2 || sources[0] != wantFirst || sources[1] != metaDir {
-				t.Errorf("sources = %v, want [%q %q]", sources, wantFirst, metaDir)
-			}
-			if !keepAsDirectory {
-				t.Error("keepAsDirectory = false, want true")
-			}
-			if filepath.Base(metaDir) != meta.DirName {
-				t.Errorf("metadata source %q does not end in %q", metaDir, meta.DirName)
-			}
-		})
+	if !keepAsDirectory {
+		t.Error("keepAsDirectory = false, want true")
+	}
+	if filepath.Base(metaDir) != meta.DirName {
+		t.Errorf("metadata source %q does not end in %q", metaDir, meta.DirName)
 	}
 }
 
 // An empty metaDir packs the payload alone, which is what keeps the packer
 // usable for anything that has no metadata to add.
 func TestSquashfsWithoutMetaDirPacksPayloadOnly(t *testing.T) {
-	withAppTmpOverlay(t, false)
+	withPackSettings(t)
 	b := newPackObject(t, catalog.TypeApp)
 
-	sources, keepAsDirectory := packSources(b, b.ws.CntDir, "", "")
+	sources, keepAsDirectory := packSources(b, b.ws.CntDir, "")
 
 	if len(sources) != 1 || sources[0] != b.ws.CntDir {
 		t.Errorf("sources = %v, want [%q]", sources, b.ws.CntDir)
@@ -220,7 +183,7 @@ func TestPackedImageMetadataIsReadable(t *testing.T) {
 	if _, err := exec.LookPath("mksquashfs"); err != nil {
 		t.Skip("mksquashfs not available")
 	}
-	withAppTmpOverlay(t, false)
+	withPackSettings(t)
 
 	b := newPackObject(t, catalog.TypeApp)
 	payload := filepath.Join(b.ws.CntDir, b.spec.Image.Name, "bin")
@@ -282,7 +245,7 @@ func TestPackedImageExcludesBuildScratch(t *testing.T) {
 	if _, err := exec.LookPath("mksquashfs"); err != nil {
 		t.Skip("mksquashfs not available")
 	}
-	withAppTmpOverlay(t, false)
+	withPackSettings(t)
 
 	b := newPackObject(t, catalog.TypeApp)
 	if err := os.MkdirAll(filepath.Join(b.ws.CntDir, b.spec.Image.Name), 0o755); err != nil {
@@ -314,66 +277,6 @@ func TestPackedImageExcludesBuildScratch(t *testing.T) {
 	}
 }
 
-// TestPackedImageFromScratchOverlayReadsThroughFuse2fs exercises the ext3-mode
-// pack path end to end: a real .img, populated via debugfs the way an actual
-// conda install leaves it, packed by mounting it with fuse2fs — no container,
-// no Apptainer, the same apptainer-free mechanism internal/image/freeze uses.
-func TestPackedImageFromScratchOverlayReadsThroughFuse2fs(t *testing.T) {
-	for _, name := range []string{"mksquashfs", "unsquashfs", "mke2fs", "debugfs", "fuse2fs", "unshare"} {
-		if _, err := exec.LookPath(name); err != nil {
-			t.Skipf("%s not available", name)
-		}
-	}
-	defer freeze.SetExecutablePathForTest(buildMountHarness(t))()
-
-	withAppTmpOverlay(t, true)
-	config.Global.Build.AppTmpOverlaySizeMB = 64
-
-	b := newPackObject(t, catalog.TypeApp)
-	if err := b.CreateTmpOverlay(t.Context(), false); err != nil {
-		t.Fatalf("CreateTmpOverlay: %v", err)
-	}
-
-	hostFile := filepath.Join(t.TempDir(), "samtools")
-	if err := os.WriteFile(hostFile, []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	debugfsPath, err := toolpath.Resolve("debugfs")
-	if err != nil {
-		t.Fatal(err)
-	}
-	script := "cd upper\nmkdir cnt\ncd cnt\nmkdir samtools\ncd samtools\nmkdir 1.21\ncd 1.21\nmkdir bin\ncd bin\n" +
-		fmt.Sprintf("write %s samtools\nquit\n", hostFile)
-	cmd := exec.CommandContext(t.Context(), debugfsPath, "-w", b.ws.Overlay)
-	cmd.Stdin = strings.NewReader(script)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("debugfs inject: %v\n%s", err, out)
-	}
-
-	metaDir, err := stageMetadata(t.Context(), b)
-	if err != nil {
-		t.Fatalf("stageMetadata: %v", err)
-	}
-
-	out := filepath.Join(t.TempDir(), "samtools--1.21.sqf")
-	if err := createSquashfs(t.Context(), b, false, "/cnt", metaDir, out); err != nil {
-		t.Fatalf("createSquashfs: %v", err)
-	}
-
-	list, err := exec.CommandContext(t.Context(), "unsquashfs", "-l", out).Output()
-	if err != nil {
-		t.Fatalf("unsquashfs -l: %v", err)
-	}
-	for _, want := range []string{
-		"squashfs-root/cnt/samtools/1.21/bin/samtools",
-		"squashfs-root" + meta.Path,
-	} {
-		if !strings.Contains(string(list), want) {
-			t.Errorf("packed image is missing %s:\n%s", want, list)
-		}
-	}
-}
-
 func TestSquashfsShowsProgressWithoutFinalStatistics(t *testing.T) {
 	script := squashfsScript("mksquashfs", []string{"/cnt"}, "/images/out.sqf", 2, "128k", "-comp zstd", true)
 	if !strings.Contains(script, " -quiet ") {
@@ -387,7 +290,7 @@ func TestSquashfsShowsProgressWithoutFinalStatistics(t *testing.T) {
 // The conda install phase must not know where the image lands: that is what lets
 // a cancelled install leave nothing next to the installed images.
 func TestCondaInstallDoesNotPackOrTouchTarget(t *testing.T) {
-	withAppTmpOverlay(t, false)
+	withPackSettings(t)
 	withProvisionedLibexec(t)
 	b := newPackObject(t, catalog.TypeApp)
 	b.buildType = BuildTypeConda
@@ -408,30 +311,5 @@ func TestCondaInstallDoesNotPackOrTouchTarget(t *testing.T) {
 	}
 	if strings.Contains(strings.Join(opts.BindPaths, " "), filepath.Dir(b.tgt.Path)) {
 		t.Errorf("install phase binds the images dir: %v", opts.BindPaths)
-	}
-}
-
-// Conda and script must agree on where the payload is, or one writes to the
-// image while the other packs the host directory.
-func TestCondaInstallPayloadMatchesPackSource(t *testing.T) {
-	for _, appTmpOverlay := range []bool{false, true} {
-		t.Run(map[bool]string{false: "dir mode", true: "ext3 mode"}[appTmpOverlay], func(t *testing.T) {
-			withAppTmpOverlay(t, appTmpOverlay)
-			withProvisionedLibexec(t)
-			b := newPackObject(t, catalog.TypeApp)
-			b.buildType = BuildTypeConda
-			b.packageName, b.packageVersion = "samtools", "1.21"
-
-			opts, err := b.condaInstallExecOpts()
-			if err != nil {
-				t.Fatal(err)
-			}
-			installsToHost := strings.Contains(strings.Join(opts.BindPaths, " "), b.ws.CntDir+":/cnt")
-
-			if installsToHost != b.ws.HostPayload() {
-				t.Errorf("install writes to host = %v but packOutput reads host = %v",
-					installsToHost, b.ws.HostPayload())
-			}
-		})
 	}
 }

@@ -93,7 +93,7 @@ config.Global  // Singleton instance
 - `Branch`, `PreferRemote` (remote script fetching)
 - `Notification` - Notification method when a helper job starts (default: `""` = none). Values: `"bell"` (terminal bell), `"email"` (scheduler email directive), ≥5-char string (ntfy.sh topic, fires from compute node), `""` or `"none"` (silent).
 - `ProxyPerJob` - Auto-start a per-job SOCKS5 proxy inside submitted jobs when no active proxy is found (`proxy_perjob` config key, default: `false`)
-- `Build BuildConfig` - Build settings (`Defaults scheduler.ResourceSpec`, `AppTmpOverlay`, `AppTmpOverlaySizeMB`, `CompressArgs`, `BlockSize`, `DataBlockSize`, `SystemApptainer`)
+- `Build BuildConfig` - Build settings (`Defaults scheduler.ResourceSpec`, `CompressArgs`, `BlockSize`, `DataBlockSize`, `SystemApptainer`)
 - `Scheduler SchedulerConfig` - Scheduler binary/submission settings: `Bin`, `Timeout`, `Account`, `Partition`, and `Defaults scheduler.ResourceSpec` (ncpus/mem/time baseline for a job with no script directives — used whether or not the job actually ends up submitted to a scheduler, same as `Build.Defaults`)
 
 ## Data Directory Search

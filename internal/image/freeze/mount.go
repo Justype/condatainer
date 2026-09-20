@@ -18,8 +18,7 @@ var executablePath = os.Executable
 
 // SetExecutablePathForTest points MountedRun's self re-exec at path instead
 // of the real condatainer binary, and returns a func that restores the
-// previous value. For tests outside this package (e.g. internal/build's,
-// whose packFromScratchImage calls MountedRun too) that build
+// previous value. For tests outside this package that build
 // testdata/mountharness as a stand-in condatainer binary; tests inside this
 // package can set the unexported executablePath directly instead.
 func SetExecutablePathForTest(path string) (restore func()) {
@@ -32,8 +31,8 @@ func SetExecutablePathForTest(path string) (restore func()) {
 // namespace, waits for the mount to appear, runs work (a bash script fragment
 // that sees mnt as an ordinary directory), then ends the mount by killing the
 // FUSE process. fuseArgs holds every flag the tool needs; mnt is appended.
-// Exported so internal/build's own SquashFS packing can read a scratch .img
-// the same apptainer-free way, not just this package's own freeze/unfreeze.
+// Exported so internal/build can read a foreign .sif the same apptainer-free
+// way, not just this package's own freeze/unfreeze.
 //
 // `unshare --mount --user --map-root-user` is what lets an ordinary user call
 // mount() at all: it maps namespace-uid 0 to the real caller, which is enough

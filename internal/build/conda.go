@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	osexec "os/exec"
 	"path/filepath"
 	"strings"
@@ -15,11 +14,9 @@ import (
 	"github.com/Justype/condatainer/internal/conda"
 
 	"github.com/Justype/condatainer/internal/config"
-	"github.com/Justype/condatainer/internal/image/freeze"
 	"github.com/Justype/condatainer/internal/libexec"
 	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/runtime/exec"
-	"github.com/Justype/condatainer/internal/toolpath"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -245,46 +242,22 @@ func (b *BuildObject) captureCondaExports(ctx context.Context) {
 }
 
 // condaExport runs `micromamba env export` against the installed prefix and
-// returns its stdout, directly on host — a plain host path in dir mode, or
-// the same fuse2fs mount packFromScratchImage uses to read a scratch .img in
-// ext3 mode (squashfs.go).
+// returns its stdout, directly on the host.
 func (b *BuildObject) condaExport(ctx context.Context, args ...string) ([]byte, error) {
 	mmCmd, err := micromambaCmd()
 	if err != nil {
 		return nil, err
 	}
 
-	if !b.ws.UsesImage() {
-		prefix := filepath.Join(b.ws.CntDir, b.spec.Image.Name)
-		cmdArgs := append([]string{"env", "export", "-p", prefix}, args...)
-		var out bytes.Buffer
-		cmd := osexec.CommandContext(ctx, mmCmd, cmdArgs...)
-		cmd.Stdout = &out
-		if err := cmd.Run(); err != nil {
-			return nil, err
-		}
-		return out.Bytes(), nil
-	}
-
-	fuse2fsBin, err := toolpath.Resolve("fuse2fs")
-	if err != nil {
+	prefix := filepath.Join(b.ws.CntDir, b.spec.Image.Name)
+	cmdArgs := append([]string{"env", "export", "-p", prefix}, args...)
+	var out bytes.Buffer
+	cmd := osexec.CommandContext(ctx, mmCmd, cmdArgs...)
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
 		return nil, err
 	}
-	mnt := filepath.Join(b.ws.TmpDir, "export-mnt")
-	if err := os.MkdirAll(mnt, 0o755); err != nil {
-		return nil, fmt.Errorf("create export mountpoint: %w", err)
-	}
-	defer os.RemoveAll(mnt)
-
-	prefix := filepath.Join(mnt, freeze.UpperDir, "cnt", b.spec.Image.Name)
-	outFile := filepath.Join(b.ws.TmpDir, "export-out")
-	defer os.Remove(outFile)
-	script := fmt.Sprintf("%s env export -p %s %s > %s",
-		shellQuote(mmCmd), shellQuote(prefix), strings.Join(args, " "), shellQuote(outFile))
-	if err := freeze.MountedRun(ctx, fuse2fsBin, []string{"-o", "ro", b.ws.Overlay}, mnt, script, exec.IO{}); err != nil {
-		return nil, err
-	}
-	return os.ReadFile(outFile)
+	return out.Bytes(), nil
 }
 
 // condaInstallExecOpts constructs exec.Options for the micromamba run. Installs
@@ -319,10 +292,9 @@ fi
 	return b.condaExecOpts(bashScript, extraBindPaths)
 }
 
-// condaExecOpts sites a micromamba run against this build's payload, whichever
-// workspace mode is in use: bound host directories, or the scratch image the
-// payload lives inside. installConda is its only caller; solveConda builds
-// its own Options, since a dry-run solve mounts no payload at all.
+// condaExecOpts sites a micromamba run against this build's payload, bound from
+// host directories. installConda is its only caller; solveConda builds its own
+// Options, since a dry-run solve mounts no payload at all.
 //
 // Unlike script.go/squashfs.go, this call binds neither getAllBaseDirs() nor
 // container.BindPaths(), so the toolchain's tier needs an explicit bind here.
@@ -339,32 +311,20 @@ func (b *BuildObject) condaExecOpts(bashScript string, extraBindPaths []string) 
 	}
 	bindPaths = append(bindPaths, dir)
 
-	if !b.ws.UsesImage() {
-		bindPaths = append(bindPaths,
-			b.ws.TmpDir+":"+ScratchPath,
-			b.ws.CntDir+":/cnt",
-		)
-		return exec.Options{
-			BaseImage:      b.spec.Base,
-			Overlays:       []string{},
-			BindPaths:      bindPaths,
-			EnvSettings:    []string{"TMPDIR=" + ScratchPath},
-			Command:        []string{"/bin/bash", "-c", bashScript},
-			HidePrompt:     true,
-			WritableImg:    false,
-			ApptainerFlags: []string{"--writable-tmpfs"},
-			PassThruStdin:  true,
-		}, nil
-	}
+	bindPaths = append(bindPaths,
+		b.ws.TmpDir+":"+ScratchPath,
+		b.ws.CntDir+":/cnt",
+	)
 	return exec.Options{
-		BaseImage:     b.spec.Base,
-		Overlays:      []string{b.ws.Overlay},
-		BindPaths:     bindPaths,
-		EnvSettings:   []string{"TMPDIR=" + ScratchPath},
-		Command:       []string{"/bin/bash", "-c", bashScript},
-		HidePrompt:    true,
-		WritableImg:   true,
-		PassThruStdin: true,
+		BaseImage:      b.spec.Base,
+		Overlays:       []string{},
+		BindPaths:      bindPaths,
+		EnvSettings:    []string{"TMPDIR=" + ScratchPath},
+		Command:        []string{"/bin/bash", "-c", bashScript},
+		HidePrompt:     true,
+		WritableImg:    false,
+		ApptainerFlags: []string{"--writable-tmpfs"},
+		PassThruStdin:  true,
 	}, nil
 }
 
