@@ -30,7 +30,7 @@ type Bin struct {
 
 // ErrNeedsHost reports an action that needs the host's apptainer: a container
 // has no setuid starter to escalate with.
-var ErrNeedsHost = errors.New("needs a host apptainer, which is not available inside a container")
+var ErrNeedsHost = errors.New("must run on the host, not inside a container")
 
 // insideContainer is config.IsInsideContainer, replaceable by tests.
 var insideContainer = config.IsInsideContainer
@@ -54,13 +54,30 @@ func remember(b Bin) Bin {
 func systemBin() (Bin, error) {
 	path := config.Global.Build.SystemApptainer
 	if path == "" {
-		return Bin{}, &ApptainerNotFoundError{Path: "apptainer/singularity"}
+		return Bin{}, &ApptainerNotFoundError{}
 	}
 	full, err := exec.LookPath(path)
 	if err != nil {
 		return Bin{}, &ApptainerNotFoundError{Path: path}
 	}
 	return Bin{Path: full}, nil
+}
+
+// unusable words why no apptainer could be used, for where this process runs.
+// A container cannot install one, so it is told how to get one at launch.
+func unusable(err error) error {
+	var missing *ApptainerNotFoundError
+	found := !errors.As(err, &missing)
+	if insideContainer() {
+		if !found {
+			return errors.New("this container has no apptainer; start it again with `nested_run` enabled (`condatainer config set nested_run true`) or with an apptainer/<version> overlay mounted")
+		}
+		return fmt.Errorf("the apptainer in this container is unusable: %w; start it again with `nested_run` enabled or with an apptainer/<version> overlay mounted", err)
+	}
+	if !found {
+		return errors.New("no apptainer found; install one with `condatainer update --libexec apptainer`, or load an apptainer module (>= 1.4)")
+	}
+	return fmt.Errorf("no usable apptainer: %w; install one with `condatainer update --libexec apptainer`, or load an apptainer module (>= 1.4)", err)
 }
 
 // Normal returns the apptainer for an ordinary launch: the one installed in
@@ -74,10 +91,7 @@ func Normal() (Bin, error) {
 		err = bin.requireZstd("exec")
 	}
 	if err != nil {
-		if insideContainer() {
-			return Bin{}, fmt.Errorf("no usable apptainer in this container: %w; nested running needs the apptainer from libexec/ or an apptainer overlay (see nested_run)", err)
-		}
-		return Bin{}, fmt.Errorf("no usable apptainer: %w; install one with `condatainer update --libexec apptainer`, or load an apptainer module (>= 1.4)", err)
+		return Bin{}, unusable(err)
 	}
 	return remember(bin), nil
 }
@@ -89,10 +103,10 @@ func Fakeroot() (Bin, error) {
 		return Bin{}, fmt.Errorf("fakeroot exec %w", ErrNeedsHost)
 	}
 	bin, err := systemBin()
-	if err == nil {
-		err = bin.requireZstd("fakeroot exec")
-	}
 	if err != nil {
+		return Bin{}, needSystem("fakeroot exec", err)
+	}
+	if err := bin.requireZstd("fakeroot exec"); err != nil {
 		return Bin{}, err
 	}
 	return remember(bin), nil
@@ -107,9 +121,15 @@ func ForBuild() (Bin, error) {
 	}
 	bin, err := systemBin()
 	if err != nil {
-		return Bin{}, err
+		return Bin{}, needSystem("a definition build", err)
 	}
 	return remember(bin), nil
+}
+
+// needSystem words a missing system apptainer for an action only that one can
+// do: condatainer cannot install it, so the user has to supply it.
+func needSystem(what string, err error) error {
+	return fmt.Errorf("%s needs the system apptainer: %w; load an apptainer module or install one on the host (>= 1.4)", what, err)
 }
 
 // requireZstd refuses singularity and an apptainer that cannot mount

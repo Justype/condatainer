@@ -2,8 +2,10 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
+	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/image/freeze"
 	"github.com/Justype/condatainer/internal/runtime/apptainer"
 	"github.com/Justype/condatainer/internal/toolpath"
@@ -50,7 +52,11 @@ func planToolchain(p systemProbe) (install, report, warnings []string) {
 		report = append(report, "fuse2fs: not found; it cannot be installed here, and writable .img overlays need it")
 	}
 	if p.SystemApptainerErr != nil {
-		warnings = append(warnings, fmt.Sprintf("no system apptainer found (%v): it is required to build os overlays", p.SystemApptainerErr))
+		cause := p.SystemApptainerErr
+		if inner := errors.Unwrap(cause); inner != nil {
+			cause = inner
+		}
+		warnings = append(warnings, fmt.Sprintf("no system apptainer (%v): it is required to build os overlays", cause))
 	}
 	return install, report, warnings
 }
@@ -58,7 +64,9 @@ func planToolchain(p systemProbe) (install, report, warnings []string) {
 // probeSystem asks the same resolvers the tools themselves use.
 func probeSystem(ctx context.Context) systemProbe {
 	p := systemProbe{}
-	_, p.SystemApptainerErr = apptainer.ForBuild()
+	if !config.IsInsideContainer() { // os overlays are never built inside a container
+		_, p.SystemApptainerErr = apptainer.ForBuild()
+	}
 	if bin, err := apptainer.Normal(); err != nil {
 		p.ApptainerErr = err
 	} else if bin.Libexec {

@@ -2,8 +2,10 @@ package exec
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
+	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/image"
 	"github.com/Justype/condatainer/internal/libexec"
 	"github.com/Justype/condatainer/internal/logging"
@@ -80,6 +82,9 @@ func Prepare(ctx context.Context, options Options) (*Plan, error) {
 	}
 	bin, err := resolve()
 	if err != nil {
+		if config.IsInsideContainer() {
+			return nil, fmt.Errorf("cannot start a nested container: %w", err)
+		}
 		return nil, err
 	}
 

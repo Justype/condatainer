@@ -67,8 +67,10 @@ writable `.img` with root-owned files). Three resolvers, by what the action need
   over the host's. Otherwise the system/module binary, under the same checks as
   `Fakeroot`. When neither works it refuses and names both ways out:
   `condatainer update --libexec apptainer`, or loading an apptainer module.
-  Inside a container that advice is refused, so the message points at nested
-  running instead.
+  Inside a container that advice cannot be followed, so the message says the
+  container has no apptainer and points at starting it again with `nested_run`
+  or an apptainer overlay. A caller that knows its action leads with it
+  (`cannot build an overlay`, `cannot start a nested container`).
 - **`ForBuild`** — a `.def` (`os`) build's own `apptainer build --fakeroot`:
   the system binary with no zstd check, because its output is a sandbox — an `os`
   build never mounts a zstd-compressed artifact during the build itself (`#DEP:`
@@ -76,8 +78,9 @@ writable `.img` with root-owned files). Three resolvers, by what the action need
   `internal/build/squashfs.go`'s `createSquashfs` runs `mksquashfs` directly on
   the host (`toolpath.Resolve`).
 
-`Fakeroot` and `ForBuild` refuse at once inside a container (`ErrNeedsHost`): no
-starter there can escalate, so a later failure would only be less clear.
+`Fakeroot` and `ForBuild` refuse at once inside a container (`ErrNeedsHost`, "must run
+on the host"): no starter there can escalate, so a later failure would only be less
+clear.
 `Normal` needs no special case inside one — it finds libexec's apptainer, or the
 one an apptainer overlay put on `PATH`, as it does on a host.
 

@@ -10,11 +10,14 @@ import (
 
 // ApptainerNotFoundError is returned when the apptainer binary cannot be found
 type ApptainerNotFoundError struct {
-	Path string // The path or command name that was searched for
+	Path string // The configured path or command name; empty when none is configured
 }
 
 func (e *ApptainerNotFoundError) Error() string {
-	return fmt.Sprintf("apptainer or singularity binary not found: %s", e.Path)
+	if e.Path == "" {
+		return "no apptainer or singularity found on PATH"
+	}
+	return fmt.Sprintf("apptainer or singularity not found: %s", e.Path)
 }
 
 // ApptainerError represents errors from apptainer command execution

@@ -128,7 +128,7 @@ Submitted build jobs exit with code 3 (useful for scripts).`,
 		// resolution has already fetched recipes. The base image is not checked:
 		// it is an implicit prerequisite of the plan, built with everything else.
 		if _, err := apptainer.Normal(); err != nil {
-			ExitWithError("%v", err)
+			ExitWithError("cannot build an overlay: %v", err)
 		}
 
 		// 3. Handle Compression Config – consult helper that respects available

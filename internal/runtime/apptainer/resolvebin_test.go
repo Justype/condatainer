@@ -89,8 +89,8 @@ func TestNormalInsideContainerPointsAtNestedRun(t *testing.T) {
 	systemApptainer(t, "")
 
 	_, err := Normal()
-	if err == nil || !strings.Contains(err.Error(), "nested_run") || strings.Contains(err.Error(), "update --libexec") {
-		t.Fatalf("Normal error = %v, want it to mention nested_run and not update --libexec", err)
+	if err == nil || !strings.Contains(err.Error(), "nested_run") || strings.Contains(err.Error(), "update --libexec") || strings.Contains(err.Error(), "not available") {
+		t.Fatalf("Normal error = %v, want it to mention nested_run, and neither update --libexec nor \"not available\"", err)
 	}
 }
 
