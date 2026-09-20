@@ -552,7 +552,7 @@ edge records is the scheme's statement about that.
 The exact recorded identity is preferred in every case, because it yields the
 exact identity for the dependent too — the result that satisfies every other
 project that locked it. Where two dependents disagree about a shared dependency,
-the stricter role wins. Under `--match identity` nothing but the exact identity
+the stricter role wins. Under an `identity` project nothing but the exact identity
 is accepted, and not by policy: a script identity hashes dependency identities,
 so a substitution produces a dependent the mode rejects anyway.
 
@@ -615,6 +615,19 @@ The job's working directory is the project root or the submission is refused
 (`project.WorkDir`) — a project's relative paths resolve against the root, and a
 job that runs anywhere else splits CondaTainer's overlay resolution from the
 script's own paths.
+
+## The match mode is the project's
+
+Whether a substitute artifact is acceptable is a fact about the project, so it is
+the lock's `match` field (absent means `equivalence`) and not a flag on any
+command. `Resolve` and `restore.Compute` both default their mode from the lock,
+which is what keeps `run`, `exec`, `check`, the dashboard and restore from
+holding one project to different rules. An explicit mode still wins, and
+`project push` passes identity because it publishes exact artifacts.
+
+`project select-match` follows `select-distro`: it edits the loaded lock and
+publishes it, and `project lock` keeps the field because it rewrites the lock it
+loaded rather than building a new one.
 
 ## Acting in a project
 

@@ -27,23 +27,24 @@ var projectDir string
 
 var projectCmd = &cobra.Command{
 	Use:   "project",
-	Short: "Pin and restore a project's artifacts",
+	Short: "Pin, restore and publish a project's artifacts",
 	Long: `A project is a folder holding a cnt-lock/ directory. Locking pins every #DEP:
 in its scripts to one exact artifact and records how to rebuild it, so the same
 scripts run the same way on another machine.
 
 Every artifact carries two keys:
-- identity    names one exact build;
-- equivalence is shared by any build that can stand in for it.
+- identity     one exact build;
+- equivalence  builds that differ only in ways that should not change the
+               result, so any of them can substitute for the others.
 
-A restore accepts an equivalent build unless you ask for the identity.`,
+By default a project matches by equivalence.`,
 }
 
 func init() {
 	rootCmd.AddCommand(projectCmd)
 	projectCmd.PersistentFlags().StringVar(&projectDir, "project", "", "Project root (default: the current directory)")
 	projectCmd.AddCommand(newProjectLockCmd(), newProjectStatusCmd(), newProjectPinCmd(), newProjectUnpinCmd(),
-		newProjectSelectDistroCmd(), newProjectListCmd(), newProjectValidateCmd(),
+		newProjectSelectDistroCmd(), newProjectSelectMatchCmd(), newProjectListCmd(), newProjectValidateCmd(),
 		newProjectRestoreCmd(), newProjectRegistryCmd(), newProjectPushCmd())
 }
 
@@ -132,7 +133,7 @@ func newProjectStatusCmd() *cobra.Command {
 	var jsonOutput bool
 	cmd := &cobra.Command{
 		Use:   "status",
-		Short: "Show whether this directory is a project, and what it pins",
+		Short: "Show project state and unpinned declarations",
 		Long: `Reports whether the current directory (or --project DIR) is a project,
 how many artifacts it pins, and which #DEP: declarations have no pin yet.
 
@@ -306,7 +307,7 @@ func newProjectSelectDistroCmd() *cobra.Command {
 	var auto bool
 	cmd := &cobra.Command{
 		Use:   "select-distro [distro]",
-		Short: "Choose which distro's base this project restores to",
+		Short: "Choose the distro this project uses as its base",
 		Long: `Pins <distro>/base as this project's root, overriding what
 'condatainer project lock' would otherwise derive from the configured
 default_distro.
@@ -362,6 +363,56 @@ immediately, rather than waiting for the next 'condatainer project lock'.`,
 	}
 	cmd.Flags().BoolVar(&auto, "auto", false, "Clear a manual override and re-derive from the configured default_distro")
 	return cmd
+}
+
+func newProjectSelectMatchCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "select-match <identity|equivalence>",
+		Short: "Choose which installed builds this project accepts",
+		Long: `Sets how strictly this project matches installed artifacts to its pins, and
+records it in the lock.
+
+A pin names one exact build. Another build can still be equivalent to it:
+- a Conda solve picks other build strings;
+- a data file was re-released upstream;
+- a dependency was rebuilt.
+
+  equivalence  any equivalent build is used, and noted where it is (default)
+  identity     only the pinned build is used
+
+Under identity, restore fetches or rebuilds the exact build, and run and exec
+stop when only an equivalent one is installed.`,
+		Example: `  # Require the exact pinned builds
+  condatainer project select-match identity
+
+  # Go back to accepting equivalent builds
+  condatainer project select-match equivalence`,
+		Args:         cobra.ExactArgs(1),
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			mode := lock.Match(args[0])
+			if mode != lock.MatchEquivalence && mode != lock.MatchIdentity {
+				return fmt.Errorf("unknown match %q: use %q or %q", args[0], lock.MatchEquivalence, lock.MatchIdentity)
+			}
+			root, err := projectRoot(true)
+			if err != nil {
+				return err
+			}
+			current, err := lock.Load(root)
+			if err != nil {
+				return err
+			}
+			current.Match = mode
+			if mode == lock.MatchEquivalence {
+				current.Match = ""
+			}
+			if err := lock.Publish(root, current); err != nil {
+				return err
+			}
+			utils.PrintSuccess("Project accepts %s copies", mode)
+			return nil
+		},
+	}
 }
 
 func newProjectUnpinCmd() *cobra.Command {
@@ -444,7 +495,7 @@ func newProjectListCmd() *cobra.Command {
 	var jsonOutput bool
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List this project's pins",
+		Short: "List pins",
 		Long: `Lists every pin in cnt-lock/lock.json and the artifact it names.
 
 Works in a fresh clone that has restored nothing. To ask whether an artifact is
@@ -603,7 +654,7 @@ func printUnpublishedNote(l *lock.Lock, pinned []*lock.Pinned) {
 func newProjectRegistryCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "registry",
-		Short: "Manage where this project publishes its artifacts",
+		Short: "Manage the publish destination",
 		Long: `Shows where 'condatainer project push' publishes, as recorded in
 cnt-lock/lock.json.
 
@@ -640,7 +691,7 @@ func newProjectRegistrySetCmd() *cobra.Command {
 	var audience, source string
 	cmd := &cobra.Command{
 		Use:   "set <registry>/<owner>/<repo>",
-		Short: "Record where this project publishes its artifacts",
+		Short: "Set the publish destination",
 		Long: `Records where 'condatainer project push' publishes, in cnt-lock/lock.json.
 
 Give a repository with no tag or digest. Every artifact goes into that one
@@ -699,7 +750,7 @@ whole project.
 func newProjectRegistryUnsetCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "unset",
-		Short: "Forget where this project publishes",
+		Short: "Clear the publish destination",
 		Long: `Forgets the recorded destination, so 'condatainer project push' has nowhere
 to publish until one is set again.
 
@@ -745,7 +796,7 @@ func newProjectPushCmd() *cobra.Command {
 	var repository string
 	cmd := &cobra.Command{
 		Use:   "push",
-		Short: "Publish this project's artifacts and record where they landed",
+		Short: "Publish pinned artifacts and record where they landed",
 		Long: `Publishes the locked artifacts to the project's registry and records where
 each landed, so a later restore downloads them instead of rebuilding.
 
@@ -915,7 +966,6 @@ func problemStrings(problems []lock.Problem) []string {
 
 func newProjectValidateCmd() *cobra.Command {
 	var jsonOutput, installed, payload bool
-	var matchMode string
 	cmd := &cobra.Command{
 		Use:   "validate",
 		Short: "Check the lock is complete and consistent with the scripts",
@@ -931,10 +981,6 @@ runs anywhere.`,
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			match, err := parseMatch(matchMode)
-			if err != nil {
-				return err
-			}
 			root, err := projectRoot(!jsonOutput)
 			if err != nil {
 				return err
@@ -953,7 +999,7 @@ runs anywhere.`,
 			// An installed check is only meaningful over a lock that verifies.
 			var notInstalled []string
 			if (installed || payload) && len(problems) == 0 {
-				notInstalled = installedProblems(cmd.Context(), root, current, match, payload)
+				notInstalled = installedProblems(cmd.Context(), root, current, payload)
 			}
 
 			total := len(problems) + len(scanned.Findings) + len(needPin) + len(notInstalled)
@@ -991,17 +1037,15 @@ runs anywhere.`,
 	cmd.Flags().BoolVar(&installed, "installed", false, "Also require every pin to be installed here")
 	cmd.Flags().BoolVar(&payload, "payload", false,
 		"Also check installed files against the payload key (reads every byte; implies --installed)")
-	cmd.Flags().StringVar(&matchMode, "match", string(restore.MatchEquivalent),
-		"Key an installed artifact must agree with: equivalent or identity")
 	return cmd
 }
 
 // installedProblems reports each pin that is not installed here, as an artifact
-// that agrees with the lock under match, and with payload each installed one
+// that agrees with the lock under its match mode, and with payload each installed one
 // whose files do not match its recorded payload key. A build dependency that
 // only a rebuild would need is not a problem.
-func installedProblems(ctx context.Context, root string, l *lock.Lock, match restore.Match, payload bool) []string {
-	plan := restore.Compute(root, l, restore.Options{Match: match})
+func installedProblems(ctx context.Context, root string, l *lock.Lock, payload bool) []string {
+	plan := restore.Compute(root, l, restore.Options{})
 	problems := append([]string(nil), plan.Problems...)
 	for _, step := range plan.Steps {
 		if !step.Direct {
@@ -1175,7 +1219,6 @@ func newProjectRestoreCmd() *cobra.Command {
 		dryRun        bool
 		noPrebuilt    bool
 		keepBuildDeps bool
-		matchMode     string
 		replace       bool
 		only          string
 	)
@@ -1194,10 +1237,6 @@ something the lock does not name is refused unless you pass --replace.`,
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			match, err := parseMatch(matchMode)
-			if err != nil {
-				return err
-			}
 			root, err := projectRoot(!jsonOutput)
 			if err != nil {
 				return err
@@ -1207,7 +1246,7 @@ something the lock does not name is refused unless you pass --replace.`,
 				return err
 			}
 			opts := restore.Options{
-				Match: match, SkipPrebuilt: noPrebuilt, KeepBuildDeps: keepBuildDeps,
+				SkipPrebuilt: noPrebuilt, KeepBuildDeps: keepBuildDeps,
 				Replace: replace, Only: only, SubmitJobs: config.Global.SubmitJob,
 			}
 
@@ -1234,26 +1273,11 @@ something the lock does not name is refused unless you pass --replace.`,
 		"Keep build dependencies instead of discarding them at the end")
 	cmd.Flags().BoolVar(&replace, "replace", false,
 		"Overwrite a project path holding something the lock does not name")
-	cmd.Flags().StringVar(&matchMode, "match", string(restore.MatchEquivalent),
-		"Key a restored artifact must agree with: equivalent or identity")
 	// Set by the job a submitted rebuild runs, so it produces exactly what it
 	// was sent for. Nothing a person types.
 	cmd.Flags().StringVar(&only, "only", "", "Restore one recorded artifact and its dependencies")
 	_ = cmd.Flags().MarkHidden("only")
 	return cmd
-}
-
-// parseMatch rejects an unknown mode rather than falling back to the default:
-// a misspelled --match identity would silently restore under the looser rule.
-func parseMatch(mode string) (restore.Match, error) {
-	switch restore.Match(mode) {
-	case restore.MatchEquivalent:
-		return restore.MatchEquivalent, nil
-	case restore.MatchIdentity:
-		return restore.MatchIdentity, nil
-	}
-	return "", fmt.Errorf("unknown --match %q: use %q or %q",
-		mode, restore.MatchEquivalent, restore.MatchIdentity)
 }
 
 // reportPlan prints a --dry-run plan and fails if it could not run.
@@ -1264,7 +1288,11 @@ func reportPlan(plan *restore.Plan, jsonOutput bool) error {
 		}
 	} else {
 		for _, step := range plan.Steps {
-			utils.PrintMessage("  %-11s %s → %s", step.Action, utils.StyleName(step.Name), planDestination(step))
+			line := fmt.Sprintf("  %-11s %s → %s", step.Action, utils.StyleName(step.Name), planDestination(step))
+			if step.Found != "" {
+				line += utils.StyleWarning(fmt.Sprintf(" (equivalent, not %s)", short(step.Identity)))
+			}
+			utils.PrintMessage("%s", line)
 			if step.Replaces != "" {
 				utils.PrintWarning("    replaces %s already there", short(step.Replaces))
 			}

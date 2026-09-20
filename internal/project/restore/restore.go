@@ -453,7 +453,7 @@ func payloadDrifted(entry *lock.Entry, path string) bool {
 // is only asked for when something stands in. A failure gives no diffs rather
 // than failing the restore: this explains a substitution and decides nothing.
 func substituteDiffs(ctx context.Context, entry *lock.Entry, step Step) []string {
-	_, diffs, err := verify(entry, step.Path, MatchEquivalent)
+	_, diffs, err := verify(entry, step.Path, MatchEquivalence)
 	if err != nil {
 		logging.FromContext(ctx).Debug("could not compare the substitute", "name", step.Name, "err", err)
 		return nil
@@ -511,7 +511,7 @@ func dependencyPaths(entry *lock.Entry, available map[string]string) ([]build.Lo
 //
 // explicit.txt is always first: it names exact package URLs and is the only
 // input that reproduces the recorded identity. Those URLs rot — bioconda prunes
-// old builds — and under MatchEquivalent environment.yml is the second chance.
+// old builds — and under MatchEquivalence environment.yml is the second chance.
 // It is `--no-builds` output, so it pins every transitive package at an exact
 // version, the interpreter included: a solve from it cannot land cutadapt on a
 // different Python, only on different build strings. That is precisely what the
@@ -526,7 +526,7 @@ func condaSources(entry *lock.Entry, sources map[string][]byte, match Match) []s
 		return []string{""}
 	}
 	ordered := []string{conda.ExplicitFileName}
-	if match.Normalize() == MatchEquivalent {
+	if match.Normalize() == MatchEquivalence {
 		if _, ok := sources[conda.EnvironmentFileName]; ok {
 			ordered = append(ordered, conda.EnvironmentFileName)
 		}
@@ -561,7 +561,7 @@ func verify(entry *lock.Entry, path string, match Match) (compare.Verdict, []str
 	// still worth naming as equivalent rather than as merely different.
 	if outcome.Verdict == compare.Equivalent && match.Normalize() == MatchIdentity {
 		return compare.Different, append(diffs,
-			"the rebuild is equivalent but not identical, and --match identity was requested"), nil
+			"the rebuild is equivalent but not identical, and the project requires identity"), nil
 	}
 	return outcome.Verdict, diffs, nil
 }

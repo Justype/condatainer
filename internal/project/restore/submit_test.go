@@ -161,13 +161,13 @@ func TestWaitForNamesOnlySubmittedDependencies(t *testing.T) {
 
 func TestRestoreCommandCarriesThePolicyThatDecidedThePlan(t *testing.T) {
 	step := Step{Artifact: "provenance/samtools-1.23.1-sha256-abc"}
-	opts := Options{Match: MatchIdentity, SkipPrebuilt: true, KeepBuildDeps: true}
+	opts := Options{SkipPrebuilt: true, KeepBuildDeps: true}
 
 	cmd := restoreCommand("/projects/rna", step, opts)
 	for _, want := range []string{
 		"--project '/projects/rna'",
 		"--only 'provenance/samtools-1.23.1-sha256-abc'",
-		"--match identity", "--no-prebuilt", "--keep-build-deps",
+		"--no-prebuilt", "--keep-build-deps",
 	} {
 		if !strings.Contains(cmd, want) {
 			t.Errorf("command %q is missing %q", cmd, want)
@@ -177,7 +177,7 @@ func TestRestoreCommandCarriesThePolicyThatDecidedThePlan(t *testing.T) {
 
 func TestRestoreCommandOmitsUnsetPolicy(t *testing.T) {
 	cmd := restoreCommand("/projects/rna", Step{Artifact: "provenance/x"}, Options{})
-	for _, unwanted := range []string{"--match", "--no-prebuilt", "--keep-build-deps"} {
+	for _, unwanted := range []string{"--no-prebuilt", "--keep-build-deps"} {
 		if strings.Contains(cmd, unwanted) {
 			t.Errorf("command %q carries %q, which was not asked for", cmd, unwanted)
 		}

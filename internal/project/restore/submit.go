@@ -389,7 +389,7 @@ func (j *jobs) launch(ctx context.Context, root string, entry *lock.Entry, step 
 }
 
 // restoreCommand is what the job runs: the same restore, narrowed to one
-// artifact and carrying the policy flags that decided this plan.
+// artifact and carrying the policy flags that decided this plan; the lock carries the match mode.
 //
 // --project is passed rather than relied on: a project is anchored on the
 // working directory, and the job's is set from the root, but naming it keeps
@@ -400,9 +400,6 @@ func restoreCommand(root string, step Step, opts Options) string {
 	cmd.WriteString(shellQuote(root))
 	cmd.WriteString(" --only ")
 	cmd.WriteString(shellQuote(step.Artifact))
-	if opts.Match.Normalize() == MatchIdentity {
-		cmd.WriteString(" --match identity")
-	}
 	if opts.SkipPrebuilt {
 		cmd.WriteString(" --no-prebuilt")
 	}

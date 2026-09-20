@@ -258,3 +258,26 @@ func TestOCIRoundTripsAndStaysOutOfAnUnsetLock(t *testing.T) {
 		t.Error("a recorded destination reports itself empty")
 	}
 }
+
+func TestMatchIsValidatedAndOmittedWhenDefault(t *testing.T) {
+	l := New()
+	data, err := l.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "match") {
+		t.Errorf("an unset match was written:\n%s", data)
+	}
+	l.Match = MatchIdentity
+	if data, err = l.Marshal(); err != nil {
+		t.Fatal(err)
+	}
+	back, err := Unmarshal(data)
+	if err != nil || back.Match != MatchIdentity {
+		t.Fatalf("match did not round-trip: %v", err)
+	}
+	l.Match = "exact"
+	if _, err := l.Marshal(); !errors.Is(err, ErrInvalid) {
+		t.Errorf("an unknown match was accepted: %v", err)
+	}
+}

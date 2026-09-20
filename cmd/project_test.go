@@ -363,22 +363,8 @@ func lockBytes(t *testing.T, root string) string {
 	return string(data)
 }
 
-// A misspelled mode is refused rather than silently restoring under the looser
-// default, which is the whole point of asking for the stricter one.
-func TestProjectRestoreRejectsAnUnknownMatchMode(t *testing.T) {
-	root := newProject(t)
-	writeScript(t, root, "run.sh", "#DEP: star/2.7.11b\nrun\n")
-
-	out, err := run(t, "project", "restore", "--match", "exact")
-	if err == nil {
-		t.Fatalf("an unknown --match was accepted: %s", out)
-	}
-	if !strings.Contains(err.Error(), "identity") {
-		t.Errorf("error does not name the valid modes: %v", err)
-	}
-}
-
-func TestProjectRestoreDryRunJSONCarriesTheMatchMode(t *testing.T) {
+// select-match records the mode in the lock, and every later restore plans under it.
+func TestProjectSelectMatchIsWhatRestoreUses(t *testing.T) {
 	root := newProject(t)
 	writeScript(t, root, "run.sh", "#DEP: star/2.7.11b\nrun\n")
 	relative := vendorArtifact(t, root, "star/2.7.11b", "echo star\n")
@@ -388,12 +374,42 @@ func TestProjectRestoreDryRunJSONCarriesTheMatchMode(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out, err := run(t, "project", "restore", "--dry-run", "--no-prebuilt", "--match", "identity", "--json")
+	if out, err := run(t, "project", "select-match", "exact"); err == nil || !strings.Contains(err.Error(), "identity") {
+		t.Fatalf("an unknown mode was accepted: %v\n%s", err, out)
+	}
+	if out, err := run(t, "project", "select-match", "identity"); err != nil {
+		t.Fatalf("select-match failed: %v\n%s", err, out)
+	}
+	out, err := run(t, "project", "restore", "--dry-run", "--no-prebuilt", "--json")
 	if err != nil {
 		t.Fatalf("dry run failed: %v\n%s", err, out)
 	}
 	var report struct {
 		Match string `json:"match"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("output is not JSON: %v\n%s", err, out)
+	}
+	if report.Match != "identity" {
+		t.Errorf("match = %q, want the lock's", report.Match)
+	}
+}
+
+func TestProjectRestoreDryRunJSONListsTheSteps(t *testing.T) {
+	root := newProject(t)
+	writeScript(t, root, "run.sh", "#DEP: star/2.7.11b\nrun\n")
+	relative := vendorArtifact(t, root, "star/2.7.11b", "echo star\n")
+	l := lock.New()
+	l.Pins["star/2.7.11b"] = lock.PinEntry{Artifact: relative}
+	if err := lock.Publish(root, l); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := run(t, "project", "restore", "--dry-run", "--no-prebuilt", "--json")
+	if err != nil {
+		t.Fatalf("dry run failed: %v\n%s", err, out)
+	}
+	var report struct {
 		Steps []struct {
 			Name   string `json:"name"`
 			Action string `json:"action"`
@@ -401,9 +417,6 @@ func TestProjectRestoreDryRunJSONCarriesTheMatchMode(t *testing.T) {
 	}
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("output is not JSON: %v\n%s", err, out)
-	}
-	if report.Match != "identity" {
-		t.Errorf("match = %q, want the requested mode", report.Match)
 	}
 	if len(report.Steps) != 1 || report.Steps[0].Action != "build" {
 		t.Errorf("steps = %#v", report.Steps)

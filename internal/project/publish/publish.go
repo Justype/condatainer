@@ -212,14 +212,14 @@ func locate(root string, step Step) (string, error) {
 		at := filepath.Join(root, filepath.FromSlash(step.Destination))
 		candidate, ok := project.LookupAt(at, entry.Manifest.Name, entry.Manifest.Keys, project.MatchIdentity)
 		if !ok {
-			return "", fmt.Errorf("%s is not at %s at %s; run `condatainer project restore --match identity`",
+			return "", fmt.Errorf("%s is not at %s at %s; run `condatainer project select-match identity`, then `project restore`",
 				entry.Manifest.Name, step.Destination, entry.Identity.Digest())
 		}
 		return candidate.Path, nil
 	}
 	candidate, ok := project.LookupLocal(entry.Manifest.Name, entry.Manifest.Keys, project.MatchIdentity, nil)
 	if !ok {
-		return "", fmt.Errorf("%s is not installed at %s; run `condatainer project restore --match identity`",
+		return "", fmt.Errorf("%s is not installed at %s; run `condatainer project select-match identity`, then `project restore`",
 			entry.Manifest.Name, entry.Identity.Digest())
 	}
 	return candidate.Path, nil

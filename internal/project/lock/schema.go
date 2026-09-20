@@ -83,6 +83,9 @@ type Lock struct {
 	// OCI is where this project publishes. Absent until `project registry set`
 	// records one.
 	OCI OCI `json:"oci,omitzero"`
+	// Match is which key a local copy must agree with for this project. Absent
+	// means equivalence.
+	Match Match `json:"match,omitempty"`
 	// Pins maps a canonical request to the artifact directory that
 	// satisfies it. The value is an object rather than a bare path so
 	// pin-specific policy can be added without copying artifact facts
@@ -93,6 +96,41 @@ type Lock struct {
 	// records a location: `project pin`, and later `project push`, append to it. A closure-only artifact may have remotes too, which
 	// is why this is keyed by artifact rather than nested under a pin.
 	Remotes map[string][]Remote `json:"remotes,omitempty"`
+}
+
+// Match is which of an artifact's two keys a locally available copy has to
+// agree with: identity asks "which exact build is this?", equivalence asks "can
+// this substitute for the requested artifact?".
+type Match string
+
+const (
+	// MatchEquivalence accepts anything that can substitute for what was locked.
+	// The default, because it is what the equivalence key exists to decide.
+	//
+	// It is also the only workable rule for ordinary analysis. A Conda solve
+	// that lands on the same versions but different build strings or package
+	// URLs writes a different explicit.txt and an identical environment.yml, so
+	// it is equivalent and not identical. Requiring identity would fail that,
+	// and would additionally require every data artifact to be rebuilt against
+	// the exact tool identities it was first built with, since a script
+	// identity hashes its dependencies' identities.
+	MatchEquivalence Match = "equivalence"
+	// MatchIdentity accepts only the exact build the lock names.
+	//
+	// Deliberately stringent: a Conda artifact has to replay its explicit.txt to
+	// the byte, and a data artifact has to be rebuilt in the same environment.
+	// That is the point when bit-level provenance is the requirement, and too
+	// much to ask when it is not.
+	MatchIdentity Match = "identity"
+)
+
+// Normalize fills in the default, so a zero value is the ordinary mode rather
+// than the strict one.
+func (m Match) Normalize() Match {
+	if m == MatchIdentity {
+		return MatchIdentity
+	}
+	return MatchEquivalence
 }
 
 // OCI is a project's own publishing destination. The field names mirror
@@ -207,6 +245,11 @@ func (l *Lock) Marshal() ([]byte, error) {
 func (l *Lock) Validate() error {
 	if err := validSourceURL(l.Source); err != nil {
 		return fmt.Errorf("%w: source: %v", ErrInvalid, err)
+	}
+	switch l.Match {
+	case "", MatchEquivalence, MatchIdentity:
+	default:
+		return fmt.Errorf("%w: match %q is not %s or %s", ErrInvalid, l.Match, MatchEquivalence, MatchIdentity)
 	}
 	if err := l.OCI.validate(); err != nil {
 		return fmt.Errorf("%w: oci: %v", ErrInvalid, err)

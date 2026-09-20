@@ -16,43 +16,14 @@ import (
 	"github.com/Justype/condatainer/internal/utils"
 )
 
-// Match is which of an artifact's two keys a locally available copy has to
-// agree with.
-//
-// The two keys exist to answer different questions, and this is where the
-// question gets asked: identity is "which exact build is this?", equivalence is
-// "can this substitute for the requested artifact?".
-type Match string
+// Match is which key a locally available copy has to agree with; a project
+// records its own in the lock.
+type Match = lock.Match
 
 const (
-	// MatchEquivalent accepts anything that can substitute for what was locked.
-	// The default, because it is what the equivalence key exists to decide.
-	//
-	// It is also the only workable rule for ordinary analysis. A Conda solve
-	// that lands on the same versions but different build strings or package
-	// URLs writes a different explicit.txt and an identical environment.yml, so
-	// it is equivalent and not identical. Requiring identity would fail that,
-	// and would additionally require every data artifact to be rebuilt against
-	// the exact tool identities it was first built with, since a script
-	// identity hashes its dependencies' identities.
-	MatchEquivalent Match = "equivalent"
-	// MatchIdentity accepts only the exact build the lock names.
-	//
-	// Deliberately stringent: a Conda artifact has to replay its explicit.txt to
-	// the byte, and a data artifact has to be rebuilt in the same environment.
-	// That is the point when bit-level provenance is the requirement, and too
-	// much to ask when it is not.
-	MatchIdentity Match = "identity"
+	MatchEquivalence = lock.MatchEquivalence
+	MatchIdentity    = lock.MatchIdentity
 )
-
-// Normalize fills in the default, so a zero value is the ordinary mode rather
-// than the strict one.
-func (m Match) Normalize() Match {
-	if m == MatchIdentity {
-		return MatchIdentity
-	}
-	return MatchEquivalent
-}
 
 // LookupFunc finds a local artifact answering to keys under a match mode.
 type LookupFunc func(name string, keys meta.Keys, match Match, dirs []string) (store.Candidate, bool)
@@ -60,7 +31,7 @@ type LookupFunc func(name string, keys meta.Keys, match Match, dirs []string) (s
 // LookupAtFunc reports whether the artifact at one exact path satisfies keys.
 type LookupAtFunc func(path, name string, keys meta.Keys, match Match) (store.Candidate, bool)
 
-// LookupLocal finds the locked artifact, or under MatchEquivalent something
+// LookupLocal finds the locked artifact, or under MatchEquivalence something
 // that can stand in for it.
 //
 // The exact identity is tried first in both modes, so an available exact copy
@@ -198,7 +169,7 @@ func LookupAt(path, name string, keys meta.Keys, match Match) (store.Candidate, 
 	if candidate.Identity == keys.Identity {
 		return candidate, true
 	}
-	if match.Normalize() == MatchEquivalent && candidate.Equiv == keys.Equiv {
+	if match.Normalize() == MatchEquivalence && candidate.Equiv == keys.Equiv {
 		return candidate, true
 	}
 	return store.Candidate{}, false
@@ -248,7 +219,7 @@ func (r *Resolution) Complete() bool { return len(r.Unresolved) == 0 }
 
 // ResolveOptions tunes resolution.
 type ResolveOptions struct {
-	// Match is which key a local copy must agree with. Empty means equivalent.
+	// Match is which key a local copy must agree with. Empty means the lock's.
 	Match Match
 	// SearchDirs overrides the configured image roots.
 	SearchDirs []string
@@ -312,7 +283,11 @@ func Resolve(ctx context.Context, root string, l *lock.Lock, requests []lock.Req
 		return resolution, nil
 	}
 
-	match := opts.Match.Normalize()
+	match := opts.Match
+	if match == "" {
+		match = l.Match
+	}
+	match = match.Normalize()
 	resolve, resolveAt := opts.resolver(), opts.pathResolver()
 	resolution := &Resolution{Root: root}
 

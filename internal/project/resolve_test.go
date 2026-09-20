@@ -394,7 +394,7 @@ func TestToolNameDropsTheVersion(t *testing.T) {
 	}
 }
 
-// Under --match identity nothing but the recorded identity is accepted, whatever
+// Under an identity project nothing but the recorded identity is accepted, whatever
 // the edge's role says: ScriptIdentityV1 hashes dependency identities, so a
 // substitution would produce a dependent the mode rejects anyway.
 func TestLookupInputRefusesASubstituteUnderMatchIdentity(t *testing.T) {
@@ -405,6 +405,35 @@ func TestLookupInputRefusesASubstituteUnderMatchIdentity(t *testing.T) {
 	}
 	// An empty images root, so only the exact-identity probe can answer.
 	if _, ok := LookupInput(dep, MatchIdentity, []string{t.TempDir()}); ok {
-		t.Fatal("a substitute was accepted under --match identity")
+		t.Fatal("a substitute was accepted under an identity project")
+	}
+}
+
+// A caller that sets no mode is held to the lock's, so run and exec refuse what
+// restore would have refused.
+func TestResolveUsesTheLocksMatchMode(t *testing.T) {
+	root := projectRoot(t)
+	relative, _ := vendor(t, root, "star/2.7.11b", "echo star\n")
+	l := lock.New()
+	l.Pins["star/2.7.11b"] = lock.PinEntry{Artifact: relative}
+	l.Match = lock.MatchIdentity
+	requests := []lock.Request{{Key: "star/2.7.11b", Kind: lock.KindName}}
+
+	var seen Match
+	spy := func(_ string, _ meta.Keys, match Match, _ []string) (store.Candidate, bool) {
+		seen = match
+		return store.Candidate{}, false
+	}
+	if _, err := Resolve(context.Background(), root, l, requests, ResolveOptions{lookup: spy}); err != nil {
+		t.Fatal(err)
+	}
+	if seen != MatchIdentity {
+		t.Errorf("lookup ran under %q, want the lock's identity", seen)
+	}
+	if _, err := Resolve(context.Background(), root, l, requests, ResolveOptions{Match: MatchEquivalence, lookup: spy}); err != nil {
+		t.Fatal(err)
+	}
+	if seen != MatchEquivalence {
+		t.Errorf("an explicit mode did not win: %q", seen)
 	}
 }

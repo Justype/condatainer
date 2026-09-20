@@ -437,11 +437,11 @@ func TestCondaSourcesTierByMatchMode(t *testing.T) {
 		match   Match
 		want    []string
 	}{
-		{"EquivalentTriesBoth", both, MatchEquivalent,
+		{"EquivalentTriesBoth", both, MatchEquivalence,
 			[]string{conda.ExplicitFileName, conda.EnvironmentFileName}},
 		{"IdentityReplaysExplicitOnly", both, MatchIdentity,
 			[]string{conda.ExplicitFileName}},
-		{"NothingToFallBackOn", explicitOnly, MatchEquivalent,
+		{"NothingToFallBackOn", explicitOnly, MatchEquivalence,
 			[]string{conda.ExplicitFileName}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -462,7 +462,7 @@ func TestCondaSourcesTierByMatchMode(t *testing.T) {
 // vendored verbatim and reproduces the identity outright.
 func TestCondaSourcesLeaveOtherBuildTypesAlone(t *testing.T) {
 	entry := &lock.Entry{Manifest: meta.Manifest{Name: "star/2.7.11b", BuildType: "script"}}
-	got := condaSources(entry, map[string][]byte{conda.EnvironmentFileName: nil}, MatchEquivalent)
+	got := condaSources(entry, map[string][]byte{conda.EnvironmentFileName: nil}, MatchEquivalence)
 	if len(got) != 1 || got[0] != "" {
 		t.Fatalf("sources = %v, want one unnamed source", got)
 	}

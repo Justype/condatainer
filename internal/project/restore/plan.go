@@ -29,8 +29,8 @@ import (
 type Match = project.Match
 
 const (
-	// MatchEquivalent accepts anything that can substitute for what was locked.
-	MatchEquivalent = project.MatchEquivalent
+	// MatchEquivalence accepts anything that can substitute for what was locked.
+	MatchEquivalence = project.MatchEquivalence
 	// MatchIdentity accepts only the exact build the lock names.
 	MatchIdentity = project.MatchIdentity
 )
@@ -139,7 +139,7 @@ func (p *Plan) Work() int {
 
 // Options tunes planning.
 type Options struct {
-	// Match is which key a local copy has to agree with. Empty means equivalent.
+	// Match is which key a local copy has to agree with. Empty means the lock's.
 	Match Match
 	// SkipPrebuilt ignores every recorded remote and plans a local build
 	// instead. It is not a claim that the machine is offline: a build needs the
@@ -232,7 +232,11 @@ func (o Options) inputResolver() lookupInputFunc {
 // Nothing here writes, fetches, or locks. Every artifact that is already
 // present is adopted, and only a genuine miss becomes a fetch or a rebuild.
 func Compute(root string, l *lock.Lock, opts Options) *Plan {
-	match := opts.Match.Normalize()
+	match := opts.Match
+	if match == "" {
+		match = l.Match
+	}
+	match = match.Normalize()
 	plan := &Plan{Root: root, Match: match}
 
 	verified, problems := lock.Verify(root, l)

@@ -445,7 +445,7 @@ func TestComputeAdoptsAnEquivalentSubstituteByDefault(t *testing.T) {
 	if !plan.Complete() {
 		t.Fatalf("problems: %v", plan.Problems)
 	}
-	if plan.Match != MatchEquivalent {
+	if plan.Match != MatchEquivalence {
 		t.Errorf("match = %q, want equivalent by default", plan.Match)
 	}
 	step := plan.Steps[0]
@@ -497,7 +497,7 @@ func TestComputeLeavesFoundEmptyForAnExactHit(t *testing.T) {
 	l := lock.New()
 	l.Pins["star/2.7.11b"] = lock.PinEntry{Artifact: appPath}
 
-	for _, match := range []Match{MatchEquivalent, MatchIdentity} {
+	for _, match := range []Match{MatchEquivalence, MatchIdentity} {
 		plan := Compute(root, l, Options{Match: match, lookup: installed("star/2.7.11b")})
 		step := plan.Steps[0]
 		if step.Action != ActionAdopt || step.Found != "" {

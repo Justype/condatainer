@@ -46,7 +46,7 @@ Available Commands:
   list              List installed overlays
   o                 Shortcut for 'overlay create'
   overlay           Manage ext3 overlays (create, resize, check, info)
-  project           Pin and restore a project's artifacts
+  project           Pin, restore and publish a project's artifacts
   proxy             Manage proxy tunnels for compute nodes
   registry          Publish and fetch artifacts through an OCI registry
   remove            Remove installed overlays matching search terms
@@ -2147,7 +2147,7 @@ omission.
 Pin the exact artifacts a project mounts, and carry that pin in Git.
 
 ```
-condatainer project lock | pin | unpin | select-distro | list | validate | restore | registry [set|unset] | push
+condatainer project lock | pin | unpin | select-distro | select-match | list | validate | restore | registry [set|unset] | push
 ```
 
 A project is any directory holding `cnt-lock/`, which `project lock` creates.
@@ -2173,39 +2173,52 @@ project/
 
 ### Identity and equivalence
 
-Every artifact carries two keys. Both are SHA-256 over a canonical description of
-how the artifact was **built** — never over the payload bytes — so a rebuild from
-the same inputs reproduces them on any machine, whether or not SquashFS happened
-to write identical bytes.
+Every artifact has two keys, both computed from how it was built and never from
+the files inside it, so a rebuild from the same inputs gets the same keys on any
+machine.
 
-Both hash the artifact type, every `#ENV:` value, the comment-stripped recipe
-digest, and every selected `#PH:` placeholder. They differ in how dependencies
-enter, and in one more input: identity also hashes the SHA-256 of every file a
-[`#SOURCE:`](build_script.md#source-tag) fetched, and equivalence does not. A file
-re-released upstream under the same name therefore gives a different identity and
-the same equivalence.
+- **Identity** is which exact build this is. A pin records it.
+- **Equivalence** is whether this build can stand in for another. It moves only
+  when what you asked for changes, not when the build environment does.
 
-| dependency | identity | equivalence |
+**What changes them**
+
+| change | identity | equivalence |
 |---|---|---|
-| `data` | name + its exact identity | its equivalence key |
-| `app` / `os` whose components appear in this artifact's own name | name + its exact identity | name/version only |
-| `app` / `os` that does not (build history) | name + its exact identity | **omitted** |
+| edit the recipe's commands | changes | changes |
+| choose another `#PH:` or `#ENV:` value | changes | changes |
+| an upstream `#SOURCE:` file changes | changes | same |
+| a `data` dependency is rebuilt as an equivalent, not identical, build | changes | same |
+| an `app` or `os` dependency named in the artifact's own name changes version | changes | changes |
+| the same version of that dependency is a different build | changes | same |
+| a dependency used only to build it (a mounted `build-essential`) changes | changes | same |
+| reword a comment or `#DESC:`, edit a scheduler directive, extend a `#PH:` menu | same | same |
 
-So **identity** answers "which exact build is this", and pins record it.
-**Equivalence** answers "can this stand in", and restore accepts it by default.
+Edits that cannot change what is built leave both keys alone, so they do not create a
+new artifact.
 
-The third row is the useful one. A `build-essential` mounted only to compile
-something is build history: it changes the identity, so a rebuild against a newer
-one is a different build, but it never changes equivalence, so that rebuild
-remains a legitimate substitute. The second row is why an app contributes its
-name rather than its own key — `star/2.7.11b/index` built against `star/2.7.11b`
-is about that version of STAR, not about which build of it produced the index.
+An `os` definition is the same, with its upstream image in place of `#SOURCE:`: when
+the `From:` image is updated, rebuilding gives a new identity and the same
+equivalence.
 
-A Conda build has no recipe and no dependencies, so it keys off its two exports
-instead: identity is `explicit.txt` byte for byte (which exact package set), and
-equivalence is `environment.yml` byte for byte (which environment was asked for).
-That is why `--match identity` on a Conda artifact means replaying the same
-pinned package URLs exactly.
+A Conda environment has two keys from its two exports. Identity is `explicit.txt`
+(the exact package URLs). Equivalence is `environment.yml` (the versions asked for).
+A new solve that lands on the same versions with different build strings is
+equivalent, not identical. A frozen environment has one key for both, so nothing
+substitutes for it.
+
+**What you see**
+
+| where | what it shows |
+|---|---|
+| `condatainer info <name>` | the `Identity:` and `Equivalence:` lines |
+| `project restore` | `(equivalent, not sha256:…; differs: src:gtf)` when a substitute was used or built, with the inputs that differ |
+| `project restore --dry-run` | the same note on a step a substitute already answers |
+| `run`, `exec` | `is mounted from an equivalent artifact, not <identity>` |
+| `create` | `this exact build is already installed, skipping` when the identity is present |
+
+Under an [`identity` project](#project-select-match) each of these is an error instead
+of a note.
 
 ### Project Lock
 
@@ -2355,6 +2368,35 @@ expands against — `avail`, `list`, `remove`, `info`, `overlay`, shell
 completion, and `create`'s own bare-name expansion all follow the selected
 root instead of the configured `default_distro`.
 
+### Project Select-Match
+
+```bash
+condatainer project select-match identity
+condatainer project select-match equivalence
+```
+
+Records in the lock which copy of a pinned artifact the project accepts.
+`equivalence`, the default, takes any equivalent build: one that can stand in for the pinned one.
+`identity` takes only the exact pinned build.
+
+For example, a Conda environment is pinned and later rebuilt. The package
+versions are the same, but the build strings differ:
+
+| mode | the rebuilt copy |
+|---|---|
+| `equivalence` | accepted; the result line says it is equivalent, not identical |
+| `identity` | refused; only a copy with the pinned build strings is used |
+
+A data artifact behaves the same way. If a `#SOURCE:` file was re-released
+upstream under the same name, the rebuilt artifact is equivalent but not
+identical. See [Identity and equivalence](#identity-and-equivalence) for what
+each key covers.
+
+The mode applies wherever the pins are used: `project restore` refuses a
+substitute, `project validate --installed` reports one, and `run` and `exec`
+stop when only a substitute is installed. Commit the change and every
+collaborator is held to it.
+
 ### Project List
 
 ```bash
@@ -2393,7 +2435,7 @@ actually *available* is `project restore --dry-run`'s.
 ```bash
 condatainer project validate
 condatainer project validate --json
-condatainer project validate --installed [--match identity]
+condatainer project validate --installed
 condatainer project validate --payload
 ```
 
@@ -2415,8 +2457,7 @@ By default it never asks whether an artifact is installed here.
 
 | flag | effect |
 |---|---|
-| `--installed` | also fail for every pin that is not installed here as an artifact agreeing with the lock |
-| `--match equivalent\|identity` | which key an installed artifact must agree with (default `equivalent`); used with `--installed` |
+| `--installed` | also fail for every pin that is not installed here as an artifact the project's [match mode](#project-select-match) accepts |
 | `--payload` | also read each installed artifact's files and check them against its recorded payload key; implies `--installed` |
 
 `--installed` uses the lookup [`project restore --dry-run`](#project-restore) plans with, and a build
@@ -2429,7 +2470,7 @@ payload key; a Conda or definition build is skipped.
 ```bash
 condatainer project restore
 condatainer project restore --dry-run
-condatainer project restore --no-prebuilt --match identity
+condatainer project restore --no-prebuilt
 condatainer project restore --keep-build-deps
 ```
 
@@ -2440,7 +2481,6 @@ Nothing is mounted and `cnt-lock/` is never modified.
 |---|---|
 | `--dry-run` | report what would happen and acquire nothing |
 | `--no-prebuilt` | build missing artifacts from source where possible instead of downloading a recorded one |
-| `--match equivalent\|identity` | which key a restored artifact must agree with (default `equivalent`) |
 | `--keep-build-deps` | install newly produced build dependencies instead of discarding them |
 | `--replace` | overwrite a project path holding something the lock does not name |
 | `--json` | print JSON |
@@ -2451,14 +2491,14 @@ build and nothing upstream is consulted. One with no recorded location is rebuil
 from the recipe in `cnt-lock/`, which downloads its `#SOURCE:` files again. If an
 upstream file has changed since, the rebuild is a different build.
 
-Under `--match equivalent` it is accepted, and the result line names what differs:
+Under the default `equivalence` match it is accepted, and the result line names what differs:
 
 ```
   built    grch38/gtf-gencode/49 → …/49.sqf (equivalent, not sha256:41ab1c2d3e4f; differs: src:gtf)
 ```
 
-`--json` carries the digests of each input that differs. Under `--match identity`
-the restore fails instead. An artifact addressed by name is kept in the store under
+`--json` carries the digests of each input that differs. Under an `identity`
+project the restore fails instead. An artifact addressed by name is kept in the store under
 its own identity, and `condatainer project pin` can pin it.
 
 A rebuild can also match the locked identity and still produce different files, because the
@@ -2549,7 +2589,7 @@ a coordinate by hand.
 
 ### Project Registry
 
-Show, set, or forget where this project publishes.
+Show, set, or clear the publish destination.
 
 ```bash
 # Show what is recorded
