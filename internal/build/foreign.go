@@ -80,7 +80,6 @@ func FromForeignRoot(ctx context.Context, targetPrefix, source, imagesDir string
 		ws:          ws,
 		tgt:         targetFor(targetPrefix + ".sqf"),
 		buildSource: source,
-		submitJob:   config.Global.SubmitJob,
 		update:      update,
 		buildType:   BuildTypeDef,
 		foreignRoot: &foreignRoot{path: source, sandbox: sandbox, boot: boot, digest: digest},

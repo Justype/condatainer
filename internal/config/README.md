@@ -183,7 +183,7 @@ channels:
 build:
   system_apptainer: "apptainer"
   ncpus: 4
-  mem: 8192   # MB
+  mem: 12288  # MB
   time: "2h"
   compress_args: "-comp zstd -Xcompression-level 8"   # zstd-medium, always — every reader is a version-checked apptainer
 

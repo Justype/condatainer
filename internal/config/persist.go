@@ -125,7 +125,7 @@ func setDefaults() {
 	viper.SetDefault("build.compress_args", ArgsForCompress("zstd-medium"))
 	viper.SetDefault("build.block_size", DefaultBlockSize)
 	viper.SetDefault("build.data_block_size", DefaultDataBlockSize)
-	viper.SetDefault("build.always_submit", false)
+	viper.SetDefault("build.always_submit_data", false)
 
 	// Scheduler config defaults
 	viper.SetDefault("scheduler.bin", "")
@@ -448,7 +448,7 @@ func ReadConfigKey(configPath, key string) string {
 
 // SaveMinimalConfigTo writes only detected keys to path using a fresh viper instance,
 // so no default values bleed in. Keys already provided by lowerLayers are skipped.
-func SaveMinimalConfigTo(path, apptainerBin, schedulerBin, compressArgs string, lowerLayers []ConfigLayerInfo) error {
+func SaveMinimalConfigTo(path, apptainerBin, schedulerBin string, lowerLayers []ConfigLayerInfo) error {
 	dir := filepath.Dir(path)
 	if err := utils.MkdirAllShared(dir); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
@@ -468,9 +468,6 @@ func SaveMinimalConfigTo(path, apptainerBin, schedulerBin, compressArgs string, 
 	}
 	if schedulerBin != "" && !alreadySet("scheduler.bin") {
 		v.Set("scheduler.bin", schedulerBin)
-	}
-	if compressArgs != "" && !alreadySet("build.compress_args") {
-		v.Set("build.compress_args", compressArgs)
 	}
 	if err := v.WriteConfigAs(path); err != nil {
 		return fmt.Errorf("failed to write config to %s: %w", path, err)
@@ -995,8 +992,8 @@ func LoadFromViper() {
 		}
 	}
 
-	if alwaysSubmit, ok := layerBool("build.always_submit"); ok {
-		Global.Build.AlwaysSubmit = alwaysSubmit
+	if alwaysSubmit, ok := layerBool("build.always_submit_data"); ok {
+		Global.Build.AlwaysSubmitData = alwaysSubmit
 	}
 
 	if ch := GetChannels(); len(ch) > 0 {

@@ -27,13 +27,14 @@ const GitHubRepo = "Justype/condatainer"
 
 // BuildConfig holds default settings for build operations
 type BuildConfig struct {
-	Defaults        scheduler.ResourceSpec // Default resource spec for build job submissions
-	CompressArgs    string                 // mksquashfs compression arguments
-	BlockSize       string                 // mksquashfs block size for app/env/external overlays (DefaultBlockSize)
-	DataBlockSize   string                 // mksquashfs block size for data/ref overlays (DefaultDataBlockSize)
-	AlwaysSubmit    bool                   // Always submit builds as scheduler jobs even without script directives (default: false)
-	Channels        []string               // conda channels in priority order (default: [conda-forge, bioconda])
-	SystemApptainer string                 // Path to the system/module apptainer or singularity binary (auto-detected if empty)
+	Defaults         scheduler.ResourceSpec // Default resource spec for build job submissions
+	CompressArgs     string                 // mksquashfs compression arguments
+	BlockSize        string                 // mksquashfs block size for app/env/external overlays (DefaultBlockSize)
+	DataBlockSize    string                 // mksquashfs block size for data/ref overlays (DefaultDataBlockSize)
+	AlwaysSubmitData bool                   // Submit data builds as scheduler jobs even without script directives (default: false)
+	SkipPrebuilt     bool                   // Build from the recipe rather than pull a prebuilt artifact; set per run by create --no-prebuilt, never read from a file
+	Channels         []string               // conda channels in priority order (default: [conda-forge, bioconda])
+	SystemApptainer  string                 // Path to the system/module apptainer or singularity binary (auto-detected if empty)
 }
 
 // SchedulerConfig holds scheduler binary/submission settings shared by every
@@ -156,11 +157,11 @@ const (
 	DefaultBlockSize     = "128k"
 	DefaultDataBlockSize = "512k"
 
-	DefaultNcpus        = 4    // CPUs for a build job
-	DefaultMemMB        = 8192 // memory for a build job
-	DefaultBuildTime    = "2h" // walltime for a build job
-	DefaultCacheTTLDay  = 7    // remote recipe metadata cache, 1 week
-	DefaultGCGraceDay   = 30   // store gc: age below which an entry is never collectable
+	DefaultNcpus        = 4     // CPUs for a build job
+	DefaultMemMB        = 12288 // memory for a build job
+	DefaultBuildTime    = "2h"  // walltime for a build job
+	DefaultCacheTTLDay  = 7     // remote recipe metadata cache, 1 week
+	DefaultGCGraceDay   = 30    // store gc: age below which an entry is never collectable
 	DefaultNotification = "web"
 	DefaultNestedRun    = NestedRunAuto
 

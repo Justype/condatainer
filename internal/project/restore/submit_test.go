@@ -3,6 +3,9 @@ package restore
 import (
 	"strings"
 	"testing"
+
+	"github.com/Justype/condatainer/catalog"
+	"github.com/Justype/condatainer/internal/config"
 )
 
 // buildStep is one plan entry, named so a partition case reads as a graph.
@@ -185,5 +188,24 @@ func TestShellQuoteSurvivesAQuoteInAPath(t *testing.T) {
 	got := shellQuote("/home/o'brien/rna project")
 	if want := `'/home/o'\''brien/rna project'`; got != want {
 		t.Fatalf("shellQuote = %s, want %s", got, want)
+	}
+}
+
+// build.always_submit_data calls for a job for a data rebuild and for nothing
+// else; a recipe's own directives still do, whatever its type.
+func TestCallsForJobFollowsAlwaysSubmitData(t *testing.T) {
+	prev := config.Global.Build.AlwaysSubmitData
+	config.Global.Build.AlwaysSubmitData = true
+	t.Cleanup(func() { config.Global.Build.AlwaysSubmitData = prev })
+
+	if !callsForJob(catalog.TypeData, nil) {
+		t.Error("a data rebuild does not call for a job under always_submit_data")
+	}
+	if callsForJob(catalog.TypeApp, nil) {
+		t.Error("an app rebuild calls for a job under always_submit_data")
+	}
+	config.Global.Build.AlwaysSubmitData = false
+	if callsForJob(catalog.TypeData, nil) {
+		t.Error("a data rebuild calls for a job with the flag off")
 	}
 }

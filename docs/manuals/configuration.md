@@ -145,7 +145,7 @@ which CondaTainer never reads or changes. See
 |-----|---------|-------------|
 | `submit_job` | `true` | Submit builds as scheduler jobs (disabled if no scheduler found) |
 | `autoload_gpu` | `true` | Pass `--nv` / `--rocm` when the host has the device node. Set `false` if the driver is present but unusable |
-| `nested_run` | `auto` | Provide apptainer inside `e`, `exec` and `run` containers, so containers can be started from within one. `auto` uses the apptainer installed by `condatainer update --libexec apptainer`, otherwise an installed `apptainer/<version>` overlay, and builds nothing. `true` also builds that overlay when it is missing, on the host that ran the command and before any job is submitted (`build.always_submit` does not apply), and stops with an error if apptainer cannot be provided. `false` turns it off |
+| `nested_run` | `auto` | Provide apptainer inside `e`, `exec` and `run` containers, so containers can be started from within one. `auto` uses the apptainer installed by `condatainer update --libexec apptainer`, otherwise an installed `apptainer/<version>` overlay, and builds nothing. `true` also builds that overlay when it is missing, on the host that ran the command and before any job is submitted (`build.always_submit_data` does not apply), and stops with an error if apptainer cannot be provided. `false` turns it off |
 | `default_distro` | first source's `default_distro` | Default distro for the container root, e.g. `ubuntu24` → `ubuntu24/base` |
 | `notification` | `web` | Alert when a helper job starts: `web`, `terminal`, `both`, `none` |
 | `metadata_cache_ttl` | `7` | Days to cache remote recipe metadata. `0` always fetches |
@@ -159,12 +159,12 @@ which CondaTainer never reads or changes. See
 |-----|---------|-------------|
 | `build.system_apptainer` | Auto-detected | Path to apptainer or singularity binary. Used for a fakeroot `exec`, an `os` `.def` build's own `apptainer build`, and any other `exec`/`run` or conda/script build when no apptainer is installed in condatainer's own toolchain (`condatainer update --libexec apptainer`), which is used first when present. It must be apptainer 1.4 or newer. |
 | `build.ncpus` | `4` | CPUs for build jobs |
-| `build.mem` | `8192` | Memory for build jobs (supports units: `8g`, `8192`) |
+| `build.mem` | `12288` | Memory for build jobs (supports units: `12g`, `12288`) |
 | `build.time` | `2h` | Time limit for builds |
 | `build.compress_args` | `zstd-medium` | mksquashfs compression arguments |
 | `build.block_size` | `128k` | mksquashfs block size for app/env/external overlays (e.g. `128k`, `512k`) |
 | `build.data_block_size` | `512k` | mksquashfs block size for data overlays (e.g. `512k`, `1m`) |
-| `build.always_submit` | `false` | Always submit builds as scheduler jobs even if the script has no scheduler directives |
+| `build.always_submit_data` | `false` | Submit `data` builds as scheduler jobs even if the recipe has no scheduler directives |
 | `channels` | `[conda-forge, bioconda]` | Conda channels passed to micromamba in priority order (first = highest priority) |
 
 > `build.compress_args` also accepts shortcuts: `gzip`, `lz4`, `zstd`, `zstd-fast`, `zstd-medium`, `zstd-high`
@@ -301,7 +301,7 @@ mapping is consistent for every key handled by the CLI:
 | `CNT_NESTED_RUN`           | `nested_run`           |
 | `CNT_DEFAULT_DISTRO`       | `default_distro`       |
 | `CNT_BUILD_MEM`            | `build.mem`            |
-| `CNT_BUILD_ALWAYS_SUBMIT`  | `build.always_submit`  |
+| `CNT_BUILD_ALWAYS_SUBMIT_DATA`  | `build.always_submit_data`  |
 | `CNT_BUILD_BLOCK_SIZE`     | `build.block_size`     |
 | `CNT_BUILD_DATA_BLOCK_SIZE`| `build.data_block_size`|
 | `CNT_ROOT`                 | Cluster/system root dir (loads `config.yaml` + data dirs; replaces bin/ heuristic) |
@@ -420,12 +420,12 @@ metadata_cache_ttl: 7
 build:
   system_apptainer: /usr/bin/apptainer  # scheduler type is auto-detected from scheduler.bin
   ncpus: 4
-  mem: 8g
+  mem: 12g
   time: 2h
   compress_args: -comp zstd -Xcompression-level 8
   block_size: 128k       # SquashFS block size for app/env/external overlays
   data_block_size: 512k  # SquashFS block size for data overlays
-  always_submit: false    # Always submit as scheduler jobs even without directives
+  always_submit_data: false    # Submit data builds as scheduler jobs even without directives
 
 # Scheduler configuration
 scheduler:

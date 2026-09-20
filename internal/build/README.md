@@ -492,10 +492,19 @@ somewhere a file-existence check never guessed.
 2. **Plan** - Create a BuildObject per missing node, in the solved order
 3. **Resolve the base** - Every script and Conda build runs inside it, so it is
    built first; a scheduler job cannot build one on the node
-4. **Separate local/scheduler** - Based on resource requirements
+4. **Separate local/scheduler** - A build goes to the scheduler when its recipe carries directives,
+   or when it is `data` and `build.always_submit_data` is set. A job re-runs `create`, so only a build
+   that command can reproduce is submitted: a catalog name, or an external shell script, re-run as
+   `create --name|--prefix … --file …` (`SetJobArgs`). A Conda build from packages or a file, a
+   definition and a `.sif` or sandbox import run here.
 5. **Execute:**
    - Local builds: sequentially, in dependency order
-   - Scheduler builds: submitted with dependency chains, each waiting on its deps
+   - Scheduler builds: submitted with dependency chains, each waiting on its deps. A job re-runs
+     `condatainer create <name>` on the node, so the flags that change what is built or where it
+     lands travel with it: `--channel`, `--source`, `--layer`, the block sizes and compression
+     flag (`BuildGraph.SetJobFlags`), and `--update`, `--store` (only on the build that was asked
+     for, never a dependency) and `--no-prebuilt`. Submission flags are not repeated: the job is
+     the submission.
 
 ## Environment Variables
 

@@ -7,6 +7,7 @@ import (
 
 	"github.com/Justype/condatainer/internal/artifact/key"
 	"github.com/Justype/condatainer/internal/artifact/meta"
+	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/registry"
 )
@@ -24,6 +25,9 @@ var (
 // caller already holds the target's producer lock, so pull uses the locked
 // transport entry point and installs atomically into the final pathname.
 func (b *BuildObject) tryPrebuilt(ctx context.Context) (prebuiltResult, error) {
+	if config.Global.Build.SkipPrebuilt {
+		return false, nil
+	}
 	if b.catalogSource == nil || b.catalogSource.DescriptorErr != nil || len(b.catalogSource.Desc.OCI.Pull) == 0 {
 		return false, nil
 	}

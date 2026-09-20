@@ -380,7 +380,7 @@ launch is a fresh container, so one started from inside a container is provided 
   overlays the user asked for.
 - **The build runs before a job is submitted.** `run` builds a missing overlay ahead of the scheduler
   block, on the host that ran the command, where the network is; the job only looks the overlay up.
-  It builds locally whatever `build.always_submit` says, as the default base image does.
+  It builds locally whatever `build.always_submit_data` says, as the default base image does.
 
 ## GPU Detection
 

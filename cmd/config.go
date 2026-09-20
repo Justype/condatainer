@@ -27,33 +27,33 @@ var (
 // configKeyDefs maps every known config key to whether it holds a string slice (array).
 // true = array key (use append/prepend/remove); false = scalar key (use set).
 var configKeyDefs = map[string]bool{
-	"logs_dir":               false,
-	"default_distro":         false,
-	"submit_job":             false,
-	"sources":                true,
-	"autoload_gpu":           false,
-	"nested_run":             false,
-	"notification":           false,
-	"metadata_cache_ttl":     false,
-	"store_gc_grace":         false,
-	"proxy_perjob":           false,
-	"helper_bind_all":        false,
-	"build.system_apptainer": false,
-	"build.ncpus":            false,
-	"build.mem":              false,
-	"build.time":             false,
-	"build.compress_args":    false,
-	"build.block_size":       false,
-	"build.data_block_size":  false,
-	"build.always_submit":    false,
-	"scheduler.bin":          false,
-	"scheduler.timeout":      false,
-	"scheduler.account":      false,
-	"scheduler.partition":    false,
-	"scheduler.ncpus":        false,
-	"scheduler.mem":          false,
-	"scheduler.time":         false,
-	"channels":               true,
+	"logs_dir":                 false,
+	"default_distro":           false,
+	"submit_job":               false,
+	"sources":                  true,
+	"autoload_gpu":             false,
+	"nested_run":               false,
+	"notification":             false,
+	"metadata_cache_ttl":       false,
+	"store_gc_grace":           false,
+	"proxy_perjob":             false,
+	"helper_bind_all":          false,
+	"build.system_apptainer":   false,
+	"build.ncpus":              false,
+	"build.mem":                false,
+	"build.time":               false,
+	"build.compress_args":      false,
+	"build.block_size":         false,
+	"build.data_block_size":    false,
+	"build.always_submit_data": false,
+	"scheduler.bin":            false,
+	"scheduler.timeout":        false,
+	"scheduler.account":        false,
+	"scheduler.partition":      false,
+	"scheduler.ncpus":          false,
+	"scheduler.mem":            false,
+	"scheduler.time":           false,
+	"channels":                 true,
 }
 
 func isArrayKey(key string) bool { return configKeyDefs[key] }
@@ -61,7 +61,7 @@ func isArrayKey(key string) bool { return configKeyDefs[key] }
 func isBoolKey(key string) bool {
 	switch key {
 	case "submit_job", "proxy_perjob", "helper_bind_all", "autoload_gpu",
-		"build.always_submit":
+		"build.always_submit_data":
 		return true
 	}
 	return false
@@ -226,7 +226,7 @@ func configValueCompletion(key string) []string {
 		return config.CompressNames()
 	case "build.block_size", "build.data_block_size":
 		return config.BlockSizeCompletions
-	case "build.always_submit":
+	case "build.always_submit_data":
 		return []string{"true", "false"}
 	case "scheduler.ncpus":
 		return []string{"1", "2", "4", "8"}
@@ -494,8 +494,8 @@ var configShowCmd = &cobra.Command{
 		fmt.Printf("%s %s\n", utils.StyleTitle("Build Configuration:"), "build.*")
 		fmt.Printf("  %-21s %s%s\n", "system_apptainer:", config.Global.Build.SystemApptainer, srcTag("build.system_apptainer"))
 		printOverridden("                        ", "build.system_apptainer")
-		fmt.Printf("  %-21s %v%s\n", "always_submit:", config.Global.Build.AlwaysSubmit, srcTag("build.always_submit"))
-		printOverridden("                        ", "build.always_submit")
+		fmt.Printf("  %-21s %v%s\n", "always_submit_data:", config.Global.Build.AlwaysSubmitData, srcTag("build.always_submit_data"))
+		printOverridden("                        ", "build.always_submit_data")
 		fmt.Printf("  %-21s %d%s\n", "ncpus:", config.Global.Build.Defaults.CpusPerTask, srcTag("build.ncpus"))
 		printOverridden("                        ", "build.ncpus")
 		fmt.Printf("  %-21s %s%s\n", "mem:", utils.FormatMemoryMB(config.Global.Build.Defaults.MemPerNodeMB), srcTag("build.mem"))
@@ -895,9 +895,7 @@ Without -l, the layer is chosen from the install layout:
 		}
 
 		// Detect the two host-specific keys: build.system_apptainer, scheduler.bin.
-		// build.compress_args is not detected — every artifact is always
-		// zstd-medium, unconditionally (config.LoadDefaults) — but is still
-		// written explicitly so it shows plainly in the generated file.
+		// Compression is not written: the default (zstd-medium) stands until set.
 		detectedApptainerBin := config.FindApptainerBin()
 		if detectedApptainerBin == "" {
 			ExitWithError("Neither 'apptainer' nor 'singularity' binary found (checked PATH and 'module avail').")
@@ -909,10 +907,7 @@ Without -l, the layer is chosen from the install layout:
 			viper.Set("scheduler.bin", detectedSchedulerBin)
 		}
 
-		detectedCompression := config.Global.Build.CompressArgs
-		viper.Set("build.compress_args", detectedCompression)
-
-		if err := config.SaveMinimalConfigTo(configPath, detectedApptainerBin, detectedSchedulerBin, detectedCompression, lowerLayersFor(layerType)); err != nil {
+		if err := config.SaveMinimalConfigTo(configPath, detectedApptainerBin, detectedSchedulerBin, lowerLayersFor(layerType)); err != nil {
 			ExitWithError("Failed to save config: %v", err)
 		}
 
@@ -936,7 +931,6 @@ Without -l, the layer is chosen from the install layout:
 		} else {
 			fmt.Printf("  Scheduler: %s\n", utils.StyleWarning("not found"))
 		}
-		fmt.Printf("  Compression: %s\n", detectedCompression)
 	},
 }
 

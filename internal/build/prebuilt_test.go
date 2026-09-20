@@ -11,6 +11,7 @@ import (
 
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/artifact/meta"
+	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/registry"
 )
 
@@ -101,5 +102,25 @@ func TestTryPrebuiltFallsBackWhenEndpointsUnavailable(t *testing.T) {
 
 	if pulled, err := b.tryPrebuilt(t.Context()); err != nil || pulled {
 		t.Fatalf("result=%v error=%v", pulled, err)
+	}
+}
+
+// --no-prebuilt reaches no registry: nothing is resolved and the build carries on.
+func TestTryPrebuiltSkippedByNoPrebuilt(t *testing.T) {
+	b := prebuiltObject(t, []byte("echo demo\n"), "origin.invalid/lab")
+
+	oldResolve := resolvePrebuilt
+	t.Cleanup(func() { resolvePrebuilt = oldResolve })
+	resolvePrebuilt = func(context.Context, string, string, string) (ocispec.Descriptor, map[string]string, error) {
+		t.Error("a registry was consulted under --no-prebuilt")
+		return ocispec.Descriptor{}, nil, registry.ErrNotFound
+	}
+	prev := config.Global.Build.SkipPrebuilt
+	config.Global.Build.SkipPrebuilt = true
+	t.Cleanup(func() { config.Global.Build.SkipPrebuilt = prev })
+
+	got, err := b.tryPrebuilt(t.Context())
+	if err != nil || got != prebuiltResult(false) {
+		t.Fatalf("result=%v err=%v, want a local build", got, err)
 	}
 }

@@ -47,9 +47,15 @@ type ScriptSpecs = scheduler.ScriptSpecs
 // BuildObject holds all state and implements all build operations.
 type BuildObject struct {
 	buildSource string
-	submitJob   bool // Whether to submit to scheduler (from config at construction time)
-	tempSource  bool // Whether buildSource is a temp file this object wrote
-	update      bool // If true, rebuild even if overlay already exists (atomic .new swap)
+	// submitJob is whether the build may go to the scheduler. A job re-runs
+	// `create`, so a build has it only when the command can be reproduced: a
+	// catalog name, or the file and target of an external script (SetJobArgs).
+	submitJob bool
+	// jobArgs are the create arguments that reproduce this build when it is not
+	// named by the catalog.
+	jobArgs    []string
+	tempSource bool // Whether buildSource is a temp file this object wrote
+	update     bool // If true, rebuild even if overlay already exists (atomic .new swap)
 	// storeOverflow files the finished build under its identity instead of the
 	// bare name, so a second build of a name is kept beside the first rather
 	// than skipped. Set per object: it is what the user asked to build, never
@@ -180,6 +186,24 @@ func (b *BuildObject) Update() bool              { return b.update }
 // name. See the storeOverflow field.
 func (b *BuildObject) SetStoreOverflow(v bool) { b.storeOverflow = v }
 
+// SetJobArgs makes an external shell script submittable: args are the create
+// arguments that rebuild it, such as --name n --file f, and replace the name a
+// catalog build is re-run by. A definition or any other kind of build stays local.
+func (b *BuildObject) SetJobArgs(args []string) {
+	if b.buildType != BuildTypeScript || len(args) == 0 {
+		return
+	}
+	b.jobArgs, b.submitJob = args, config.Global.SubmitJob
+}
+
+// jobTarget is what a submitted create command names the build by.
+func (b *BuildObject) jobTarget() []string {
+	if len(b.jobArgs) > 0 {
+		return b.jobArgs
+	}
+	return []string{b.spec.Image.Name}
+}
+
 // StoreOverflow reports whether this build is filed by identity.
 func (b *BuildObject) StoreOverflow() bool    { return b.storeOverflow }
 func (b *BuildObject) BuildType() BuildType   { return b.buildType }
@@ -287,7 +311,11 @@ func (b *BuildObject) setCondaSpec() {
 }
 
 func (b *BuildObject) RequiresScheduler() bool {
-	return b.submitJob && (config.Global.Build.AlwaysSubmit || scheduler.HasSchedulerSpecs(b.scriptSpecs))
+	if !b.submitJob {
+		return false
+	}
+	return scheduler.HasSchedulerSpecs(b.scriptSpecs) ||
+		(config.Global.Build.AlwaysSubmitData && b.spec.Image.Type == catalog.TypeData)
 }
 
 // BuildLockInfo holds metadata stored inside a build lock file.
@@ -719,6 +747,17 @@ func (b *BuildObject) resolveResourceSpec() error {
 // Format: "name/version" for conda/shell, "name" for def, "prefix/name/version" for ref
 // All overlays are stored in imagesDir regardless of type
 func NewBuildObject(ctx context.Context, nameVersion string, external bool, imagesDir string, update bool) (*BuildObject, error) {
+	return newBuildObject(ctx, nameVersion, external, imagesDir, update, false)
+}
+
+// NewStoreBuildObject is NewBuildObject for a build filed by identity. It is
+// resolved even when the bare name is installed, since a second build of that
+// name is the point.
+func NewStoreBuildObject(ctx context.Context, nameVersion string, imagesDir string, update bool) (*BuildObject, error) {
+	return newBuildObject(ctx, nameVersion, false, imagesDir, update, true)
+}
+
+func newBuildObject(ctx context.Context, nameVersion string, external bool, imagesDir string, update, store bool) (*BuildObject, error) {
 	normalized := catalog.Normalize(nameVersion)
 
 	// Handle channel annotation (e.g. "bioconda::star/2.7.11b"):
@@ -770,6 +809,7 @@ func NewBuildObject(ctx context.Context, nameVersion string, external bool, imag
 		tgt:             targetFor(targetOverlay),
 		submitJob:       config.Global.SubmitJob,
 		update:          update,
+		storeOverflow:   store,
 		condaChannelPkg: condaChannelPkg,
 	}
 
@@ -778,9 +818,9 @@ func NewBuildObject(ctx context.Context, nameVersion string, external bool, imag
 		return createConcreteType(ctx, base, tmpDir)
 	}
 
-	// Already installed: skip resolving the concrete type. Not in update mode,
-	// where the type has to be resolved to rebuild it.
-	if !update && base.IsInstalled() {
+	// Already installed: skip resolving the concrete type. Not in update or store
+	// mode, where the type has to be resolved to build.
+	if !update && !store && base.IsInstalled() {
 		base.buildType = BuildTypeScript
 		return base, nil
 	}
@@ -823,7 +863,6 @@ func NewCondaObjectWithSource(nameVersion, buildSource, imagesDir string, update
 		ws:          ws,
 		tgt:         targetFor(targetOverlay),
 		buildSource: buildSource,
-		submitJob:   config.Global.SubmitJob,
 		update:      update,
 	}
 
@@ -945,7 +984,6 @@ func FromExternalSource(ctx context.Context, targetPrefix, source string, isAppt
 		ws:          ws,
 		tgt:         targetFor(targetPrefix + ".sqf"),
 		buildSource: source,
-		submitJob:   config.Global.SubmitJob,
 		update:      update,
 	}
 
@@ -1077,8 +1115,9 @@ func resolveBuildSource(ctx context.Context, base *BuildObject, tmpDir string) (
 	}
 
 	// Nothing to materialize for an overlay that already exists and is not
-	// being updated — dependency walks reach installed nodes routinely.
-	if !base.update && base.IsInstalled() {
+	// being updated — dependency walks reach installed nodes routinely. A store
+	// build is filed beside it, so it needs the recipe.
+	if !base.update && !base.storeOverflow && base.IsInstalled() {
 		slog.Default().Debug("target already exists, skipping recipe fetch", "name", base.spec.Image.Name)
 		return false, isContainer, nil
 	}

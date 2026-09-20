@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -28,7 +29,15 @@ type BuildGraph struct {
 	imagesDir  string
 	submitJobs bool // Whether to actually submit scheduler jobs
 	update     bool // If true, rebuild all overlays even if already installed
+
+	// jobFlags are the create flags that change what a build produces or where it
+	// lands, repeated on every submitted job's command line.
+	jobFlags []string
 }
+
+// SetJobFlags sets the flags every submitted job's create command carries, as
+// separate arguments.
+func (bg *BuildGraph) SetJobFlags(flags []string) { bg.jobFlags = flags }
 
 // NewBuildGraph creates a BuildGraph from a list of BuildObjects
 // All overlays are stored in imagesDir regardless of type
@@ -64,9 +73,10 @@ func NewBuildGraph(ctx context.Context, buildObjects []*BuildObject, imagesDir s
 	for _, obj := range buildObjects {
 		bg.graph[obj.NameVersion()] = obj
 		roots = append(roots, obj.NameVersion())
-		if update {
-			// A root being rebuilt must resolve as missing, or the walk stops
-			// at it and never reaches what it needs.
+		if update || obj.StoreOverflow() {
+			// A root being rebuilt, or filed beside the installed name, must
+			// resolve as missing, or the walk stops at it and never reaches what
+			// it needs.
 			hidden[obj.NameVersion()] = true
 		} else if obj.IsInstalled() {
 			log.Info("overlay already installed, skipping", "name", obj.NameVersion())
@@ -212,10 +222,16 @@ func (bg *BuildGraph) Run(ctx context.Context) error {
 	return nil
 }
 
+// installedAlready reports whether a build has nothing to do because its name is
+// installed. A store build is filed beside the installed name, so it never has.
+func (bg *BuildGraph) installedAlready(obj *BuildObject) bool {
+	return !bg.update && !obj.StoreOverflow() && obj.IsInstalled()
+}
+
 // runLocalStep executes builds that don't require scheduler
 func (bg *BuildGraph) runLocalStep(ctx context.Context) error {
 	for _, obj := range bg.localBuilds {
-		if !bg.update && obj.IsInstalled() {
+		if bg.installedAlready(obj) {
 			continue
 		}
 		logging.FromContext(ctx).Debug("processing overlay (local build)", "name", obj.NameVersion())
@@ -233,7 +249,7 @@ func (bg *BuildGraph) runSchedulerStep() error {
 	}
 
 	for _, obj := range bg.schedulerBuilds {
-		if !bg.update && obj.IsInstalled() {
+		if bg.installedAlready(obj) {
 			continue
 		}
 		logging.FromContext(bg.ctx).Debug("processing overlay (scheduler job)", "name", obj.NameVersion())
@@ -311,7 +327,7 @@ func (bg *BuildGraph) submitJob(obj *BuildObject, depIDs []string) (string, erro
 		return "", err
 	}
 
-	// Get script specs; when always_submit forces submission without directives, synthesize empty specs
+	// Get script specs; when always_submit_data forces submission without directives, synthesize empty specs
 	specs := obj.ScriptSpecs()
 	if specs == nil {
 		effRS := EffectiveResourceSpec(nil)
@@ -335,7 +351,7 @@ func (bg *BuildGraph) submitJob(obj *BuildObject, depIDs []string) (string, erro
 	// Create job specification
 	jobSpec := &scheduler.JobSpec{
 		Name:           obj.NameVersion(),
-		Command:        buildSchedulerCreateCommand(obj.NameVersion(), bg.update, obj.InputAnswers()),
+		Command:        buildSchedulerCreateCommand(obj.jobTarget(), bg.jobFlags, bg.update, obj.StoreOverflow(), config.Global.Build.SkipPrebuilt, obj.InputAnswers()),
 		Specs:          specs,
 		DepJobIDs:      depIDs,
 		OverrideOutput: true,
@@ -372,17 +388,42 @@ func (bg *BuildGraph) submitJob(obj *BuildObject, depIDs []string) (string, erro
 	return jobID, nil
 }
 
+// plainToken matches an argument that needs no quoting in the job script.
+var plainToken = regexp.MustCompile(`^[A-Za-z0-9_./:=+@%-]+$`)
+
+// jobToken renders one argument of the job's create command, quoted unless it is
+// plainly safe: a name, a path or a flag.
+func jobToken(arg string) string {
+	if plainToken.MatchString(arg) {
+		return arg
+	}
+	return shellQuote(arg)
+}
+
 // buildSchedulerCreateCommand returns the condatainer create command for a
-// scheduler job, propagating --update and embedding any input answers as a
-// heredoc so the node needs no TTY.
-func buildSchedulerCreateCommand(nameVersion string, update bool, inputAnswers []string) string {
+// scheduler job, naming the build by target (a catalog name, or the arguments of
+// an external script), and propagating flags, --update, --store and --no-prebuilt and
+// embedding any input answers as a heredoc so the node needs no TTY.
+func buildSchedulerCreateCommand(target, flags []string, update, store, noPrebuilt bool, inputAnswers []string) string {
 	var cmd strings.Builder
 	cmd.WriteString("condatainer create")
+	for _, flag := range flags {
+		cmd.WriteString(" ")
+		cmd.WriteString(jobToken(flag))
+	}
 	if update {
 		cmd.WriteString(" --update")
 	}
-	cmd.WriteString(" ")
-	cmd.WriteString(nameVersion)
+	if store {
+		cmd.WriteString(" --store")
+	}
+	if noPrebuilt {
+		cmd.WriteString(" --no-prebuilt")
+	}
+	for _, token := range target {
+		cmd.WriteString(" ")
+		cmd.WriteString(jobToken(token))
+	}
 	if len(inputAnswers) > 0 {
 		cmd.WriteString(" << 'CNT_INPUTS_EOF'")
 		for _, input := range inputAnswers {

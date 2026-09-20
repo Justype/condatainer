@@ -716,3 +716,25 @@ func TestInfoVerifyRefusesAnythingButASquashFS(t *testing.T) {
 		t.Errorf("error = %v", err)
 	}
 }
+
+// A submitted job re-runs create from the name alone, so everything that changes
+// what it builds or where it lands travels as a flag; submission and mode flags
+// do not.
+func TestCreateJobFlagsCarryWhatChangesTheBuild(t *testing.T) {
+	saved := []any{createChannels, createSources, createLayer, createBlockSize, createDataBlockSize, createAlwaysSubmitData, createUpdate}
+	t.Cleanup(func() {
+		createChannels, createSources = saved[0].([]string), saved[1].([]string)
+		createLayer, createBlockSize, createDataBlockSize = saved[2].(string), saved[3].(string), saved[4].(string)
+		createAlwaysSubmitData, createUpdate = saved[5].(bool), saved[6].(bool)
+	})
+	createChannels = []string{"conda-forge", "bioconda"}
+	createSources = []string{"lab"}
+	createLayer, createBlockSize, createDataBlockSize = "u", "256k", "1m"
+	createAlwaysSubmitData, createUpdate = true, true
+
+	got := strings.Join(createJobFlags(), " ")
+	want := "--channel conda-forge --channel bioconda --source lab --layer u --block-size 256k --data-block-size 1m"
+	if got != want {
+		t.Errorf("flags = %q, want %q", got, want)
+	}
+}

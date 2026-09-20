@@ -25,18 +25,19 @@ import (
 
 // Variables to hold flag values
 var (
-	createName          string
-	createPrefix        string
-	createFile          string
-	createFrom          string
-	createBlockSize     string
-	createDataBlockSize string
-	createChannels      []string
-	createSources       []string
-	createUpdate        bool
-	createStore         bool
-	createLayer         string
-	createAlwaysSubmit  bool
+	createName             string
+	createPrefix           string
+	createFile             string
+	createFrom             string
+	createBlockSize        string
+	createDataBlockSize    string
+	createChannels         []string
+	createSources          []string
+	createUpdate           bool
+	createStore            bool
+	createNoPrebuilt       bool
+	createLayer            string
+	createAlwaysSubmitData bool
 
 	// compression flags are generated dynamically from config.CompressOptions
 	compFlags     map[string]*bool
@@ -45,7 +46,7 @@ var (
 	// buildFlagNames is the set of flags shown under "Build Flags:" in help.
 	buildFlagNames = map[string]bool{
 		"block-size":      true,
-		"data-block-size": true, "always-submit": true, "no-submit": true, "store": true,
+		"data-block-size": true, "always-submit-data": true, "no-submit": true, "store": true, "no-prebuilt": true,
 	}
 )
 
@@ -66,6 +67,35 @@ func compressArgsFromFlags(flags map[string]*bool) (string, error) {
 		return "", nil
 	}
 	return config.ArgsForCompress(selected), nil
+}
+
+// createJobFlags are the flags a submitted build has to repeat: the node re-runs
+// create from the name alone, so anything that changes what is built or where it
+// lands has to travel with it. Submission and mode flags are left out — the job
+// is the submission, and it builds by name.
+func createJobFlags() []string {
+	var flags []string
+	for _, channel := range createChannels {
+		flags = append(flags, "--channel", channel)
+	}
+	for _, source := range createSources {
+		flags = append(flags, "--source", source)
+	}
+	if createLayer != "" {
+		flags = append(flags, "--layer", createLayer)
+	}
+	if createBlockSize != "" {
+		flags = append(flags, "--block-size", createBlockSize)
+	}
+	if createDataBlockSize != "" {
+		flags = append(flags, "--data-block-size", createDataBlockSize)
+	}
+	for _, opt := range config.CompressOptions {
+		if ptr := compFlags[opt.Name]; ptr != nil && *ptr {
+			flags = append(flags, "--"+opt.Name)
+		}
+	}
+	return flags
 }
 
 var createCmd = &cobra.Command{
@@ -174,9 +204,12 @@ Submitted build jobs exit with code 3 (useful for scripts).`,
 			}
 		}
 
-		// 7b. Handle --always-submit flag
-		if createAlwaysSubmit {
-			config.Global.Build.AlwaysSubmit = true
+		// 7b. Handle --always-submit-data
+		if createNoPrebuilt {
+			config.Global.Build.SkipPrebuilt = true
+		}
+		if createAlwaysSubmitData {
+			config.Global.Build.AlwaysSubmitData = true
 		}
 
 		// 8. Announce update mode
@@ -221,8 +254,9 @@ func init() {
 		"Use only this configured recipe source, in flag order (repeatable)")
 	f.BoolVarP(&createUpdate, "update", "u", false, "Rebuild overlays even if they already exist")
 	f.BoolVar(&createStore, "store", false, "Build into the store, filed under its identity")
+	f.BoolVar(&createNoPrebuilt, "no-prebuilt", false, "Build from the recipe instead of pulling a prebuilt artifact")
 	f.StringVarP(&createLayer, "layer", "l", "", "Build into this data layer: u/user, r/app-root, e/extra-root")
-	f.BoolVar(&createAlwaysSubmit, "always-submit", false, "Submit all builds as scheduler jobs, even no directives")
+	f.BoolVar(&createAlwaysSubmitData, "always-submit-data", false, "Submit data builds as scheduler jobs, even without directives")
 	f.BoolVar(&noSubmitMode, "no-submit", false, "Disable job submission (build locally)")
 
 	// Compression flags: create a bool flag for each known option
@@ -587,7 +621,13 @@ func runCreatePackages(ctx context.Context, packages []string) {
 			}
 		}
 
-		bo, err := build.NewBuildObject(ctx, pkg, false, imagesDir, createUpdate)
+		var bo *build.BuildObject
+		var err error
+		if createStore {
+			bo, err = build.NewStoreBuildObject(ctx, pkg, imagesDir, createUpdate)
+		} else {
+			bo, err = build.NewBuildObject(ctx, pkg, false, imagesDir, createUpdate)
+		}
 		if err != nil {
 			ExitWithError("Failed to create build object for %s: %v", pkg, err)
 		}
@@ -600,6 +640,7 @@ func runCreatePackages(ctx context.Context, packages []string) {
 	if err != nil {
 		ExitWithError("Failed to create build graph: %v", err)
 	}
+	graph.SetJobFlags(createJobFlags())
 
 	if err := graph.Run(ctx); err != nil {
 		exitOnBuildError(err)
@@ -675,19 +716,22 @@ func applyStoreOverflow(bo *build.BuildObject) {
 }
 
 // buildExternalSource builds one script or definition into targetPrefix, exiting
-// on failure. outputDir holds the image and its scratch space.
-func buildExternalSource(ctx context.Context, targetPrefix, source string, isApptainer bool, outputDir string) {
+// on failure. outputDir holds the image and its scratch space. jobArgs are the
+// create arguments that rebuild it, for a script that a scheduler job is to run.
+func buildExternalSource(ctx context.Context, targetPrefix, source string, isApptainer bool, outputDir string, jobArgs []string) {
 	bo, err := build.FromExternalSource(ctx, targetPrefix, source, isApptainer, outputDir, createUpdate)
 	if err != nil {
 		ExitWithError("Failed to create build object from %s: %v", source, err)
 	}
 	applyStoreOverflow(bo)
+	bo.SetJobArgs(jobArgs)
 
 	graph, err := build.NewBuildGraph(ctx, []*build.BuildObject{bo}, outputDir,
 		config.Global.SubmitJob, createUpdate)
 	if err != nil {
 		ExitWithError("Failed to create build graph: %v", err)
 	}
+	graph.SetJobFlags(createJobFlags())
 
 	if err := graph.Run(ctx); err != nil {
 		exitOnBuildError(err)
@@ -733,7 +777,8 @@ func runCreateWithName(ctx context.Context, packages []string) {
 		if isForeignRoot(createFile) {
 			buildForeignSource(ctx, targetPrefix, absFile, imagesDir)
 		} else {
-			buildExternalSource(ctx, targetPrefix, absFile, strings.HasSuffix(createFile, ".def"), imagesDir)
+			buildExternalSource(ctx, targetPrefix, absFile, strings.HasSuffix(createFile, ".def"), imagesDir,
+				[]string{"--name", createName, "--file", absFile})
 		}
 		return
 	}
@@ -794,7 +839,8 @@ func runCreateWithPrefix(ctx context.Context) {
 	} else if isExternalBuildFile(createFile) {
 		// Shell script or apptainer def file
 		absFile, _ := filepath.Abs(createFile)
-		buildExternalSource(ctx, absPrefix, absFile, strings.HasSuffix(createFile, ".def"), outputDir)
+		buildExternalSource(ctx, absPrefix, absFile, strings.HasSuffix(createFile, ".def"), outputDir,
+			[]string{"--prefix", absPrefix, "--file", absFile})
 	} else {
 		ExitWithError("File must be .yml, .yaml, .txt, .sh, .bash, .def, .sif, or a sandbox directory")
 	}
@@ -851,7 +897,7 @@ func runCreateFromSource(ctx context.Context) {
 
 	utils.PrintMessage("Creating overlay %s from %s", filepath.Base(targetOverlayPath), utils.StylePath(source))
 
-	buildExternalSource(ctx, targetPrefix, source, isApptainer, imagesDir)
+	buildExternalSource(ctx, targetPrefix, source, isApptainer, imagesDir, nil)
 }
 
 func exitOnBuildError(err error) {

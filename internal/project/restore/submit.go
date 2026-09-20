@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/artifact/meta"
 	"github.com/Justype/condatainer/internal/build"
 	"github.com/Justype/condatainer/internal/config"
@@ -122,16 +123,23 @@ func planJobs(ctx context.Context, root string, verified *lock.Verified, plan *P
 			continue
 		}
 		j.specs[step.Artifact] = specs
-		needs[stepKey(step)] = config.Global.Build.AlwaysSubmit || scheduler.HasSchedulerSpecs(specs)
+		needs[stepKey(step)] = callsForJob(entry.Manifest.Type, specs)
 	}
 
 	j.submit, j.deferred = partition(plan.Steps, needs, transient)
 	return j
 }
 
+// callsForJob reports whether a rebuild of this type is a scheduler job by itself:
+// its recipe carries directives, or it is data and build.always_submit_data is set.
+func callsForJob(typ catalog.Type, specs *scheduler.ScriptSpecs) bool {
+	return scheduler.HasSchedulerSpecs(specs) ||
+		(config.Global.Build.AlwaysSubmitData && typ == catalog.TypeData)
+}
+
 // partition splits a plan into the steps the scheduler runs (submit) and the
 // build dependencies a submitted job produces instead of this process (deferred).
-// needs says which steps declare scheduler directives of their own.
+// needs says which steps call for a job of their own (callsForJob).
 //
 // The split cannot be made step by step while executing. A build dependency comes
 // before its dependent in the order, and whether it runs here or inside that
