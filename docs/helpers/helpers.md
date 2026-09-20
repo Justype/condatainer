@@ -110,6 +110,8 @@ If you want the server to survive logout, start it with `--daemon`:
 ```bash
 condatainer server start --daemon
 ```
+
+`server start`, `stop` and `restart` only run on the login node; inside a container or a scheduler job they refuse.
 ````
 
 ## Managing Helpers

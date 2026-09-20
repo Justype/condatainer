@@ -68,6 +68,7 @@ func RunDaemon(port int, reportPipe *os.File, watchPID int) error {
 	})))
 
 	logger := logging.FromContext(ctx)
+	slog.SetDefault(logger) // the tunnel code logs each method's attempt through slog.Default()
 	s := &srv{
 		port:      actualPort,
 		startTime: time.Now(),

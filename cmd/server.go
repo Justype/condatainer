@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/server"
 	"github.com/Justype/condatainer/internal/utils"
 	"github.com/spf13/cobra"
@@ -27,7 +28,26 @@ The server runs on the login node and provides:
   - Reverse proxy to helper apps running on compute nodes 
   - Live log streaming
 
-The port is persisted after the first start.`,
+The port is persisted after the first start.
+
+start, stop and restart run on the login node; they cannot run inside a
+container or a scheduler job.`,
+}
+
+// requireLoginNode refuses the commands that start or stop the server inside a
+// container or a scheduler job: the server belongs to the login node.
+func requireLoginNode(cmd *cobra.Command) error {
+	var where string
+	switch {
+	case config.IsInsideContainer():
+		where = "a container"
+	case scheduler.IsInsideJob():
+		where = "a scheduler job"
+	default:
+		return nil
+	}
+	cmd.SilenceUsage = true
+	return fmt.Errorf("server %s cannot run inside %s; run it on the login node", cmd.Name(), where)
 }
 
 var (
@@ -44,6 +64,9 @@ var serverStartCmd = &cobra.Command{
 By default the server exits when your SSH session ends; use --daemon to keep it running.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true
+		if err := requireLoginNode(cmd); err != nil {
+			return err
+		}
 
 		port := serverStartPort
 		if port != 0 {
@@ -90,6 +113,9 @@ Pass a node name (or partial match) to stop a server on another login node.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true
+		if err := requireLoginNode(cmd); err != nil {
+			return err
+		}
 
 		nodePattern := serverStopNodeFlag
 		if nodePattern == "" && len(args) > 0 {
@@ -207,6 +233,9 @@ var serverRestartCmd = &cobra.Command{
 	Short: "Restart the dashboard server (stop + start)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true
+		if err := requireLoginNode(cmd); err != nil {
+			return err
+		}
 
 		pidFile := config.GetServerPidFilePath()
 		ss, err := server.ReadState(pidFile)
