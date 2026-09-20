@@ -196,7 +196,7 @@ The Go runner injects these before your script runs:
 
 ### `condatainer _server_ready`
 
-Call once the service is accepting connections. Writes the state file the CLI monitor and dashboard read; until it lands, the session shows as `[STARTING]`.
+Call once the service has been started. It waits up to `--wait` seconds (default 60; `0` skips the wait) for `--port` to accept connections, then writes the state file the CLI monitor and dashboard read; until it lands, the session shows as `[STARTING]`. If the port never opens, it reports ready anyway and writes a warning to the job log. The wait is skipped for `--external-url`.
 
 ```bash
 # Standard service (port-based)

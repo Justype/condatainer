@@ -578,11 +578,14 @@ func buildHelperCommandBody(id, name, cwd, scriptDir, stateDir string, walltime 
 	// defers a trap while a foreground command runs, so a scheduler's SIGTERM
 	// would never reach it. The trap forwards TERM to the container and the loop
 	// keeps waiting, so the container exits (and unmounts its images) before the
-	// wrapper does.
+	// wrapper does. The trap is armed before the launch, and a TERM that lands
+	// before the container has a pid is forwarded right after it starts.
+	fmt.Fprintln(&sb, `_cnt_child=`)
+	fmt.Fprintln(&sb, `_cnt_stopped=0`)
+	fmt.Fprintln(&sb, `trap '_cnt_stopped=1; [ -n "$_cnt_child" ] && kill -TERM $_cnt_child 2>/dev/null' TERM INT`)
 	fmt.Fprintf(&sb, "%s &\n", containerCmd)
 	fmt.Fprintln(&sb, `_cnt_child=$!`)
-	fmt.Fprintln(&sb, `_cnt_stopped=0`)
-	fmt.Fprintln(&sb, `trap '_cnt_stopped=1; kill -TERM $_cnt_child 2>/dev/null' TERM INT`)
+	fmt.Fprintln(&sb, `[ $_cnt_stopped = 1 ] && kill -TERM $_cnt_child 2>/dev/null`)
 	fmt.Fprintln(&sb, `while :; do`)
 	fmt.Fprintln(&sb, `  wait $_cnt_child`)
 	fmt.Fprintln(&sb, `  _cnt_exit=$?`)

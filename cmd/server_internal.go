@@ -1,10 +1,12 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/Justype/condatainer/internal/helper"
 	"github.com/Justype/condatainer/internal/server"
@@ -29,6 +31,7 @@ var (
 	serverReadyURLPath     string
 	serverReadyExternalURL string
 	serverReadyJobID       string
+	serverReadyWait        int
 )
 
 var serverReadyCmd = &cobra.Command{
@@ -56,6 +59,14 @@ var serverReadyCmd = &cobra.Command{
 			jobID = os.Getenv("CNT_HELPER_JOB_ID")
 		}
 
+		if serverReadyPort > 0 && serverReadyExternalURL == "" && serverReadyWait > 0 {
+			timeout := time.Duration(serverReadyWait) * time.Second
+			if !waitForPort(cmd.Context(), serverReadyPort, timeout) {
+				fmt.Fprintf(os.Stderr, "warning: port %d is not accepting connections after %s; reporting ready anyway\n",
+					serverReadyPort, timeout)
+			}
+		}
+
 		ev := helper.StateEvent{
 			Type:        "ready",
 			Port:        serverReadyPort,
@@ -79,6 +90,28 @@ func init() {
 	serverReadyCmd.Flags().StringVar(&serverReadyURLPath, "url-path", "", "URL path/query appended to proxy URL")
 	serverReadyCmd.Flags().StringVar(&serverReadyExternalURL, "external-url", "", "External URL shown as-is")
 	serverReadyCmd.Flags().StringVar(&serverReadyJobID, "job-id", "", "Scheduler job ID")
+	serverReadyCmd.Flags().IntVar(&serverReadyWait, "wait", 60, "Seconds to wait for the port to accept connections before reporting ready (0 = don't wait)")
+}
+
+// waitForPort polls 127.0.0.1:port until it accepts a connection, timeout
+// passes, or ctx ends, and reports whether it connected.
+func waitForPort(ctx context.Context, port int, timeout time.Duration) bool {
+	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+	deadline := time.Now().Add(timeout)
+	for {
+		if conn, err := net.DialTimeout("tcp", addr, time.Second); err == nil {
+			conn.Close() //nolint:errcheck
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
 }
 
 // ── _server_message ────────────────────────────────────────────────────────

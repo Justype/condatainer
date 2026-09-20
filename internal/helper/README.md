@@ -306,8 +306,9 @@ long to exit before it is killed. The value stays inside the scheduler's own TER
 is what ends the job when the container ignores TERM. Killing a writable image's `fuse2fs` mount leaves
 the image needing recovery, so nothing in the wrapper kills the container before that delay expires.
 
-Until the container has started there is nothing to forward to, so an earlier trap records `done` and
-cleans up directly.
+Until the container is launched there is nothing to forward to, so an earlier trap records `done` and
+cleans up directly. The forwarding trap is armed just before the launch, and a stop that lands before the
+container has a pid is forwarded as soon as it has one.
 
 ## NFS State Files
 
@@ -355,18 +356,20 @@ Scripts call these condatainer subcommands from inside the container:
 
 ### `condatainer _server_ready`
 
-Writes the `ready` file and appends to JSONL history.
+Writes the `ready` file and appends to JSONL history. Before writing it, waits up to `--wait` seconds
+(default 60) for `--port` to accept connections on `127.0.0.1`, so `ready` means the service is listening
+and not merely launched: scripts start the service in the background and call this on the next line. The
+timeout keeps a service that never binds from hanging the script; it reports ready anyway, with a warning
+in `job.log`. `--port 0` and `--external-url` have no local port to wait for.
 
 ```bash
 condatainer _server_ready \
     --port "$CNT_HELPER_PORT" \
-    --label "Jupyter Lab" \
     --url-path "?token=$TOKEN"
 
 # For external-URL services (no port forwarding):
 condatainer _server_ready \
     --port 0 \
-    --label "VS Code Tunnel: $MACHINE_NAME" \
     --external-url "https://vscode.dev/tunnel/$MACHINE_NAME$CNT_HELPER_CWD"
 ```
 
@@ -408,9 +411,7 @@ my-service \
     --bind 127.0.0.1:"$CNT_HELPER_PORT" &
 PID=$!
 
-condatainer _server_ready \
-    --port "$CNT_HELPER_PORT" \
-    --label "My Custom Service ($MODE)"
+condatainer _server_ready --port "$CNT_HELPER_PORT"
 
 wait $PID
 ```
@@ -430,7 +431,7 @@ wait $PID
 my-app --port "$CNT_HELPER_PORT" &
 PID=$!
 
-condatainer _server_ready --port "$CNT_HELPER_PORT" --label "My App $VERSION"
+condatainer _server_ready --port "$CNT_HELPER_PORT"
 wait $PID
 ```
 
@@ -457,7 +458,6 @@ my-tunnel --name "$NAME" 2>&1 | while IFS= read -r line; do
         *"tunnel ready"*)
             condatainer _server_ready \
                 --port 0 \
-                --label "My Tunnel: $NAME" \
                 --external-url "https://my-service.example.com/tunnel/$NAME" ;;
     esac
 done
