@@ -36,6 +36,19 @@ func FormatMemoryMB(mb int64) string {
 	return fmt.Sprintf("%dMB", mb)
 }
 
+// minSpeedWindow is the shortest span FormatSpeed quotes a rate over; less is noise.
+const minSpeedWindow = 100 * time.Millisecond
+
+// FormatSpeed renders bytes moved over elapsed as a rate, such as "45.2 MiB/s",
+// and reports false when the span is too short or nothing moved — a retried
+// transfer can withdraw what it had counted, so the difference can be negative.
+func FormatSpeed(bytes int64, elapsed time.Duration) (string, bool) {
+	if bytes <= 0 || elapsed < minSpeedWindow {
+		return "", false
+	}
+	return FormatSize(int64(float64(bytes)/elapsed.Seconds())) + "/s", true
+}
+
 // FormatSize renders a byte count for display, in binary units to three
 // significant figures. Artifacts are gigabytes, so a raw byte count is a number
 // nobody reads.

@@ -81,6 +81,12 @@ type downloadProgress struct {
 	nextReport int64
 	lastReport time.Time
 	finished   bool
+
+	// start is the first byte. sampleAt and sampleDone are the last report, the
+	// point a running speed is measured from.
+	start      time.Time
+	sampleAt   time.Time
+	sampleDone int64
 }
 
 func newDownloadProgress(ctx context.Context, total int64) *downloadProgress {
@@ -101,6 +107,7 @@ func (d *downloadProgress) advance(n int) {
 	now := time.Now()
 	if d.nextReport == 0 {
 		d.nextReport, d.lastReport = progressStep, now
+		d.start, d.sampleAt = now, now
 	}
 	due := d.done >= d.nextReport || now.Sub(d.lastReport) >= progressInterval
 	if due {
@@ -156,11 +163,19 @@ func (d *downloadProgress) report(final bool) {
 		return
 	}
 	d.mu.Lock()
-	done := d.done
+	done, now := d.done, time.Now()
+	from, since := d.sampleDone, d.sampleAt
+	if final {
+		from, since = 0, d.start
+	}
+	d.sampleAt, d.sampleDone = now, done
 	d.mu.Unlock()
-	d.log.Info(verbDownload+" progress", "kind", "progress",
-		"done", utils.FormatSize(done), "total", utils.FormatSize(d.total),
-		"final", final, "last", final)
+
+	attrs := []any{"kind", "progress", "done", utils.FormatSize(done), "total", utils.FormatSize(d.total)}
+	if speed, ok := utils.FormatSpeed(done-from, now.Sub(since)); ok && !since.IsZero() {
+		attrs = append(attrs, "speed", speed)
+	}
+	d.log.Info(verbDownload+" progress", append(attrs, "final", final, "last", final)...)
 }
 
 // countingReader counts one attempt's bytes into the artifact's total, and gives
@@ -199,6 +214,12 @@ type progressReader struct {
 	finished   bool
 	layer      int
 	layers     int
+
+	// start is the first byte. sampleAt and sampleDone are the last report, the
+	// point a running speed is measured from.
+	start      time.Time
+	sampleAt   time.Time
+	sampleDone int64
 }
 
 func newProgressReader(ctx context.Context, r io.Reader, total int64, verb string) *progressReader {
@@ -219,6 +240,7 @@ func (r *progressReader) Read(p []byte) (int, error) {
 	if r.nextReport == 0 {
 		r.nextReport = progressStep
 		r.lastReport = now
+		r.start, r.sampleAt = now, now
 	}
 	if r.done >= r.nextReport || now.Sub(r.lastReport) >= progressInterval {
 		r.report(false)
@@ -247,6 +269,15 @@ func (r *progressReader) report(final bool) {
 		return
 	}
 	attrs := []any{"kind", "progress", "done", utils.FormatSize(r.done), "total", utils.FormatSize(r.total)}
+	now := time.Now()
+	from, since := r.sampleDone, r.sampleAt
+	if final {
+		from, since = 0, r.start
+	}
+	r.sampleAt, r.sampleDone = now, r.done
+	if speed, ok := utils.FormatSpeed(r.done-from, now.Sub(since)); ok && !since.IsZero() {
+		attrs = append(attrs, "speed", speed)
+	}
 	if r.layers > 0 {
 		attrs = append(attrs, "layer", fmt.Sprintf("%d/%d", r.layer, r.layers))
 	}

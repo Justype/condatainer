@@ -151,7 +151,7 @@ A pause reports itself and its resume, carrying the same attribute the progress
 line does so the three read as one event:
 
 ```text
-[CNT] upload progress done=1.25 GB total=2.00 GB layer=4/11
+[CNT] upload progress done=1.25 GB total=2.00 GB speed=38.4 MiB/s layer=4/11
 [CNT] upload rate limited layer=4/11 retry=1/4 wait=1m0s
 [CNT] upload resumed layer=4/11
 ```
@@ -177,8 +177,11 @@ to avoid one would be paying twice.
 Progress is reported for the **artifact**, not per blob:
 
 ```text
-[CNT] download progress done=8.00 GB total=26.00 GB layers=6/13
+[CNT] download progress done=8.00 GB total=26.00 GB speed=45.2 MiB/s layers=6/13
 ```
+
+`speed=` is the rate since the previous line; the final line carries the average over the whole
+transfer. Bytes a retried layer withdraws are not counted, so a report with nothing moved omits it.
 
 Layers arrive concurrently, so per-blob lines would put two or three readers on
 one terminal line overwriting each other, and a finished download would print one

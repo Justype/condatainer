@@ -416,3 +416,26 @@ func TestGetDependenciesFromScriptKeepsPathDeclarations(t *testing.T) {
 		t.Fatalf("deps = %v, want %v", deps, want)
 	}
 }
+
+func TestFormatSpeed(t *testing.T) {
+	tests := []struct {
+		name    string
+		bytes   int64
+		elapsed time.Duration
+		want    string
+	}{
+		{"steady", 100 << 20, time.Second, "100 MiB/s"},
+		{"fraction of a second", 50 << 20, 500 * time.Millisecond, "100 MiB/s"},
+		{"too short to quote", 100 << 20, 10 * time.Millisecond, ""},
+		{"nothing moved", 0, time.Second, ""},
+		{"a retried transfer withdrew bytes", -5, time.Second, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := FormatSpeed(tt.bytes, tt.elapsed)
+			if got != tt.want || ok != (tt.want != "") {
+				t.Errorf("FormatSpeed(%d, %v) = %q, %v; want %q", tt.bytes, tt.elapsed, got, ok, tt.want)
+			}
+		})
+	}
+}

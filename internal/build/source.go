@@ -360,8 +360,8 @@ func (p *sourceProgress) report(final bool) {
 	if final {
 		bytes, since = p.done, p.start
 	}
-	if elapsed := time.Since(since).Seconds(); elapsed > 0 {
-		args = append(args, "speed", utils.FormatSize(int64(float64(bytes)/elapsed))+"/s")
+	if speed, ok := utils.FormatSpeed(bytes, time.Since(since)); ok {
+		args = append(args, "speed", speed)
 	}
 	args = append(args, "final", final, "last", final)
 	p.log.Info("Downloading "+p.label, args...)

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"oras.land/oras-go/v2"
@@ -255,5 +256,43 @@ func TestDownloadProgressCancellationSuppressesCompletion(t *testing.T) {
 
 	if strings.Contains(logs.String(), "final=true") {
 		t.Errorf("a cancelled download also claimed to finish:\n%s", logs)
+	}
+}
+
+// A running report quotes the speed since the last report, and the final one the
+// average over the whole transfer.
+func TestDownloadProgressReportsSpeed(t *testing.T) {
+	ctx, logs := captureLogs(t)
+	p := newDownloadProgress(ctx, 200<<20)
+
+	p.advance(1) // starts the clock
+	p.start, p.sampleAt = time.Now().Add(-2*time.Second), time.Now().Add(-time.Second)
+	p.advance(100 << 20)
+	if !strings.Contains(logs.String(), "speed=") || !strings.Contains(logs.String(), "/s") {
+		t.Fatalf("no speed on a running report:\n%s", logs)
+	}
+
+	logs.Reset()
+	p.finish()
+	if !strings.Contains(logs.String(), "speed=") || !strings.Contains(logs.String(), "final=true") {
+		t.Fatalf("no speed on the final report:\n%s", logs)
+	}
+}
+
+// An upload's blob line carries a speed too: the running one from the last
+// report, the average on the last.
+func TestProgressReaderReportsSpeed(t *testing.T) {
+	ctx, logs := captureLogs(t)
+	reader := newProgressReader(ctx, bytes.NewReader(bytes.Repeat([]byte("x"), 100<<20)), 100<<20, verbUpload)
+
+	if _, err := io.CopyN(io.Discard, reader, 1); err != nil { // starts the clock
+		t.Fatal(err)
+	}
+	reader.start, reader.sampleAt = time.Now().Add(-2*time.Second), time.Now().Add(-time.Second)
+	if _, err := io.Copy(io.Discard, reader); err != nil {
+		t.Fatal(err)
+	}
+	if got := logs.String(); strings.Count(got, "speed=") < 1 || !strings.Contains(got, "final=true") {
+		t.Fatalf("no speed on the upload report:\n%s", got)
 	}
 }
