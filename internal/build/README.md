@@ -112,6 +112,9 @@ has deps, because producing an index needs the tool that produces it.
 - If none installed → build the preferred version (`1.22.1`)
 - Versions above preferred (`2.0`) are rejected (implicit upper bound)
 - Operators: `>=` (inclusive lower bound) and `>` (exclusive lower bound)
+- The dependency edge in the artifact's keys is read from the image that was mounted, resolved
+  with the constraint, so it names that version and carries its identity. Reading the preferred
+  version instead would record a tool that did not run, or `unrecorded` when it is not installed.
 
 Resolution itself lives in `catalog.Resolve`; see **BuildGraph Execution** below.
 

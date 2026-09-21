@@ -2003,7 +2003,7 @@ version selection and may build when no published artifact exists. Pull never
 falls back to a build. Placement precedence is `--prefix`, `--name`, the exact
 address when it contains a complete name, then the published OCI title.
 
-`registry push` shows the artifact, its size and where it will go, then asks
+`registry push` shows the artifact, its size, its layers and where it will go, then asks
 `Push? [y/N]` before uploading. `-y` answers yes, and `--force` adds a warning that
 it replaces an existing versioned tag.
 

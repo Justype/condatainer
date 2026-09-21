@@ -2,6 +2,7 @@ package build
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
@@ -9,6 +10,7 @@ import (
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/artifact/key"
 	"github.com/Justype/condatainer/internal/artifact/meta"
+	"github.com/Justype/condatainer/internal/config"
 )
 
 // packDependency builds a real .sqf a dependency edge can be read out of. A
@@ -116,6 +118,40 @@ func TestDependencyKeysNormalizesANameDependency(t *testing.T) {
 	}
 	if deps[0].Name != "samtools/1.21" {
 		t.Errorf("edge name = %q, want the resolved name/version", deps[0].Name)
+	}
+}
+
+// A constraint picks the installed version the build mounts, so the edge names
+// that version and carries its keys — not the preferred version, which may not be
+// installed at all.
+func TestDependencyKeysRecordsTheVersionAConstraintResolvesTo(t *testing.T) {
+	path, manifest := packDependency(t, "samtools--1.20.sqf", "samtools/1.20", "#TYPE:app\necho samtools\n")
+
+	root := t.TempDir()
+	images := filepath.Join(root, "condatainer", "images")
+	if err := os.MkdirAll(images, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(path, filepath.Join(images, "samtools--1.20.sqf")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("SCRATCH", root)
+	t.Setenv("XDG_DATA_HOME", "")
+	t.Setenv("CNT_EXTRA_ROOT", "")
+	t.Setenv("CNT_ROOT", "")
+	config.InitDataPaths()
+	InvalidateInstalledOverlays()
+	t.Cleanup(func() { config.InitDataPaths(); InvalidateInstalledOverlays() })
+
+	b := &BuildObject{spec: Spec{Dependencies: []string{"samtools/1.24>=1.10"}}}
+	deps := b.dependencyKeys(context.Background())
+
+	if len(deps) != 1 {
+		t.Fatalf("got %d edges, want 1", len(deps))
+	}
+	if deps[0].Name != "samtools/1.20" || deps[0].Identity != manifest.Keys.Identity {
+		t.Errorf("edge = %s %+v, want the installed samtools/1.20 and its identity", deps[0].Name, deps[0].Identity)
 	}
 }
 

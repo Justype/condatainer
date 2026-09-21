@@ -149,7 +149,8 @@ func (b *BuildObject) composeCapsule(ctx context.Context) error {
 // follows this same path.
 //
 // An edge records the name the dependency's own manifest declares, never the
-// string that located it. A #DEP: may be an overlay path, and a path is
+// string that located it, and reads the image the build mounts: for a constrained
+// #DEP: the installed version that satisfies it, not the preferred one. A #DEP: may be an overlay path, and a path is
 // machine-local: recorded as a name it would reach the manifest, the capsule
 // entry directory, and any published copy, and it could never match the child
 // it points at.
@@ -167,18 +168,20 @@ func (b *BuildObject) dependencyKeys(ctx context.Context) []key.Dep {
 		// .../hello--1.0.sqf into ".../hello/1.0.sqf", which names nothing, reads
 		// no manifest, and records an edge with no keys at all. A locked rebuild
 		// supplies every dependency as a path, so this is its whole edge set.
-		requested := raw
+		requested, constrained := raw, raw
 		if !catalog.IsPathDep(raw) {
 			parsed, err := catalog.ParseDep(raw)
 			if err != nil {
 				log.Warn("skipping an unparsable dependency", "dep", raw, "err", err)
 				continue
 			}
-			requested = parsed.NameVersion()
+			requested, constrained = parsed.NameVersion(), parsed.String()
 		}
 		dep := key.Dep{Name: requested, Type: catalog.TypeApp}
 
-		path, manifest, err := readDependencyManifest(requested)
+		// Read from what the build mounts: a constraint picks the highest installed
+		// version it admits, so the edge names that one and carries its keys.
+		path, manifest, err := readDependencyManifest(constrained)
 		if err != nil {
 			log.Debug("dependency carries no scheme-backed keys", "dep", requested, "err", err)
 			out = append(out, dep)
