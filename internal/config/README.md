@@ -45,9 +45,11 @@ condatainer create -s lab -s cnt star/2.7.11b
 With no `--source`, the full configured list is used. An unknown handle is an
 error. A missing recipe still follows the normal Conda fallback.
 
-**The default distro is recorded once and never revised.** `EnsureDefaultDistro`
-writes it from the first source declaring a `default_distro` the first time one
-is needed. Changing it rebuilds the container root and every `os` overlay
+**The default distro is recorded once and never revised.** `config init` runs
+`EnsureDefaultDistro`, which writes it from the first source declaring a
+`default_distro`. Every command other than `config`, `help`, completion and the
+hidden `_` commands refuses to start without one (the check is in the root
+command's pre-run), so no path reaches for a distro that is not there. Changing it rebuilds the container root and every `os` overlay
 stacked on it, so following an upstream bump would invalidate a whole set of
 images on an ordinary update; a later default is something the user opts into
 with `config set default_distro`.

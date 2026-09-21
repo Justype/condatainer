@@ -1914,7 +1914,9 @@ scheduler:
   bin: /usr/bin/sbatch
   submit_job: true
 
-# Default distro for the container root (default: the first source's default_distro)
+# Default distro for the container root. Required: set by `condatainer config init`
+# (from the first source's default_distro) or `condatainer config set default_distro <name>`;
+# every other command refuses to run without it.
 default_distro: ubuntu24
 
 # Recipe collections, in priority order (first match wins).
@@ -2870,8 +2872,7 @@ condatainer update --libexec
 condatainer update --libexec apptainer squashfs-tools squashfuse
 ```
 
-The default root image — `<distro>/base` (e.g. `ubuntu24/base`), where `<distro>` is `default_distro`
-in config or a source's `default_distro` — is otherwise never
+The default root image — `<distro>/base` (e.g. `ubuntu24/base`), where `<distro>` is the configured `default_distro` — is otherwise never
 updated on its own: it is built the first time something needs it, the same as any other
 named artifact, and reused until you rebuild it with `condatainer create --update <name>/<version>`.
 Every other command treats it as a prerequisite — `create` builds it alongside the images
