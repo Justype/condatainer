@@ -17,7 +17,7 @@ import (
 // by writing its own `cnt` entry. See the README's Recipe sources.
 var defaultSource = catalog.Spec{
 	Name: "cnt",
-	Base: "https://raw.githubusercontent.com/condatainer/recipes/main",
+	Base: "https://raw.githubusercontent.com/condatainer/cnt/main",
 }
 
 // layerSources reads the `sources` key from every config layer and concatenates

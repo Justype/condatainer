@@ -100,7 +100,7 @@ URL. Order is priority — like `PATH`, the first collection holding a name wins
 ```yaml
 sources:
   - lab: /shared/labA/recipes
-  - cnt: https://raw.githubusercontent.com/condatainer/recipes/main
+  - cnt: https://raw.githubusercontent.com/condatainer/cnt/main
 ```
 
 The public `cnt` collection is appended automatically when nothing else claims
@@ -391,7 +391,7 @@ submit_job: true
 # The public cnt collection is appended automatically unless redefined here.
 sources:
   - lab: /shared/labA/recipes
-  - cnt: https://raw.githubusercontent.com/condatainer/recipes/main
+  - cnt: https://raw.githubusercontent.com/condatainer/cnt/main
 
 # Pass --nv / --rocm when the host has the matching device node (default: true)
 # Set false on a node whose driver is installed but unusable
@@ -719,7 +719,7 @@ condatainer config remove sources myorg=https://raw.githubusercontent.com/MyOrg/
 Or via environment variable (pipe-separated), which replaces the whole list:
 
 ```bash
-export CNT_SOURCES="myorg=https://raw.githubusercontent.com/MyOrg/recipes/main|cnt=https://raw.githubusercontent.com/condatainer/recipes/main"
+export CNT_SOURCES="myorg=https://raw.githubusercontent.com/MyOrg/recipes/main|cnt=https://raw.githubusercontent.com/condatainer/cnt/main"
 ```
 
 Earlier entries win. Each remote collection caches its index separately, and

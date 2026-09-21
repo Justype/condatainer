@@ -230,7 +230,7 @@ Returns another free port, for services that need a second listener (a backend t
 
 This is the common case for analysis work: you start with Jupyter and a Python version, then keep adding packages — `scanpy` this week, `scvi-tools` next — without rebuilding anything. That is exactly what a **writable env overlay** (`env.img`) is for, and `#IMG_PACKAGES:` is how a helper asks for one.
 
-Source: [helpers/jupyterlab](https://github.com/condatainer/recipes/blob/main/helpers/jupyterlab)
+Source: [helpers/jupyterlab](https://github.com/condatainer/cnt/blob/main/helpers/jupyterlab)
 
 ```bash
 #!/bin/bash
@@ -305,7 +305,7 @@ Cytoscape is a desktop **GUI** app and isn't on Conda. To reach it from a browse
 2. **Runs a KasmVNC server on top of an XFCE4 desktop**, so the GUI has a desktop to draw on and KasmVNC turns that desktop into the web page.
 3. **Starts PulseAudio (server + client)** so sound from the desktop reaches the browser.
 
-Source: [helpers/cytoscape](https://github.com/condatainer/recipes/blob/main/helpers/cytoscape)
+Source: [helpers/cytoscape](https://github.com/condatainer/cnt/blob/main/helpers/cytoscape)
 
 ### 1. Package the app
 

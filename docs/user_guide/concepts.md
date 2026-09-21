@@ -120,7 +120,7 @@ condatainer e cutadapt/5.0 trim-galore/0.6.11 -- bash -c 'echo $PATH'
 
 For software unavailable through conda, custom recipes can be written to download and install the software.
 
-**Example**: 10X [cellranger/9.0.1](https://github.com/condatainer/recipes/blob/main/recipes/cellranger/9.0.1)
+**Example**: 10X [cellranger/9.0.1](https://github.com/condatainer/cnt/blob/main/recipes/cellranger)
 
 ## Related
 

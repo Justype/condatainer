@@ -155,7 +155,7 @@ Please see [cnt-tutorials - Airway Salmon Quant](https://github.com/Justype/cnt-
 ## 🔗 Links & Resources
 
 - [CondaTainer ReadTheDocs](https://condatainer.readthedocs.io/en/latest/)
-- [Recipe Collection](https://github.com/condatainer/recipes)
+- [Recipe Collection](https://github.com/condatainer/cnt)
 - [cnt-tutorials Repository](https://github.com/Justype/cnt-tutorials)
 
 Related tools and resources:

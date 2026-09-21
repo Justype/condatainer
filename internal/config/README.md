@@ -115,7 +115,7 @@ Recipes are not searched for on disk — they come from the catalog's `sources`
 data directory.
 
 The default collection is always reachable: unless something already answers to
-the handle `cnt`, `https://raw.githubusercontent.com/condatainer/recipes/main` is
+the handle `cnt`, `https://raw.githubusercontent.com/condatainer/cnt/main` is
 **appended** to whatever the config lists. Appended, never prepended, so every
 configured entry outranks it — and defining your own `cnt` replaces it, which is
 how a site points the handle elsewhere without rewriting the `#DEP:` lines that

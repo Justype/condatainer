@@ -1920,7 +1920,7 @@ default_distro: ubuntu24
 # Recipe collections, in priority order (first match wins).
 # The public cnt collection is appended automatically unless redefined here.
 sources:
-  - cnt: https://raw.githubusercontent.com/condatainer/recipes/main
+  - cnt: https://raw.githubusercontent.com/condatainer/cnt/main
 
 # Days to cache remote metadata (default: 7, set 0 to always fetch live)
 metadata_cache_ttl: 7
