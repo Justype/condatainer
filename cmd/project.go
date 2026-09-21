@@ -698,9 +698,9 @@ Give a repository with no tag or digest. Every artifact goes into that one
 repository, with its name carried in the tag, so a single package covers the
 whole project.
 
-- --audience says who can pull from the registry. A public one refuses an app
-  whose recipe does not declare that it may be redistributed; a restricted one
-  takes it.
+- --audience sets what a push may publish. A public one refuses an app whose
+  recipe does not declare that it may be redistributed; a restricted one takes
+  it. It does not control who can pull.
 - --source is the code repository the published packages link back to.`,
 		Example:      `  condatainer project registry set ghcr.io/my-lab/rnaseq-2026/cnt --audience restricted`,
 		Args:         cobra.ExactArgs(1),
@@ -742,7 +742,7 @@ whole project.
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&audience, "audience", "public", "Who can pull from this registry: public or restricted")
+	cmd.Flags().StringVar(&audience, "audience", "public", "What a push may publish here: public or restricted")
 	cmd.Flags().StringVar(&source, "source", "", "Code repository the packages link back to (default: the origin remote)")
 	return cmd
 }

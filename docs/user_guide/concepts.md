@@ -118,9 +118,9 @@ condatainer e cutadapt/5.0 trim-galore/0.6.11 -- bash -c 'echo $PATH'
 
 **CondaTainer** leverages the extensive `conda-forge` and `bioconda` ecosystems, which provide most bioinformatics software as conda packages. **CondaTainer** will automatically create module overlays for these packages.
 
-For software unavailable through conda, custom build scripts can be created to download and install the software.
+For software unavailable through conda, custom recipes can be written to download and install the software.
 
-**Examples**: 10X [cellranger/9.0.1](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/cellranger/9.0.1) and Illumina [orad/2.7.0](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/orad/2.7.0)
+**Example**: 10X [cellranger/9.0.1](https://github.com/condatainer/recipes/blob/main/recipes/cellranger/9.0.1)
 
 ## Related
 

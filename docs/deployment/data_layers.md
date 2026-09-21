@@ -10,13 +10,12 @@ CondaTainer keeps data under a small set of directories and searches them togeth
 
 ## app-root
 
-`app-root` is an install's own home — the directory its `images/`, `build-scripts/`, and `helper-scripts/` live under:
+`app-root` is an install's own home — the directory its `images/` and `helper-scripts/` live under:
 
 ```
 <app-root>/
 ├── bin/
 │   └── condatainer  # the binary; its location can define app-root
-├── build-scripts/   # build recipes
 ├── helper-scripts/
 └── images/          # overlays
 ```
@@ -28,7 +27,7 @@ You decide where it is: CondaTainer takes it from the binary's location (a binar
 Packing environments into images is about reducing inodes, and the largest saving is not rebuilding what someone already built. CondaTainer is shaped around three ways people share — or deliberately don't:
 
 - **A single user** wants one place to keep everything. Point `app-root` at a directory you own; every build and every read happens there.
-- **A group** wants a shared place to read *and* write recipes and overlays together. Point `app-root` at a directory the group can write, and the whole lab contributes to and reads from one pool.
+- **A group** wants a shared place to read *and* write overlays together. Point `app-root` at a directory the group can write, and the whole lab contributes to and reads from one pool.
 - **A cluster or system**, often alongside environment modules, wants a site-wide set of common overlays (RStudio Server, standard tools) built once by an admin and read by everyone. Here `app-root` is admin-owned and **read-only**, so no one's builds can land in it. Each consumer keeps their own writable place instead:
   - a **single user** writes to their personal space (`$SCRATCH`, or home) with no setup at all;
   - a **group** points `$CNT_EXTRA_ROOT` at a shared directory of their own, and their builds pool there.
@@ -57,20 +56,21 @@ The stack is identical for everyone; only the layer that receives writes moves b
 
 Reads always search every active layer; only the write target differs. *fallback* is used only when no shared layer is writable.
 
-Each one holds the same three subdirectories:
+Each one holds the same two subdirectories:
 
 ```
 <layer>/
-├── build-scripts/
 ├── helper-scripts/
 └── images/
 ```
+
+Recipes are not in a layer. They come from the ordered `sources` list in config, and a layer's `config.yaml` can add to it — see [Config Files Layer Too](#config-files-layer-too).
 
 ## Reads Go Nearest, Writes Go Furthest
 
 This is the rule that makes shared installs work. The two directions are deliberately opposite:
 
-- **Reading** — `condatainer avail`, `list`, `exec`, `helper` search *every* layer, **starting with your own**: scratch, user, then extra-root, then app-root. A user sees the admin's build scripts, their lab's overlays, and their own, merged into one view, and the first match wins.
+- **Reading** — `condatainer list`, `exec`, `helper` search *every* layer, **starting with your own**: scratch, user, then extra-root, then app-root. A user sees the admin's overlays, their lab's, and their own, merged into one view, and the first match wins.
 - **Writing** — `condatainer create` walks the layers **in the opposite direction** — extra-root, app-root, scratch, user — and uses the **first layer it can write to**.
 
 Writing furthest-out means a build is shared as widely as permissions allow: one copy in the lab directory serves everyone, instead of each member rebuilding the same overlay into their own home.

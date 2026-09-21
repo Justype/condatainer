@@ -129,13 +129,12 @@ mirror can be tried before the origin. Endpoints are registry/repository roots;
 `oci://` is accepted and stripped. If any OCI endpoint is declared, both `push`
 and at least one `pull` endpoint are required.
 
-`audience` is a claim about who can pull from the registry, and CondaTainer
-derives from it what may be published there — a `restricted` endpoint takes
-anything, a `public` one asks each artifact whether it may be republished. It
-defaults to `public`, which is the restrictive answer; nothing verifies the
-claim, so say `restricted` only if a known set of people really are the only
-ones who can pull. It is unrelated to a GitHub package's visibility setting,
-which CondaTainer never reads or changes. See
+`audience` sets what may be published to the registry: a `restricted` endpoint
+takes anything, a `public` one asks each artifact whether it may be
+republished. It defaults to `public`, the stricter rule; nothing verifies the
+claim, so say `restricted` only if the registry really is limited to people who
+may receive everything. It does not control who can pull, and it is unrelated to
+a GitHub package's visibility setting, which CondaTainer never reads or changes. See
 [Publishing rules](condatainer.md#publishing-rules) and
 [Distributing Artifacts](../deployment/distribution.md).
 
@@ -328,7 +327,7 @@ export CNT_EXTRA_ROOT=/shared/lab/tools   # group-level
 
 ## Data Directory Search Paths
 
-**CondaTainer** searches multiple directories for images, build scripts, and helper scripts. The search order determines which files are used when duplicates exist. See [Data Layers](../deployment/data_layers.md) for how this interacts with shared installations.
+**CondaTainer** searches multiple directories for images and helper scripts. Recipes are not among them; they come from the [`sources`](#recipe-sources) list. The search order determines which files are used when duplicates exist. See [Data Layers](../deployment/data_layers.md) for how this interacts with shared installations.
 
 ### Search Priority
 
@@ -360,8 +359,8 @@ condatainer config paths
 ```
 
 This shows all search paths for:
+- **Sources**: recipe collections, in lookup order
 - **Images**: `.sqf` and `.img` files
-- **Build scripts**: Build recipe files
 - **Helper scripts**: Runtime helper scripts
 
 Paths are listed in read order (nearest first), each tagged with its layer — `(user)`, `(extra-root)`, `(app-root)` — plus whether it exists, is writable, and is the write target. The write target is generally *not* the first entry: writes start from the furthest-out layer.
@@ -373,7 +372,6 @@ Each base directory follows this structure:
 ```
 <base_dir>/
   images/           # Container images and overlays
-  build-scripts/    # Build recipes
   helper-scripts/   # Runtime helpers
   tmp/              # Temporary files during builds
 ```
@@ -470,7 +468,7 @@ For shared group installations, CondaTainer supports a standalone layout where t
     condatainer         # Executable
   config.yaml           # Root config (loaded alongside user, extra-root, and system configs)
   images/               # Shared images
-  build-scripts/        # Shared build scripts
+  helper-scripts/       # Shared helper scripts
 ```
 
 All config files (user, extra-root, app-root, system) are loaded simultaneously. For `sources`, entries from all configs are **merged** — so a group admin can publish shared recipe collections in the app-root config and every user automatically searches them, even if they also have a personal config.
@@ -499,7 +497,7 @@ On HPC systems, configuration is typically layered across three scopes. CondaTai
 | Tier | Data layer | Scope | Sets |
 |---|---|---|---|
 | System / cluster | `app-root` | Sysadmin | `build.system_apptainer`, `scheduler.bin`, shared images, `channels` |
-| Group / lab | `extra-root` | Lab admin | Lab-specific images, build scripts, helper scripts |
+| Group / lab | `extra-root` | Lab admin | Lab-specific images and helper scripts, plus the `sources` for its recipe collection |
 | User | `user` | Individual | Personal overrides, personal scratch dirs |
 
 Priority: **user > group > system > defaults**
@@ -516,7 +514,9 @@ Priority: **user > group > system > defaults**
 /shared/labA/condatainer/      ← group tier (CNT_EXTRA_ROOT)
   config.yaml                  ← sources
   images/                      ← lab-specific images
-  recipes/                     ← lab-specific recipes (as a `sources` entry)
+
+/shared/labA/recipes/          ← lab recipe collection (a `sources` entry)
+  recipes/
 
 ~/.config/condatainer/config.yaml   ← user tier (auto-loaded)
 ```
@@ -535,7 +535,7 @@ channels:
 **Group config** (`/shared/labA/condatainer/config.yaml`):
 ```yaml
 sources:
-  - labA: /shared/labA/condatainer/recipes
+  - labA: /shared/labA/recipes
 ```
 
 **User config** (`~/.config/condatainer/config.yaml`):

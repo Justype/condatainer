@@ -1,34 +1,57 @@
-# Custom App Build Scripts
+# Custom App Recipes
 
-Most tools need no build script at all. If the app is on a Conda channel, `condatainer create <name>/<version>` builds a [module overlay](../user_guide/concepts.md#overlay-types) straight from Conda:
+Most tools need no recipe at all. If the app is on a Conda channel, `condatainer create <name>/<version>` builds a [module overlay](../user_guide/concepts.md#overlay-types) straight from Conda:
 
 ```bash
-condatainer create samtools/1.22.1   # resolved from bioconda, no script needed
+condatainer create samtools/1.22.1   # resolved from bioconda, no recipe needed
 condatainer create openjdk/17.0.18   # resolved from conda-forge
 ```
 
-You need a build script when the app is **not packaged for Conda** (vendor tarball, installer), or when you need a version Conda doesn't carry.
+You need a recipe when the app is **not packaged for Conda** (vendor tarball, installer), or when you need a version Conda doesn't carry.
 
-This page walks through two real ones:
+This page walks through two:
 
-- **[orad/2.7.0](#example-1-orad--a-single-version-script)** — a plain single-version script.
+- **[orad/2.7.0](#example-1-orad--a-single-version-recipe)** — a plain single-version recipe.
 - **[cytoscape](#example-2-cytoscape--a-version-template)** — a template covering every release from one file, used by the [`cytoscape` helper](./custom_helper.md#example-2-cytoscape-an-app-not-on-conda).
 
 See the [Build Script Manual](../manuals/build_script.md) for the complete header and variable reference.
 
-## Where Build Scripts Live
+## Where Recipes Live
 
-Build scripts are looked up in your `build-scripts/` search paths:
+Recipes come from **sources**: an ordered list of recipe collections in your config, where the first match wins. A source is a directory (or URL) holding a `recipes/` folder:
 
-```bash
-condatainer config paths      # show build-scripts/ helper-scripts/ search dirs
-condatainer avail cytoscape   # confirm CondaTainer sees the script
+```
+/scratch/me/recipes/
+└── recipes/
+    ├── orad/2.7.0
+    └── cytoscape
 ```
 
-Drop your script into the first writable `build-scripts/` directory (no `.sh` suffix). The **relative file path is the module name**: 
+Add yours ahead of the others:
 
-- `build-scripts/cellranger/9.0.1` => `cellranger/9.0.1`
-- `build-scripts/cytoscape` => `cytoscape`
+```bash
+condatainer config prepend sources mine=/scratch/me/recipes
+condatainer avail cytoscape   # confirm CondaTainer sees the recipe
+```
+
+The **path under `recipes/` is the module name**, with no `.sh` suffix:
+
+- `recipes/cellranger/9.0.1` => `cellranger/9.0.1`
+- `recipes/cytoscape` => `cytoscape`
+
+See [Configuration](../manuals/configuration.md) for how sources are merged across config files.
+
+## What a Recipe Is
+
+A recipe is a shell script with a header block of `#KEY:` lines. The body runs top to bottom as `bash -euo pipefail`. There is no wrapper function and no injected helper: call `curl`, `tar` and `pigz` directly, and print progress with `echo ... >&2`.
+
+| Variable | Meaning |
+|---|---|
+| `$CNT_PREFIX` | where the payload goes; exactly this directory is packed into the overlay |
+| `$CNT_NAME` | the complete module name, e.g. `orad/2.7.0` |
+| `$CNT_TMP` | scratch directory, also exported as `$TMPDIR` |
+| `$CNT_SRC_<name>` | a file fetched by a [`#SOURCE:`](../manuals/build_script.md#source-tag) header, read-only |
+| `$NCPUS`, `$MEM`, `$MEM_GB` | resources, taken from your scheduler directives |
 
 ## Which Shape to Write
 
@@ -37,64 +60,43 @@ Drop your script into the first writable `build-scripts/` directory (no `.sh` su
 | **File path** | `<name>/<version>` | `<name>` |
 | **Headers** | none required | `#PH:` + `#TARGET:` |
 | **Write it when** | install differs between versions,<br/> or you only need one | the logic is identical |
-| **Example** | [`orad/2.7.0`](#example-1-orad--a-single-version-script) | [`cytoscape`](#example-2-cytoscape--a-version-template) |
+| **Example** | [`orad/2.7.0`](#example-1-orad--a-single-version-recipe) | [`cytoscape`](#example-2-cytoscape--a-version-template) |
 
-Start single-version. Promote to a template once you've copied the same script to a second version and changed nothing but the URL.
+Start single-version. Promote to a template once you've copied the same recipe to a second version and changed nothing but the URL.
 
-Either way, copy [`assets/build-template-apps`](https://github.com/Justype/cnt-scripts/blob/main/assets/build-template-apps), which carries the [shared boilerplate](#the-shared-boilerplate) plus skeletons for the two common formats (tarball and single binary).
+## Example 1: orad — A Single-Version Recipe
 
-## Example 1: orad — A Single-Version Script
-
-Source: [`build-scripts/orad/2.7.0`](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/orad/2.7.0)
-
-Illumina's ORA decompressor is a vendor tarball behind a download page (never going to be on Conda). The file lives at `build-scripts/orad/2.7.0`, so it installs as `orad/2.7.0`.
-
-### Headers
+Illumina's ORA decompressor is a vendor tarball behind a download page (never going to be on Conda). The file lives at `recipes/orad/2.7.0`, so it installs as `orad/2.7.0`.
 
 ```bash
-#!/usr/bin/bash
+#!/usr/bin/env bash
 #DESC:Illumina ORA Decompressor
 #URL:https://support.illumina.com/sequencing/sequencing_software/DRAGENORA/software-downloads.html
 
+#SOURCE:orad https://s3.amazonaws.com/webdata.illumina.com/downloads/software/dragen-decompression/orad.2.7.0.linux.tar.gz
+
 #ENV:ORA_REF_PATH={prefix}/oradata   ## Illumina ORA decompressor reference search path
+
+echo "Extracting $CNT_NAME" >&2
+tar -xf "$CNT_SRC_orad" -C "$CNT_PREFIX" --strip-components=1 \
+    --use-compress-program="pigz -d -p ${NCPUS:-4}"
+
+# orad ships its binary at the archive root, so move it to bin/
+mkdir -p "$CNT_PREFIX/bin"
+mv "$CNT_PREFIX/orad" "$CNT_PREFIX/bin"
 ```
 
-`#DESC:` is what users see in `condatainer avail` and `condatainer info` — always write them.
+`#DESC:` is what users see in `condatainer avail` and `condatainer info` — always write it.
 
-The `#ENV:` pair is app-specific, covered [below](#setting-variables-the-app-needs).
+Four things to take from it:
 
-### `install_app()`
-
-```bash
-install_app() {
-    # By default, $target_dir and $tmp_dir are created and we are now in $tmp_dir
-    os=$(uname -s)
-    case $os in
-        Linux)  os="linux";;
-        Darwin) os="mac";;
-    esac
-
-    print_stderr "Downloading ${YELLOW}${app_name_version}${NC} binaries"
-    url="https://s3.amazonaws.com/webdata.illumina.com/downloads/software/dragen-decompression/orad.${version}.${os}.tar.gz"
-    curl -fsSL -o "${app_name}_${version}.tar.gz" "$url"
-
-    print_stderr "Extracting ${YELLOW}${app_name_version}${NC}"
-    tar_xf_pigz "${app_name}_${version}.tar.gz" -C "$target_dir" --strip-components=1
-
-    # orad is under module folder, move it to bin
-    mkdir -p "$target_dir/bin" # modules/apps/name/version/bin
-    mv "$target_dir/orad" "$target_dir/bin"
-}
-```
-
-`install_app()` is the only part you write. Four things to take from it:
-
-1. **Everything installs under `$target_dir`.** CondaTainer packs exactly that directory into the `.sqf` overlay — anything written elsewhere is lost.
-2. **`$target_dir/bin` goes on `$PATH`** when the overlay is loaded.
-3. `tar_xf_pigz` is a helper function: use `pigz` when available.
+1. **Everything installs under `$CNT_PREFIX`.** CondaTainer packs exactly that directory into the `.sqf` overlay — anything written elsewhere is lost.
+2. **`$CNT_PREFIX/bin` goes on `$PATH`** when the overlay is loaded.
+3. **`#SOURCE:` downloads the file** before the recipe runs and records its SHA-256 in the overlay, so an upstream file that is re-released under the same name gives a different identity. It is read-only; copy it into `$CNT_TMP` if you need to change it.
+4. The recipe never says where the download came from or how it got there. It reads `$CNT_SRC_orad`.
 
 ````{note}
-The extraction command depends on the tarball structure. Most tarballs wrap everything in a single top-level `<name>/` (or `<name>-<version>/`) directory, so extracting straight into `$target_dir` with `--strip-components=1` is enough.
+The extraction command depends on the tarball structure. Most tarballs wrap everything in a single top-level `<name>/` (or `<name>-<version>/`) directory, so extracting straight into `$CNT_PREFIX` with `--strip-components=1` is enough.
 
 Layouts vary, though. Check before you write the line:
 
@@ -109,7 +111,7 @@ Then fix up whatever the archive got wrong — `orad` ships its binary at the ro
 
 **Most apps need nothing here.** Once the binary is on `$PATH`, they run. Skip this section unless the app fails without a variable set.
 
-`orad` is one that does: it looks up its decompression reference through `$ORA_REF_PATH` and errors out if no reference found. Rather than making every user export it by hand, the script declares it:
+`orad` is one that does: it looks up its decompression reference through `$ORA_REF_PATH` and errors out if no reference is found. Rather than making every user export it by hand, the recipe declares it:
 
 ```bash
 #ENV:ORA_REF_PATH={prefix}/oradata   ## Illumina ORA decompressor reference search path
@@ -142,51 +144,35 @@ condatainer info orad/2.7.0
 
 ## Example 2: Cytoscape — A Version Template
 
-Source: [`build-scripts/cytoscape`](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/cytoscape)
-
-Cytoscape publishes a pre-built Linux tarball for every release at a predictable URL. Writing one file per version would mean a dozen near-identical scripts, so this is a **template**: a single file at `build-scripts/cytoscape` that expands into `cytoscape/3.10.4`, `cytoscape/3.9.1`, and so on.
-
-### Headers
+Cytoscape publishes a pre-built Linux tarball for every release at a predictable URL. Writing one file per version would mean a dozen near-identical recipes, so this is a **template**: a single file at `recipes/cytoscape` that expands into `cytoscape/3.10.4`, `cytoscape/3.9.1`, and so on.
 
 ```bash
-#!/usr/bin/bash
-#PH:cytoscape_version:3.9.0,3.9.1,3.10.0,3.10.1,3.10.2,3.10.3,3.10.4
-#AUTOUPDATE:cytoscape_version:github:cytoscape/cytoscape>=3.9.0
-
-#TARGET:cytoscape/{cytoscape_version}
+#!/usr/bin/env bash
 #DESC:Cytoscape {cytoscape_version} — network biology visualization platform (needs Java)
 #URL:https://github.com/cytoscape/cytoscape/releases
+#TARGET:cytoscape/{cytoscape_version}
+
+#PH:cytoscape_version:3.10.4,3.10.3,3.10.2,3.10.1,3.10.0,3.9.1,3.9.0
+
+#SOURCE:cytoscape https://github.com/cytoscape/cytoscape/releases/download/{cytoscape_version}/cytoscape-unix-{cytoscape_version}.tar.gz
+
+tar -xf "$CNT_SRC_cytoscape" -C "$CNT_PREFIX" --strip-components=1 \
+    --use-compress-program="pigz -d -p ${NCPUS:-4}"
+
+mkdir -p "$CNT_PREFIX/bin"
+ln -s ../cytoscape.sh "$CNT_PREFIX/bin/cytoscape"
 ```
 
 | Header | Role |
 |---|---|
 | `#PH:` | Declares the `cytoscape_version` placeholder and its allowed values |
 | `#TARGET:` | Module name pattern — expands to `cytoscape/3.10.4`, `cytoscape/3.9.1`, … |
-| `#AUTOUPDATE:` | Lets CI refresh the `#PH:` list from GitHub releases (`>=3.9.0` is the floor) |
+| `#SOURCE:` | The download; its URL takes the placeholder too |
 | `#DESC:` | Shown in `condatainer avail` and `condatainer info` |
 
-Every `#PH:` name must appear as a `{name}` token in `#TARGET:` and vice versa — otherwise every value would collapse onto the same target, so CondaTainer warns and skips the expansion.
+Every `#PH:` name must appear as a `{name}` token in `#TARGET:` and vice versa — otherwise every value would collapse onto the same target.
 
-`{cytoscape_version}` tokens are substituted **before** the script runs — in the headers *and* in the body. (It is not a bash variable, make sure no `${cytoscape_version}` in the script)
-
-### `install_app()` in template
-
-```bash
-install_app() {
-    local url="https://github.com/cytoscape/cytoscape/releases/download/{cytoscape_version}/cytoscape-unix-{cytoscape_version}.tar.gz"
-
-    print_stderr "Downloading ${YELLOW}${app_name_version}${NC}"
-    curl -fsSL -o "cytoscape.tar.gz" "$url"
-
-    print_stderr "Extracting ${YELLOW}${app_name_version}${NC}"
-    tar_xf_pigz "cytoscape.tar.gz" -C "$target_dir" --strip-components=1
-
-    mkdir -p "$target_dir/bin"
-    ln -s "$target_dir/cytoscape.sh" "$target_dir/bin/cytoscape"
-}
-```
-
-Structurally identical to orad — download, extract to `$target_dir`. The only template-specific part is `{cytoscape_version}` in the URL, substituted textually before executed.
+`{cytoscape_version}` tokens are substituted **before** the recipe runs — in the headers *and* in the body. It is not a bash variable, so make sure there is no `${cytoscape_version}` in the script.
 
 ### Installing From a Template
 
@@ -218,7 +204,7 @@ A template can declare several placeholders, and they aren't limited to versions
 condatainer create cytoscape/3.10.4
 ```
 
-Cytoscape needs a JVM 17, which can come from Conda — no script required:
+Cytoscape needs a JVM 17, which can come from Conda — no recipe required:
 
 ```bash
 condatainer create openjdk/17.0.18
@@ -235,61 +221,42 @@ condatainer exec -o openjdk/17.0.18 -o cytoscape/3.10.4 \
 Overlay order is the stack order — later `-o` flags sit on top. Keep the app last so its `bin/` wins on conflicts.
 ```
 
-## Prompting for Input
+## Links Only You Have
 
-Some vendor downloads have no stable URL — Cell Ranger's link is signed and expires after a day. When there's nothing reliable to hardcode, an `#INTERACTIVE:` header asks the user for the value before the build starts (see [`cellranger/9.0.1`](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/cellranger/9.0.1)):
-
-```bash
-#INTERACTIVE:⚠️ 10X links only valid for one day. Please go to the link below and get tar.gz link.\nhttps://www.10xgenomics.com/support/software/cell-ranger/downloads/previous-versions
-```
-
-CondaTainer prints the prompt (`\n` splits it across lines) and feeds the user's answer to the script on **stdin**, so read it with `read -r`. Declare one `#INTERACTIVE:` per value, read in order:
+Some vendor downloads have no stable URL — Cell Ranger's link is signed, tied to your account, and expires after a day. Declare it with the `ask:` form of `#SOURCE:` and CondaTainer prompts for it before the build starts:
 
 ```bash
-install_app() {
-    url='https://cf.10xgenomics.com/releases/cell-exp/cellranger-9.0.1.tar.gz'
-    # A live 10X link carries an Expires= token; a bare one has gone stale.
-    if [[ "$url" != *"Expires="* ]]; then
-        print_stderr "Enter the download link: "
-        read -r url
-    fi
-    # Validate the pasted URL before trusting it.
-    if [[ "$url" != *"cellranger-$version.tar.gz"* ]]; then
-        print_stderr "❌ The download link is invalid or not for version $version."
-        return 1
-    fi
-    curl -fsSL -o "${app_name}_${version}.tar.gz" "$url"
-    tar_xf_pigz "${app_name}_${version}.tar.gz" -C "$target_dir" --strip-components=1
-}
+#!/usr/bin/env bash
+#DESC:10x Genomics Cell Ranger, single-cell gene expression analysis
+#URL:https://www.10xgenomics.com/support/software/cell-ranger/downloads/previous-versions
+
+#SOURCE:crx ask:10x download links expire after one day and are per-user.\nOpen https://www.10xgenomics.com/support/software/cell-ranger/downloads/previous-versions and paste the cellranger-9.0.1.tar.gz link
+
+tar -xf "$CNT_SRC_crx" -C "$CNT_PREFIX" --strip-components=1 --no-same-owner \
+    --use-compress-program="pigz -d -p ${NCPUS:-4}"
 ```
+
+CondaTainer prints the prompt (`\n` splits it across lines), fetches the link you paste, and gives the recipe the file as `$CNT_SRC_crx`. The link itself is never recorded or printed, and a warning appears if it doesn't mention the version. See [Source Tag](../manuals/build_script.md#source-tag) for the rules.
+
+A value that isn't a download — a licence acceptance, say — uses [`#INPUT:`](../manuals/build_script.md#input-tag) instead, which the recipe reads on stdin.
 
 Expected output:
 
 ```
-$ condatainer i cellranger/9.0.1
-[CNT◇] Installing to /path/condatainer/images (app-root)
-[CNT◇] ⚠️ 10X links only valid for one day. Please go to the link below and get tar.gz link.
-[CNT◇] https://www.10xgenomics.com/support/software/cell-ranger/downloads/previous-versions
+$ condatainer create cellranger/9.0.1
+[CNT◇] 10x download links expire after one day and are per-user.
+[CNT◇] Open https://www.10xgenomics.com/support/software/cell-ranger/downloads/previous-versions and paste the cellranger-9.0.1.tar.gz link
 Enter here: 
 ```
 
-## The Shared Boilerplate
-
-Everything below `install_app()` in both scripts (`print_stderr`, the `install()` driver, the `pigz_*` helpers, `set -e`, the final `install` call) is a block copied verbatim between scripts — it validates `$target_dir`/`$tmp_dir`, refuses to overwrite an existing target, then `cd`s into `$tmp_dir` and calls your `install_app()`.
-
-Don't write it from scratch:
-
-- [`assets/build-template-apps`](https://github.com/Justype/cnt-scripts/blob/main/assets/build-template-apps) — apps
-- [`assets/build-template-ref`](https://github.com/Justype/cnt-scripts/blob/main/assets/build-template-ref) — data / reference (see [Custom Data Build Scripts](./custom_data.md))
-
 ## Share It
 
-Open a PR against [cnt-scripts](https://github.com/Justype/cnt-scripts) so everyone gets the script via `condatainer avail`, or host your own repo for internal tools. See [Sharing Your Scripts](../deployment/share_scripts.md).
+Put the recipe in a collection other people's config lists as a source. See [Sharing Your Recipes](../deployment/share_scripts.md).
 
 ## Related
 
 - [Build Script Manual](../manuals/build_script.md) — full header/variable reference
-- [Sharing Your Scripts](../deployment/share_scripts.md) — upstreaming or hosting your own source
+- [Sharing Your Recipes](../deployment/share_scripts.md) — hosting your own collection
 - [Custom Data Build Scripts](./custom_data.md) — packaging datasets, databases, and derived artifacts
 - [Custom Helper Scripts](./custom_helper.md) — launching the app as a browser service
 - [Custom OS Overlays](./custom_os.md) — when you need system packages (`apt`) instead

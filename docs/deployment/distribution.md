@@ -9,7 +9,7 @@ There are two distinct reasons to publish, and they get two different layouts:
 
 | You are publishing | Who pulls it | Command | Page |
 |---|---|---|---|
-| a recipe collection's builds | anyone who configured that collection | `condatainer registry push` | [Sharing Your Scripts](./share_scripts.md) |
+| a recipe collection's builds | anyone who configured that collection | `condatainer registry push` | [Sharing Your Recipes](./share_scripts.md) |
 | one project's pinned artifacts | whoever checks that project out | `condatainer project push` | [Project](../manuals/condatainer.md#project) |
 
 Both use the same transport, the same credentials, and the same
@@ -174,7 +174,7 @@ push time.
 
 An `app` from a third-party collection is the case with no clean answer today: the
 `#REDISTRIBUTE:` header lives in a recipe your project does not own, so you cannot
-declare for it. Publish to an endpoint you have declared `internal`.
+declare for it. Publish to an endpoint you have declared `restricted`.
 
 ## Credentials
 

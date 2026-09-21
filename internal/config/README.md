@@ -68,7 +68,7 @@ Always **replaces** the config file value for that key entirely.
 
 **2. Config files** — layered user/group/system config. All existing files are loaded:
 - Scalar keys (`build.system_apptainer`, `default_distro`, etc.): highest-priority file that sets the key wins.
-- Array keys (`extra_*_dirs`, `extra_scripts_links`): **merged** across all layers (user ++ extra-root ++ root ++ system), deduplicated, user entries first.
+- Array keys (`sources`): **merged** across all layers (user ++ extra-root ++ root ++ system), deduplicated, user entries first.
 - `channels`: **overwrite** — highest-priority config file that sets it wins (not merged).
 
 Priority order (highest to lowest):

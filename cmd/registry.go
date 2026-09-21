@@ -84,7 +84,7 @@ downgraded.`,
 		},
 	}
 	push.Flags().StringVar(&opts.base, "registry", "", "Registry base, including owner/prefix (inferred from source when omitted)")
-	push.Flags().StringVar(&opts.audience, "audience", string(registry.Public), "Endpoint audience: public or restricted")
+	push.Flags().StringVar(&opts.audience, "audience", string(registry.Public), "What a push may publish here: public or restricted")
 	push.Flags().BoolVarP(&opts.force, "force", "f", false, "Replace this platform at an existing versioned tag")
 
 	pull := &cobra.Command{

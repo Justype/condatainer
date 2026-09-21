@@ -540,7 +540,7 @@ Check the layer if it matters who can see the result — `(app-root)` or `(extra
   Works with any build that lands in an images directory — a `name/version` recipe, `-n` with packages, `-n -f environment.yml`, `-n --from docker://…`. The one conflict is `-p`/`--prefix`, which names an exact output file while the store generates its filename from the artifact's keys. A bare `-f environment.yml` with no `-n` derives a prefix from the file name, so it conflicts too; give it a `-n`.
 * `--always-submit-data`: Submit `data` builds as scheduler jobs even when the recipe has no scheduler directives. Other builds run here unless their recipe carries directives. Conda builds, definitions and image imports never go to the scheduler.
 * `--no-submit`: Disable job submission; build locally even if the build script has scheduler directives.
-* `--remote`: Remote build scripts take precedence over local.
+* `-s`, `--source`: Use only this configured recipe collection; repeat to set the lookup order.
 
 When a selected recipe source declares `oci.pull` endpoints, `create` tries them
 in order before building locally. A candidate is accepted only when its
@@ -713,7 +713,7 @@ Manage your local library of built containers and available recipes.
 
 ### Avail
 
-Search for available build scripts (both local scripts in build-scripts/ and remote metadata).
+Search the recipes of every configured [recipe collection](configuration.md#recipe-sources).
 
 **Aliases:** `av`
 
@@ -723,7 +723,7 @@ condatainer avail [search_terms...] [flags]
 
 **Options:**
 
-* `--remote`: Remote build scripts take precedence over local (on duplicates).
+* `-s`, `--source`: Search only this configured collection; repeat to set the lookup order.
 * `-e`, `--expand`: Expand template groups to show individual concrete entries instead of the collapsed template header.
 * `--description`: Show the description (`#DESC:`) for each entry.
 
@@ -1186,19 +1186,18 @@ Parses scripts for `#DEP:` tags and checks if the required overlays are installe
 **Usage:**
 
 ```
-condatainer check <script|dir|name> [script|dir|name ...] [-a] [--remote]
+condatainer check <script|dir|name> [script|dir|name ...] [-a]
 ```
 
 Each argument can be:
 - A local `.sh` file path
 - A directory — all `.sh` files **directly inside** it are checked (non-recursive)
-- A package name (e.g., `grch38/salmon/1.10.2/gencode49`) resolved from local or remote build scripts
+- A package name (e.g., `grch38/salmon/1.10.2/gencode49`) resolved from the configured recipe collections
 
 **Options:**
 
 * `-a`, `--auto-install`: Automatically attempt to build/install missing dependencies.
 * `-i`, `--install`: Alias for `--auto-install`.
-* `--remote`: Remote build scripts take precedence over local when resolving package names.
 * `--no-submit`: Disable job submission; build missing dependencies locally.
 * `--project [DIR]`, `--no-project`: same as [`exec`](#exec).
 
@@ -1860,7 +1859,7 @@ condatainer config init [-l|--layer user|app-root|extra-root|system]
 
 ### Config Paths
 
-Show data search paths for images, build scripts, and helper scripts, in read order (nearest first). Writes go the opposite way, to the first writable directory starting from the furthest-out layer.
+Show the recipe sources, then the data search paths for images and helper scripts, in read order (nearest first). Writes go the opposite way, to the first writable directory starting from the furthest-out layer.
 
 ```
 condatainer config paths
@@ -2608,12 +2607,12 @@ tracked in `lock.json`, not machine-local: every collaborator publishes to the
 same package, or the recorded fetch locations become a set of places *some* of
 the artifacts are.
 
-`--audience` is a claim about who can pull from the registry, and CondaTainer
-derives from it what may be published there — see
-[Publishing rules](#publishing-rules). It defaults to `public`, which is the
-restrictive answer; say `restricted` only if a known set of people really are the
-only ones who can pull. It is **not** a GitHub package's visibility, which is a
-separate per-package setting CondaTainer never reads or changes.
+`--audience` sets what `push` may publish to this destination — see
+[Publishing rules](#publishing-rules). It defaults to `public`, the stricter
+rule; a `restricted` destination takes anything, so say it only if the registry
+really is limited to people who may receive everything. It does **not** control
+who can pull, and it is not a GitHub package's visibility, which is a separate
+per-package setting CondaTainer never reads or changes.
 
 `--source` records the project's code repository, defaulting to its GitHub
 origin, and becomes the published packages' source link.
@@ -2788,7 +2787,7 @@ condatainer scheduler -p --cpu
 
 ## Update
 
-Refreshes the remote build script and helper script metadata caches, or refreshes the
+Refreshes the cached recipe and helper indexes of every remote collection, or refreshes the
 self-provisioned toolchain (mksquashfs, squashfuse, apptainer).
 
 **Usage:**

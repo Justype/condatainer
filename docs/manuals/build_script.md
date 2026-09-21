@@ -14,7 +14,8 @@ This document gives instructions on how to create your own build scripts for **C
   - [Template Tags](#template-tags)
   - [Auto-Update Tag](#auto-update-tag)
   - [Environment Variables](#environment-variables) and [ENV Naming Guidelines](#env-naming-guidelines)
-  - [Interactive Tag](#interactive-tag)
+  - [Source Tag](#source-tag)
+  - [Input Tag](#input-tag)
 - [Apps](#apps)
 - [Data](#data)
 - [OS](#os)
@@ -23,7 +24,7 @@ This document gives instructions on how to create your own build scripts for **C
 
 The file path must follow the naming convention below to be recognized by CondaTainer:
 
-`build_scripts/<name_conversion>` (should not include the .sh suffix)
+`recipes/<name_conversion>` inside a collection (no `.sh` suffix)
 
 Where `<name_conversion>` is defined as:
 
@@ -71,24 +72,29 @@ Any data, including genome reference indexes.
 
 ### Example
 
-- [cellranger/9.0.1](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/cellranger/9.0.1) (App)
-- [cytoscape](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/cytoscape) (App template)
-- [grch38/cellranger/2024-A](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/grch38/cellranger/2024-A) (Data)
-- [grch38/star-gencode](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/grch38/star-gencode) (Data templdate)
+- `cellranger/9.0.1` (App)
+- `cytoscape` (App template)
+- `grch38/cellranger/2024-A` (Data)
+- `grch38/star-gencode` (Data templdate)
 
 ## Available Variables
 
+A recipe runs top to bottom as `bash -euo pipefail`. There is no wrapper function and no helper functions: call `curl`, `tar` and `pigz` directly, and print progress with `echo ... >&2`.
+
 | Variable | Description |
 | -------- | ----------- |
+| `CNT_NAME` | The complete module name, e.g. `cellranger/9.0.1` |
+| `CNT_TYPE` | `app`, `data` or `os` |
+| `CNT_PREFIX` | Where the payload goes. Exactly this directory is packed into the overlay |
+| `CNT_TMP` | Temporary working directory, also exported as `TMPDIR` (managed by **CondaTainer**) |
+| `CNT_SRC_<name>` | A file fetched by a [`#SOURCE:`](#source-tag) header, read-only |
 | `NCPUS` | Number of CPUs (from script directives, or `build.ncpus` config setting) |
 | `MEM` | Memory per task in MB (from script directives, or `build.mem` config setting) |
 | `MEM_GB` | Memory per task in GB (integer) |
-| `app_name` | app: name; data/ref: assembly/datatype |
-| `version` | apps: app version; ref: data version |
-| `target_dir` | Target installation directory (managed by **CondaTainer**) |
-| `tmp_dir` | Temporary working directory (managed by **CondaTainer**) |
 
-> `tmp_dir` paths:
+During a script build, `micromamba` is on `PATH` and `MAMBA_ROOT_PREFIX` is the build's scratch, with `MAMBA_NO_RC=true` so your `.condarc` is ignored. `$CNT_PREFIX` already exists as an empty directory, so a recipe that installs an environment there first creates `$CNT_PREFIX/conda-meta/history` (see [Custom Bundle Overlays](../advanced_usage/custom_bundle.md)); micromamba refuses a directory that is not an environment. A script that solves an environment with it is identified by its text, not by the packages it resolves, so pin versions.
+
+> `$CNT_TMP` paths:
 >
 > - `app` module, `.def` and the base image: fast local scratch — `$CNT_TMPDIR` → scheduler tmp → `$TMPDIR` → `/tmp`
 > - `data` module: the stable condatainer data-dir tmp
@@ -96,21 +102,14 @@ Any data, including genome reference indexes.
 > - External build (`-f`): `app` and `.def` use fast scratch; `data` builds next to the target dir
 > - `$CNT_TMPDIR` selects the fast root only — it never moves a build off the stable root or off the target dir
 
-| Function | Description |
-| -------- | ----------- |
-| `print_stderr` | Print message to stderr with current time |
-| `pigz_or_gunzip` | Decompress gz file using pigz or gunzip |
-| `tar_xf_pigz` | Extract tar.gz using pigz if available |
-| `pigz_or_gunzip_pipe` | Decompress gz file and pipe to stdout using pigz or gunzip |
-
 ## Headers
 
 Headers are special comments at the beginning of build scripts that provide metadata and instructions for CondaTainer.
 
-**Example Header**: [grch38/bowtie2/ucsc_no_alt](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/grch38/bowtie2/ucsc_no_alt)
+**Example Header**: `grch38/bowtie2/ucsc_no_alt`
 
 ```bash
-#!/usr/bin/bash
+#!/usr/bin/env bash
 #DEP:bowtie2/2.5.5>=2.3
 #AUTOUPDATE:bowtie2:bioconda:bowtie2
 #DEP:grch38/genome/ucsc_no_alt
@@ -126,9 +125,7 @@ Headers are special comments at the beginning of build scripts that provide meta
 #SBATCH --job-name=bowtie2-build
 #SBATCH --output=%x-%j.log
 
-install() {
-    ...
-}
+bowtie2-build --threads "$NCPUS" "$GENOME_FASTA" "$CNT_PREFIX/GRCh38_no_alt_analysis_set"
 ```
 
 ### Description and URL
@@ -369,10 +366,10 @@ Declaring the name matters because an app or OS `#DEP:` counts toward the artifa
 
 A `{placeholder}` is rejected here: an external build has no `#PH:` declarations and no requested name to select values from, so the pattern could never be filled in.
 
-**Example** — STAR index template [grch38/star-gencode](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/grch38/star-gencode):
+**Example** — STAR index template `grch38/star-gencode`:
 
 ```bash
-#!/usr/bin/bash
+#!/usr/bin/env bash
 #PH:star_version:2.7.0b,...,2.7.11a,2.7.11b
 #PH:gencode_version:22-49
 #PH:read_length:101,151,*
@@ -392,9 +389,9 @@ A `{placeholder}` is rejected here: an external build has no `#PH:` declarations
 #SBATCH --time=2:00:00
 #SBATCH --job-name=star-index
 
-install() {
-    ...
-}
+STAR --runThreadN "$NCPUS" --runMode genomeGenerate --genomeDir "$CNT_PREFIX" \
+    --genomeFastaFiles "$GENOME_FASTA" --sjdbGTFfile "$ANNOTATION_GTF" \
+    --sjdbOverhang $(( {read_length} - 1 ))
 ```
 
 When the user runs `condatainer create grch38/star-gencode`, **CondaTainer** shows the `#DESC:` description, the `#TARGET:` pattern (with `{placeholder}` tokens highlighted), then prompts for each placeholder in declaration order:
@@ -411,7 +408,7 @@ When the user runs `condatainer create grch38/star-gencode`, **CondaTainer** sho
 
 If the user already has a compatible dependency installed (e.g. `star/2.7.10` is installed), the default for `star_version` will be `2.7.10` instead of the latest available `2.7.11b`.
 
-See [grch38/star-gencode](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/grch38/star-gencode) for a real template example.
+See `grch38/star-gencode` for a real template example.
 
 User can directly use the target to fill the placeholders:
 
@@ -512,23 +509,60 @@ For tool-specific references, use the tool name as a prefix.
 - `BOWTIE2_PREFIX` for Bowtie2 indices.
 - `BWA_MEM2_FASTA` for BWA-MEM2 genome fasta with `bwa-mem2` indices.
 
-### Interactive Tag
+### Source Tag
 
-- `#INTERACTIVE:<Prompt>` tag indicates that the build script requires input from the user during execution.
-- It is common for apps that need license agreement acceptance or custom configuration.
-- When **CondaTainer** encounters this tag, it will prompt the user with the specified `<Prompt>` message before building. It will take the user input and pass it to the build script during execution.
-- You can use `\n` to add new lines in the prompt message.
+`#SOURCE:<name> <url>` declares a file the build downloads. It can be repeated, once per file.
+
+- **CondaTainer** downloads each source before the script runs and exposes it as `$CNT_SRC_<name>`. The name may hold letters, digits and `_`.
+- A source takes one URL. `{placeholders}` from `#PH:` are substituted into it.
+- The file is read-only. To change it, copy it into `$CNT_TMP` first.
+- The SHA-256 of each file is recorded in the overlay and is part of its identity, so an upstream file that is re-released under the same name gives a different identity. The URL is not recorded.
+- A download made inside the script, with `curl` or `wget`, is not recorded.
+- A `.def` cannot declare `#SOURCE:`.
 
 **Example:**
 
 ```bash
-#!/usr/bin/bash
-#DESC:10X Genomics Single Cell Software Suite
-#URL:https://www.10xgenomics.com/support/software/cell-ranger/downloads/previous-versions
-#INTERACTIVE:⚠️ 10X links only valid for one day. Please go to the link below and get tar.gz link.\nhttps://www.10xgenomics.com/support/software/cell-ranger/downloads/previous-versions
+#!/usr/bin/env bash
+#DESC:GENCODE {gencode_version} comprehensive gene annotation GTF for GRCh38
+#TARGET:grch38/gtf-gencode/{gencode_version}
+
+#PH:gencode_version:49,48,47
+
+#SOURCE:gtf https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_{gencode_version}/gencode.v{gencode_version}.primary_assembly.annotation.gtf.gz
+
+#ENV:ANNOTATION_GTF={prefix}/gencode.v{gencode_version}.primary_assembly.annotation.gtf
+
+cd "$CNT_PREFIX"
+pigz -dc "$CNT_SRC_gtf" > "gencode.v{gencode_version}.primary_assembly.annotation.gtf"
 ```
 
-Example: [cellranger/9.0.1](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/cellranger/9.0.1)
+#### Links only you have
+
+`#SOURCE:<name> ask:<prompt>` asks for the link instead of writing one down. Use it for a download that expires or is tied to your account.
+
+- **CondaTainer** shows the prompt before building, fetches the link you paste, and records only the file's hash. The link is never recorded or printed.
+- A submitted job carries the answer with it, so `always_submit_data` needs nothing extra. `--yes` cannot supply a link, and an empty answer stops the build.
+- If the link does not mention the overlay's version, a warning is shown. It is only a warning.
+- You can use `\n` to add new lines in the prompt message.
+
+**Example:** `cellranger/9.0.1`
+
+```bash
+#SOURCE:crx ask:10x download links expire after one day and are per-user.\nOpen https://www.10xgenomics.com/support/software/cell-ranger/downloads/previous-versions and paste the cellranger-9.0.1.tar.gz link
+
+tar -xf "$CNT_SRC_crx" -C "$CNT_PREFIX" --strip-components=1 --no-same-owner
+```
+
+### Input Tag
+
+`#INPUT:<Prompt>` asks for a value the script needs during the build, such as a licence acceptance or a setting.
+
+- **CondaTainer** prompts before building and gives the answers to the script on stdin, one line each, in order: `IFS= read -r ANSWER`.
+- The answer is never recorded and must not change what is built. A value that selects which overlay to build is a `#PH:` placeholder instead.
+- You can use `\n` to add new lines in the prompt message.
+- `#INPUT:` prompts are asked first and `#SOURCE: … ask:` prompts after them, each in the order written.
+- A `.def` cannot declare `#INPUT:`.
 
 ## Apps
 
@@ -537,18 +571,16 @@ Example: [cellranger/9.0.1](https://github.com/Justype/cnt-scripts/blob/main/bui
   - HPC systems often lack required build tools or dependencies unless you load specific modules.
   - To maximize compatibility (**CondaTainer**), it's better to rely on pre-compiled packages.
 
-Template: [build-template-apps](https://github.com/Justype/cnt-scripts/blob/main/assets/build-template-apps)
-
 ### Tips
 
-You can use `tar_xf_pigz` and `pigz_or_gunzip` functions to speed up decompression of large files if `pigz` is available on your system.
+Download with [`#SOURCE:`](#source-tag) so the file is recorded, and extract it into `$CNT_PREFIX` with `tar` and `--use-compress-program="pigz -d -p ${NCPUS:-4}"`. `pigz` uses every core the job has.
 
-If the app requires specific environment variables to function properly, make sure to add them using `#ENV:` tags with inline `## ` notes. e.g. [orad/2.7.0](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/orad/2.7.0)
+If the app requires specific environment variables to function properly, make sure to add them using `#ENV:` tags with inline `## ` notes. e.g. `orad/2.7.0`, walked through in [Custom App Recipes](../advanced_usage/custom_app.md).
 
 ### Examples
 
-- [cellranger/9.0.1](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/cellranger/9.0.1)
-- [orad/2.7.0](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/orad/2.7.0)
+- `cellranger/9.0.1`
+- `orad/2.7.0`
 
 ## Data
 
@@ -558,18 +590,16 @@ If the app requires specific environment variables to function properly, make su
   - If indices require building, ensure you have the scheduler parameters (e.g. `#SBATCH`) set appropriately to allocate sufficient resources.
 - Always add environment variables using `#ENV:` with inline `## ` notes to help users locate and understand the reference data.
 
-Template: [build-template-ref](https://github.com/Justype/cnt-scripts/blob/main/assets/build-template-ref)
-
 ### Tips
 
-You can use `tar_xf_pigz` and `pigz_or_gunzip` functions to speed up decompression of large files if `pigz` is available on your system.
+Download with [`#SOURCE:`](#source-tag) and decompress into `$CNT_PREFIX` with `pigz -dc "$CNT_SRC_<name>" > <file>`. The overlay is compressed already, so keep the payload uncompressed instead of leaving a `.gz` inside it.
 
 ### Examples
 
-- [grch38/genome/ucsc_no_alt](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/grch38/genome/ucsc_no_alt)
-- [grch38/transcript-gencode](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/grch38/transcript-gencode) (template)
-- [grch38/star-gencode](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/grch38/star-gencode)
-- [grcm39/salmon-gencode](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/grcm39/salmon-gencode)
+- `grch38/genome/ucsc_no_alt`
+- `grch38/transcript-gencode` (template)
+- `grch38/star-gencode`
+- `grcm39/salmon-gencode`
 
 ## OS
 
@@ -603,9 +633,9 @@ prerequisites, not a root's concern either.
 
 ### OS Templates
 
-`.def` files support [Template Tags](#template-tags) too. Since a `.def` has no `install()` function, placeholders are substituted **throughout the whole file** at build time — including the `Bootstrap`/`From` header — so one file can cover every upstream image tag.
+`.def` files support [Template Tags](#template-tags) too. Placeholders are substituted **throughout the whole file** at build time — including the `Bootstrap`/`From` header — so one file can cover every upstream image tag.
 
-[ubuntu24/posit-r.def](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/ubuntu24/posit-r.def) builds every R version from a single definition:
+`ubuntu24/posit-r.def` builds every R version from a single definition:
 
 ```
 #PH:version:4.4.3,4.5.0,4.5.1
@@ -624,6 +654,6 @@ From: posit/r-base:{version}-noble
 
 ### Examples
 
-- [ubuntu24/code-server.def](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/ubuntu24/code-server.def)
-- [ubuntu24/posit-r.def](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/ubuntu24/posit-r.def) (template)
-- [ubuntu24/xfce4.def](https://github.com/Justype/cnt-scripts/blob/main/build-scripts/ubuntu24/xfce4.def)
+- `ubuntu24/code-server.def`
+- `ubuntu24/posit-r.def` (template)
+- `ubuntu24/xfce4.def`

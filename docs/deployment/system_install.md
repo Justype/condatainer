@@ -1,6 +1,6 @@
 # System-Wide Installation
 
-For cluster and server maintainers: install CondaTainer once in a read-only location, so every user on the machine gets the binary, your curated build scripts, and any overlays you pre-build.
+For cluster and server maintainers: install CondaTainer once in a read-only location, so every user on the machine gets the binary, your curated recipes, and any overlays you pre-build.
 
 ```{note}
 Setting up for yourself or one lab instead?
@@ -19,14 +19,13 @@ Both paths lay down a read-only tree that every user reads but none can write. P
 
 The usual choice on a cluster: users opt in with `module load condatainer`, and the module file wires the environment (`$PATH`, `$CNT_ROOT`, Apptainer).
 
-**The directory layout.** Module trees are versioned, so the binary lands at a path like `/opt/condatainer/1.4.0/bin/condatainer`. If that path defined the app-root, your build scripts and overlays would be tied to one release and stranded at the next upgrade. So keep the data in a version-independent directory and point `$CNT_ROOT` at it — then only the binary moves between versions:
+**The directory layout.** Module trees are versioned, so the binary lands at a path like `/opt/condatainer/1.4.0/bin/condatainer`. If that path defined the app-root, your overlays would be tied to one release and stranded at the next upgrade. So keep the data in a version-independent directory and point `$CNT_ROOT` at it — then only the binary moves between versions:
 
 ```
 /opt/condatainer/
 ├── 1.4.0/bin/condatainer     # each release in its own dir
 ├── 1.5.0/bin/condatainer
 └── data/                     # CNT_ROOT — shared across all versions
-    ├── build-scripts/
     ├── helper-scripts/
     └── images/
 ```
@@ -84,13 +83,12 @@ condatainer config set build.ncpus 8 -l app-root
 
 ### Without modules
 
-The binary lives in its own directory with the data beside it, so the app-root is auto-detected. A binary at `<cnt_root>/bin/condatainer` makes `<cnt_root>` the app-root, and `<cnt_root>/{build-scripts,helper-scripts,images}` are searched for every user:
+The binary lives in its own directory with the data beside it, so the app-root is auto-detected. A binary at `<cnt_root>/bin/condatainer` makes `<cnt_root>` the app-root, and `<cnt_root>/{helper-scripts,images}` are searched for every user:
 
 ```
 /opt/condatainer/
 ├── bin/condatainer
 ├── config.yaml
-├── build-scripts/
 ├── helper-scripts/
 └── images/
 ```
@@ -121,8 +119,7 @@ Anything you want every user to have without rebuilding:
 
 ```
 <cnt_root>/           # beside the binary, or wherever CNT_ROOT points
-├── config.yaml       # site defaults: apptainer path (build.system_apptainer), scheduler, build limits
-├── build-scripts/    # curated or site-specific recipes
+├── config.yaml       # site defaults: apptainer path, scheduler, build limits, and the recipe collections (`sources`)
 ├── helper-scripts/   # site-specific services
 └── images/           # pre-built overlays: common tools, reference data
 ```
@@ -133,7 +130,7 @@ Pre-building `images/` is the highest-value part on a shared cluster: a genome i
 Re-apply `chmod -R go-w <cnt_root>` after adding content. Subdirectories keep the permissions they were created with, and a world-writable `images/` becomes the write target for every user — their builds would land in your tree instead of their own.
 ```
 
-For scripts, you can also point at a remote source instead of copying files in — see [Sharing Your Scripts](./share_scripts.md).
+For recipes, list a collection under `sources` in `config.yaml` — a directory or a URL. See [Sharing Your Recipes](./share_scripts.md).
 
 ## 3. Site Defaults in `config.yaml`
 
@@ -159,7 +156,7 @@ su - someuser
 module load condatainer     # if using modules
 
 condatainer config paths    # your dirs listed; writable target is the user's own
-condatainer avail           # your build-scripts appear
+condatainer avail           # your recipe collections appear
 condatainer list            # your pre-built overlays appear
 ```
 
@@ -173,14 +170,14 @@ A system install is read-only, but it doesn't lock anyone out — groups and ind
 export CNT_EXTRA_ROOT=/shared/labA/condatainer
 ```
 
-That one variable adds the group's `build-scripts/`, `helper-scripts/`, and `images/` to the search path for everyone who sets it — most conveniently from a group `setup.sh` or an environment module. It's env-only, so put it in a module file or a shell profile.
+That one variable adds the group's `helper-scripts/` and `images/` to the search path for everyone who sets it — most conveniently from a group `setup.sh` or an environment module. It's env-only, so put it in a module file or a shell profile.
 
-The group root sits *above* the system install in the search order, so a group script can shadow a same-named one you ship, and writes go to the group directory. See [Shared Group Installation](./group_install.md) for setting up the group directory itself, and [Sharing Your Scripts](./share_scripts.md) for publishing into it.
+The group root sits *above* the system install in the search order, so a group overlay can shadow a same-named one you ship, and writes go to the group directory. Its `config.yaml` can add recipe collections too. See [Shared Group Installation](./group_install.md) for setting up the group directory itself, and [Sharing Your Recipes](./share_scripts.md) for publishing into it.
 
 ## Related
 
 - [Data Layers](./data_layers.md) — how the search order and write target work
 - [Shared Group Installation](./group_install.md) — the lab-level setup
-- [Sharing Your Scripts](./share_scripts.md) — publishing scripts to your users
+- [Sharing Your Recipes](./share_scripts.md) — publishing scripts to your users
 - [Configuration Manual](../manuals/configuration.md#multi-tier-setup-system--group--user) — config layers and search paths
 - [Installation](../user_guide/installation.md) — the standard single-user install

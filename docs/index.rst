@@ -18,6 +18,7 @@ CondaTainer
   Module Overlays <user_guide/module_overlays>
   Writable Environment Overlays <user_guide/environment_overlays>
   Read-Only Bundle Overlays <user_guide/bundle_overlays>
+  Reproducible Projects <user_guide/projects>
 
 .. toctree::
   :caption: Helpers:

@@ -96,7 +96,7 @@ condatainer avail
 The shared root is in everyone's search path, so:
 
 - **Overlays** in `images/` : apps and data overlays. `condatainer exec/run`
-- **Build scripts** in `build-scripts/` appear in everyone's `condatainer avail`.
+- **Recipes** in a collection listed under `sources` in the group's `config.yaml` appear in everyone's `condatainer avail` — see [Sharing Your Recipes](./share_scripts.md).
 - **Helper scripts** in `helper-scripts/` are launchable by everyone. `condatainer helper`
 
 Writes go to the first *writable* directory in the write order, which starts at the furthest-out shared layer ([Data Layers](./data_layers.md)). If a member's builds land in their own scratch instead of the shared root, check that the shared directory is still group-writable with the setgid bit set ([step 1](#1-pick-a-directory)).
@@ -104,6 +104,6 @@ Writes go to the first *writable* directory in the write order, which starts at 
 ## Related
 
 - [Data Layers](./data_layers.md) — how the search order and write target work
-- [Sharing Your Scripts](./share_scripts.md) — publishing build and helper scripts to the group
+- [Sharing Your Recipes](./share_scripts.md) — publishing recipes and helper scripts to the group
 - [Installation](../user_guide/installation.md) — the standard single-user install
 - [Configuration Manual](../manuals/configuration.md#multi-tier-setup-system--group--user) — config layers and search paths
