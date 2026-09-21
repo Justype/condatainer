@@ -20,10 +20,6 @@ import (
 
 // platform returns the OCI platform of the running machine, used as an index
 // child's platform descriptor.
-//
-// This is Go's architecture spelling, not [meta.NativeArch]'s uname spelling —
-// amd64 rather than x86_64 — because it goes into the OCI index where the wire
-// format decides. The two are separate vocabularies and must not be merged.
 func platform() (ocispec.Platform, bool) {
 	switch runtime.GOARCH {
 	case "amd64", "arm64":

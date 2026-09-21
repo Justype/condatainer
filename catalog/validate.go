@@ -148,17 +148,32 @@ func (r *Recipe) Validate() error {
 	// A source name becomes $CNT_SRC_<name> and addresses one record in the
 	// identity, so a malformed or repeated one is rejected rather than skipped:
 	// the body would otherwise run against an unset variable.
-	seenSource := make(map[string]bool, len(r.Sources))
+	type sourceKey struct{ name, arch string }
+	seenSource := make(map[sourceKey]bool, len(r.Sources))
+	qualified := make(map[string]bool, len(r.Sources))
+	plain := make(map[string]bool, len(r.Sources))
 	for _, src := range r.Sources {
-		if seenSource[src.Name] {
-			errs = append(errs, fmt.Errorf("%w: %s declares #SOURCE:%s twice; one name is one input",
+		key := sourceKey{src.Name, src.Arch}
+		if seenSource[key] {
+			errs = append(errs, fmt.Errorf("%w: %s declares #SOURCE:%s twice for the same architecture; one name is one input",
 				ErrInvalidRecipe, r.Name, src.Name))
 		}
-		seenSource[src.Name] = true
+		seenSource[key] = true
+		if src.Arch == "" {
+			plain[src.Name] = true
+		} else {
+			qualified[src.Name] = true
+		}
+	}
+	for name := range qualified {
+		if plain[name] {
+			errs = append(errs, fmt.Errorf("%w: %s declares #SOURCE:%s both with and without an architecture; use one form",
+				ErrInvalidRecipe, r.Name, name))
+		}
 	}
 	for _, raw := range scanMalformedSources(r.Text) {
-		errs = append(errs, fmt.Errorf("%w: %s declares #SOURCE:%s; the form is a name then one URL, or ask: and a prompt, and the name may hold only letters, digits and underscore",
-			ErrInvalidRecipe, r.Name, raw))
+		errs = append(errs, fmt.Errorf("%w: %s declares #SOURCE:%s; the form is a name, an optional architecture (%s), then one URL, or ask: and a prompt; the name may hold only letters, digits and underscore",
+			ErrInvalidRecipe, r.Name, raw, strings.Join(SourceArches, ", ")))
 	}
 
 	if r.Redistribute != "" && r.Redistribute != "yes" && r.Redistribute != "no" {

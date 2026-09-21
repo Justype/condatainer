@@ -43,9 +43,6 @@ func TestPlatformUsesTheOCISpelling(t *testing.T) {
 	if plat.OS != "linux" {
 		t.Errorf("OS = %q, want linux", plat.OS)
 	}
-	if plat.Architecture == "x86_64" || plat.Architecture == "aarch64" {
-		t.Errorf("architecture = %q, which is the uname spelling", plat.Architecture)
-	}
 }
 
 func TestMergeAndContainsIndexEntries(t *testing.T) {

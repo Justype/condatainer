@@ -2,7 +2,10 @@ package catalog
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"io"
+	"runtime"
 	"strings"
 )
 
@@ -262,9 +265,10 @@ func splitNote(s string) (value, note string) {
 //
 // A link only the user holds — expiring, per-user, EULA-gated — is declared with
 // a Prompt instead of a URL, and the tool asks for it. The answer is never
-// recorded.
+// recorded. Arch, when set, restricts the line to one architecture.
 type SourceURL struct {
 	Name   string
+	Arch   string
 	URL    string
 	Prompt string
 }
@@ -272,7 +276,15 @@ type SourceURL struct {
 // askPrefix marks a #SOURCE: whose link is asked for rather than written down.
 const askPrefix = "ask:"
 
-// parseSource splits "name url" or "name ask:prompt".
+// SourceArches are the architectures a #SOURCE: may name, spelled as Go does.
+var SourceArches = []string{"amd64", "arm64"}
+
+// ErrNoSourceForArch is returned when a source is declared per architecture and
+// none of its lines is for the one asked about.
+var ErrNoSourceForArch = errors.New("no #SOURCE: for this architecture")
+
+// parseSource splits "name url", "name ask:prompt", or either with an
+// architecture word between the name and the rest.
 //
 // The name becomes an environment variable, so it is restricted to what one can
 // hold. A malformed declaration is skipped here and reported by Validate, which
@@ -283,17 +295,56 @@ func parseSource(value string) (SourceURL, bool) {
 	if !validSourceName(name) || rest == "" {
 		return SourceURL{}, false
 	}
+	arch := ""
+	if word, tail, found := strings.Cut(rest, " "); found && isSourceArch(word) {
+		arch, rest = word, strings.TrimSpace(tail)
+	}
 	if prompt, ok := strings.CutPrefix(rest, askPrefix); ok {
 		prompt = strings.TrimSpace(prompt)
 		if prompt == "" {
 			return SourceURL{}, false
 		}
-		return SourceURL{Name: name, Prompt: prompt}, true
+		return SourceURL{Name: name, Arch: arch, Prompt: prompt}, true
 	}
-	if strings.ContainsAny(rest, " \t") {
+	if rest == "" || strings.ContainsAny(rest, " \t") {
 		return SourceURL{}, false
 	}
-	return SourceURL{Name: name, URL: rest}, true
+	return SourceURL{Name: name, Arch: arch, URL: rest}, true
+}
+
+func isSourceArch(word string) bool {
+	for _, a := range SourceArches {
+		if word == a {
+			return true
+		}
+	}
+	return false
+}
+
+// SourcesFor returns the #SOURCE: lines that apply on arch, one per name, in
+// declaration order. A name declared only for other architectures is an error.
+func (r *Recipe) SourcesFor(arch string) ([]SourceURL, error) {
+	var out []SourceURL
+	for _, src := range r.Sources {
+		if src.Arch == "" || src.Arch == arch {
+			out = append(out, src)
+		}
+	}
+	for _, src := range r.Sources {
+		if !hasSourceName(out, src.Name) {
+			return out, fmt.Errorf("%w: #SOURCE:%s has no line for %s", ErrNoSourceForArch, src.Name, arch)
+		}
+	}
+	return out, nil
+}
+
+func hasSourceName(sources []SourceURL, name string) bool {
+	for _, src := range sources {
+		if src.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // Prompts returns every question a build must put to the user, in the order the
@@ -302,7 +353,8 @@ func parseSource(value string) (SourceURL, bool) {
 // the fetch and never reach it.
 func (r *Recipe) Prompts() []string {
 	out := append([]string(nil), r.Inputs...)
-	for _, src := range r.Sources {
+	sources, _ := r.SourcesFor(runtime.GOARCH)
+	for _, src := range sources {
 		if src.Prompt != "" {
 			out = append(out, src.Prompt)
 		}

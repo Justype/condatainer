@@ -58,26 +58,13 @@ func completeInfoArgs(cmd *cobra.Command, args []string, toComplete string) ([]s
 
 func runInfoOverlay(cmd *cobra.Command, args []string) error {
 	overlayArg := args[0]
-	normalized := catalog.Normalize(overlayArg)
 
-	// Try to find as installed overlay first: an exact, bare or partial name.
-	overlayPath, _, err := installedOverlayPath(normalized)
+	overlayPath, err := installedOverlayFile(cmd.Context(), overlayArg)
+	if err != nil && catalog.Normalize(overlayArg) == config.BaseRecipeName() {
+		overlayPath, err = config.FindBaseImage(), nil
+	}
 	if err != nil {
 		return err
-	}
-
-	// The base is not in the installed-overlay map — that map drives `remove`, and
-	// the container root is not something to delete by name. Resolve it here only.
-	if overlayPath == "" && normalized == config.BaseRecipeName() {
-		overlayPath = config.FindBaseImage()
-	}
-
-	if overlayPath == "" {
-		// Try as external file path
-		overlayPath, _ = filepath.Abs(overlayArg)
-		if !utils.FileExists(overlayPath) {
-			return fmt.Errorf("overlay file %s not found", utils.StylePath(overlayPath))
-		}
 	}
 
 	verify, _ := cmd.Flags().GetBool("verify")

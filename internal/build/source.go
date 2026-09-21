@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -64,7 +65,7 @@ func (b *BuildObject) declaredSources() ([]catalog.SourceURL, error) {
 			return nil, fmt.Errorf("cannot apply placeholders to the recipe's sources: %w", err)
 		}
 	}
-	return recipe.Sources, nil
+	return recipe.SourcesFor(runtime.GOARCH)
 }
 
 // fetchDeclaredSources downloads what the recipe declared and records the

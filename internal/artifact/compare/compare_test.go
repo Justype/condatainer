@@ -282,8 +282,8 @@ func TestGates(t *testing.T) {
 
 	t.Run("a foreign architecture is refused", func(t *testing.T) {
 		b := starIndex()
-		b.arch = "aarch64"
-		got := compareOn(want, read(t, b), "x86_64")
+		b.arch = "arm64"
+		got := compareOn(want, read(t, b), "amd64")
 		if got.Verdict != Different || !hasField(got.Diffs, "arch") {
 			t.Errorf("verdict = %s, diffs = %v", got.Verdict, got.Diffs)
 		}

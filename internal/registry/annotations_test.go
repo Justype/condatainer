@@ -18,7 +18,7 @@ func fullManifest() meta.Manifest {
 		BuildType:     "script",
 		Description:   "STAR index for GENCODE 49",
 		URL:           "https://github.com/alexdobin/STAR",
-		Platform:      meta.Platform{OS: "linux", Arch: "x86_64"},
+		Platform:      meta.Platform{OS: "linux", Arch: "amd64"},
 		Keys: meta.Keys{
 			Identity: meta.KeyRef{Scheme: "script-identity-v1", SHA256: strings.Repeat("a", 64)},
 			Equiv:    meta.KeyRef{Scheme: "script-equiv-v1", SHA256: strings.Repeat("b", 64)},
@@ -69,7 +69,7 @@ func TestAnnotationsOmitsWhatIsNotRecorded(t *testing.T) {
 		SchemaVersion: meta.SchemaVersion,
 		Name:          "myenv",
 		Type:          catalog.TypeApp,
-		Platform:      meta.Platform{OS: "linux", Arch: "x86_64"},
+		Platform:      meta.Platform{OS: "linux", Arch: "amd64"},
 	}
 	ann := Annotations(m, "")
 

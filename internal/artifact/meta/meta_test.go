@@ -145,11 +145,10 @@ func TestEnvVarResolved(t *testing.T) {
 	}
 }
 
-// The recorded architecture is what recipes, Conda subdirs and users all say,
-// not Go's spelling of it.
-func TestNativeArchIsUnameForm(t *testing.T) {
+// The recorded architecture is Go's spelling.
+func TestNativeArchIsGoForm(t *testing.T) {
 	switch got := NativeArch(); got {
-	case "x86_64", "aarch64":
+	case "amd64", "arm64":
 	default:
 		t.Logf("unrecognized host architecture %q", got)
 	}

@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/conda"
 	"github.com/Justype/condatainer/internal/image"
 	"github.com/Justype/condatainer/internal/image/ext3"
@@ -455,22 +454,10 @@ func init() {
 	registerExportFlags(exportCmd)
 }
 
-// resolveOverlayArg resolves an overlay argument to an absolute path. It first
-// tries an installed overlay by name (exact, bare or partial), then falls back to treating the argument as a file or
-// directory path. Mirrors the resolution used by `overlay info`.
+// resolveOverlayArg resolves an overlay argument to an absolute path: an installed
+// overlay by name (as `exec -o` resolves it), else a file or directory path.
 func resolveOverlayArg(arg string) (string, error) {
-	path, found, err := installedOverlayPath(catalog.Normalize(arg))
-	if err != nil {
-		return "", err
-	}
-	if found {
-		return path, nil
-	}
-	abs, _ := filepath.Abs(arg)
-	if !utils.FileExists(abs) && !utils.DirExists(abs) {
-		return "", fmt.Errorf("overlay %s not found", utils.StylePath(abs))
-	}
-	return abs, nil
+	return installedOverlayFile(context.Background(), arg)
 }
 
 // openExportOutput returns a writer, a close func, and a destination label.

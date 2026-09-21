@@ -56,7 +56,7 @@ func Expand(r *Recipe, vars map[string]string) (*Recipe, error) {
 	// expansion unchanged.
 	out.Sources = make([]SourceURL, len(r.Sources))
 	for i, src := range r.Sources {
-		out.Sources[i] = SourceURL{Name: src.Name, URL: replaceVars(src.URL, vars), Prompt: replaceVars(src.Prompt, vars)}
+		out.Sources[i] = SourceURL{Name: src.Name, Arch: src.Arch, URL: replaceVars(src.URL, vars), Prompt: replaceVars(src.Prompt, vars)}
 	}
 
 	out.Inputs = slices.Clone(r.Inputs)

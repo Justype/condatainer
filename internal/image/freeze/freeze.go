@@ -219,9 +219,6 @@ func stagePayload(ctx context.Context, img, scratch string, payloadMB int) (stri
 // it is recorded by whoever refers to the artifact.
 func describe(opts Options, tr Translation, env []meta.EnvVar, entries []Entry, tools meta.BuildTools) (meta.Manifest, meta.Runtime) {
 	payloadMB := payloadSizeMB(entries)
-	// Uname form, which is what recipes, Conda subdirs and users all say — and
-	// what MountAllowed compares against, so GOARCH here would make every frozen
-	// artifact look like it was built for another machine.
 	platform := meta.NativePlatform()
 
 	m := meta.Manifest{

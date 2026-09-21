@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -189,5 +190,29 @@ func TestDefinitionRefusesSourceAndInput(t *testing.T) {
 		"#TYPE:data\n#SOURCE:gtf https://example.invalid/a\n#INPUT:go on\necho build\n")
 	if err := script.Validate(); err != nil {
 		t.Errorf("a script recipe was refused: %v", err)
+	}
+}
+
+func TestSourcePerArchitecture(t *testing.T) {
+	rec := parse(t, "recipes/tool/1", strings.Join([]string{
+		"#SOURCE:bin amd64 https://example.invalid/tool-x64",
+		"#SOURCE:bin arm64 https://example.invalid/tool-a64",
+		"#SOURCE:pkg arm64 ask:paste the arm64 link",
+	}, "\n")+"\n")
+	got, err := rec.SourcesFor("arm64")
+	if err != nil || len(got) != 2 || got[0].URL != "https://example.invalid/tool-a64" || got[1].Prompt != "paste the arm64 link" {
+		t.Fatalf("SourcesFor(arm64) = %+v, %v", got, err)
+	}
+	if _, err := rec.SourcesFor("amd64"); !errors.Is(err, ErrNoSourceForArch) {
+		t.Errorf("SourcesFor(amd64) error = %v, want ErrNoSourceForArch", err)
+	}
+	for _, text := range []string{
+		"#SOURCE:bin amd64 https://a\n#SOURCE:bin amd64 https://b\n",
+		"#SOURCE:bin https://a\n#SOURCE:bin arm64 https://b\n",
+		"#SOURCE:bin x86_64 https://a\n",
+	} {
+		if err := parse(t, "recipes/tool/1", text).Validate(); !errors.Is(err, ErrInvalidRecipe) {
+			t.Errorf("Validate(%q) = %v, want ErrInvalidRecipe", text, err)
+		}
 	}
 }

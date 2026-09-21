@@ -3,11 +3,12 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 
 	"github.com/Justype/condatainer/catalog"
-	"github.com/Justype/condatainer/internal/image"
 	"github.com/Justype/condatainer/internal/project"
 	"github.com/Justype/condatainer/internal/project/lock"
+	"github.com/Justype/condatainer/internal/runtime/container"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -85,13 +86,21 @@ func resolveOverlayValues(ctx context.Context, values []string, standing *projec
 	return out, nil
 }
 
-// installedOverlayPath resolves a name — bare, partial or exact — to the
-// installed overlay it means, for the commands that act on one overlay.
-func installedOverlayPath(name string) (string, bool, error) {
-	scan, err := image.ScanOverlays(image.ScanOptions{})
+// installedOverlayFile resolves an overlay argument the way `exec -o` does: the
+// project and catalog step first, then the installed-overlay map that mounts
+// use. A file or directory that exists is returned as an absolute path.
+func installedOverlayFile(ctx context.Context, arg string) (string, error) {
+	resolved, err := projectOverlays(ctx, []string{arg})
 	if err != nil {
-		utils.PrintWarning("%v", err)
+		return "", err
 	}
-	_, path, found, err := catalog.SolveInstalled(context.Background(), scan, projectDefaultDistro(), name)
-	return path, found, err
+	abs, _ := filepath.Abs(resolved[0])
+	if utils.FileExists(abs) || utils.DirExists(abs) {
+		return abs, nil
+	}
+	paths, err := container.ResolveOverlayPaths(resolved)
+	if err != nil || len(paths) != 1 {
+		return "", fmt.Errorf("overlay %s not found", utils.StylePath(arg))
+	}
+	return paths[0], nil
 }

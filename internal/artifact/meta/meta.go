@@ -56,7 +56,7 @@ type Platform struct {
 	// OS is recorded as linux and never compared: everything runs in a Linux
 	// container, so it is a label rather than a gate.
 	OS string `json:"os"`
-	// Arch is the build architecture in uname form, or the literal "noarch" for
+	// Arch is the build architecture as amd64 or arm64, or the literal "noarch" for
 	// an artifact whose recipe declared it is architecture-independent.
 	Arch string `json:"arch"`
 }
@@ -69,18 +69,9 @@ func NativePlatform() Platform {
 	return Platform{OS: "linux", Arch: NativeArch()}
 }
 
-// NativeArch reports the running architecture in uname form, which is what
-// recipes, Conda subdirs and users all say.
-func NativeArch() string {
-	switch runtime.GOARCH {
-	case "amd64":
-		return "x86_64"
-	case "arm64":
-		return "aarch64"
-	default:
-		return runtime.GOARCH
-	}
-}
+// NativeArch reports the running architecture, spelled as Go does: amd64 or
+// arm64.
+func NativeArch() string { return runtime.GOARCH }
 
 // EnvVar is one #ENV: contribution.
 type EnvVar struct {

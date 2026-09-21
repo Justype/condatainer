@@ -515,6 +515,7 @@ For tool-specific references, use the tool name as a prefix.
 
 - **CondaTainer** downloads each source before the script runs and exposes it as `$CNT_SRC_<name>`. The name may hold letters, digits and `_`.
 - A source takes one URL. `{placeholders}` from `#PH:` are substituted into it.
+- A download that differs by architecture is declared once per architecture, `amd64` or `arm64`, and the build uses the line for the machine it runs on. A name is either all with an architecture or all without. If no line matches, the build stops.
 - The file is read-only. To change it, copy it into `$CNT_TMP` first.
 - The SHA-256 of each file is recorded in the overlay and is part of its identity, so an upstream file that is re-released under the same name gives a different identity. The URL is not recorded.
 - A download made inside the script, with `curl` or `wget`, is not recorded.
@@ -536,6 +537,15 @@ For tool-specific references, use the tool name as a prefix.
 cd "$CNT_PREFIX"
 pigz -dc "$CNT_SRC_gtf" > "gencode.v{gencode_version}.primary_assembly.annotation.gtf"
 ```
+
+#### One file per architecture
+
+```bash
+#SOURCE:bin amd64 https://example.org/v{version}/tool-linux-x64
+#SOURCE:bin arm64 https://example.org/v{version}/tool-linux-aarch64
+```
+
+`$CNT_SRC_bin` is the file for the architecture the build runs on. `ask:` takes the same word: `#SOURCE:pkg arm64 ask:<prompt>`.
 
 #### Links only you have
 

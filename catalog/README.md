@@ -163,10 +163,18 @@ counting.
 
 ## `#SOURCE:` and the prompt list
 
-`#SOURCE:` declares a file the build fetches, as a name and either one URL or `ask:` and a prompt
-(`SourceURL`). A URL and a prompt both expand with the template, since a template's source URL is
+`#SOURCE:` declares a file the build fetches, as a name, an optional architecture, and either one URL
+or `ask:` and a prompt (`SourceURL`). A URL and a prompt both expand with the template, since a template's source URL is
 where it varies most. The name is all that survives expansion unchanged, and it is what the identity
 records the fetched digest against.
+
+The architecture is `amd64` or `arm64`, Go's spelling, which is also what artifacts record and what an
+OCI index says. It is recognised as a word from that fixed set directly after the name; a URL contains
+`://` and a prompt starts with `ask:`, so neither can be read as one. Vendors spell architectures too
+many ways for a placeholder to stand in for it, so each architecture is a literal line. `SourcesFor`
+picks the lines for one architecture, and a name with lines only for others is an error rather than an
+unset `$CNT_SRC_<name>`. A name is all qualified or all plain: mixing them would leave "which wins"
+to declaration order.
 
 `Recipe.Prompts` is the one ordered list of questions a build puts to the user: the `#INPUT:` prompts,
 then each `ask:` in declaration order. `#INPUT:` answers reach the recipe on stdin and `ask:` answers
