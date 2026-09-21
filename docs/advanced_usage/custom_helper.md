@@ -123,7 +123,7 @@ Used for the interactive prompt selector and `--help` display.
 Checked and auto-installed before the job starts. Declaration order is the Apptainer overlay stack order — **the last name is the topmost layer** and wins on file conflicts (e.g. `/var/lib/dpkg/status`).
 
 ```bash
-#REQUIRED_OVERLAYS: my-app/{VERSION} build-essential
+#REQUIRED_OVERLAYS: my-app/{VERSION} r-build-essential
 ```
 
 ### `#IMG_PACKAGES:` — writable Conda overlay

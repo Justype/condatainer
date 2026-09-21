@@ -26,7 +26,7 @@ Overlays are stackable, self-contained files that encapsulate executables and da
 OS overlays are stackable when based on the same distribution version.
 
 ```bash
-condatainer e rstudio-server build-essential
+condatainer e rstudio-server r-build-essential
 ```
 ````
 
@@ -45,7 +45,7 @@ Module overlays are categorized into different types:
 
 ### Naming Convention
 
-- OS: `<distro>/<name>` (e.g., `ubuntu24/build-essential`)
+- OS: `<distro>/<name>` (e.g., `ubuntu24/r-build-essential`)
 - Bundle / Env: `<name>` — no slash (e.g., `env`, `sci_rna`)
 - App (Module): `<name>/<version>` (e.g., `cellranger/9.0.1`)
 - Data (Module): `<assembly|project>/<datatype>/<version>`

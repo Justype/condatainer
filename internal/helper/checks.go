@@ -2,8 +2,11 @@ package helper
 
 import (
 	"context"
+	"fmt"
 	"os"
 
+	"github.com/Justype/condatainer/catalog"
+	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/image"
 	"github.com/Justype/condatainer/internal/logging"
 	"github.com/Justype/condatainer/internal/project"
@@ -118,12 +121,11 @@ func SingletonBlocked(meta HelperScriptMeta, running []*HelperRun) bool {
 // CheckRequiredOverlays expands {tokens} in meta.RequiredOverlays using
 // params and returns the resolved absolute paths.
 //
-// cwd standing in a project resolves every name through that project's lock
-// instead of by installed name, building nothing — a helper's required
-// overlays reach the lock only as manual pins, so an unresolved one names
-// `project restore`. Outside a project, when cwd is not one, or when
-// noProject is set, each name is ensured on disk the ordinary way, building
-// any missing one via `condatainer create`.
+// Standing in a project, a name resolves the way `exec -o` does: through its
+// pin, else against what is installed; a pinned artifact absent here names
+// `project restore`. Only a name nothing installed answers is built via
+// `condatainer create`, as is every name outside a project, when cwd is not
+// one, or when noProject is set. A helper never adds a pin.
 //
 // Returns (nil, nil) when the template is empty. Public wrapper around the
 // previously unexported checkAndInstallNamedOverlays.
@@ -133,18 +135,49 @@ func CheckRequiredOverlays(ctx context.Context, cwd, requiredTemplate string, pa
 	}
 	logger := logging.FromContext(ctx)
 	names := resolveOverlayTemplate(requiredTemplate, params)
-	if !noProject {
-		standing, err := project.StandingAt(cwd)
+	if noProject {
+		logger.Info("Checking required overlays")
+		return checkAndInstallNamedOverlays(ctx, names, config.ResolvedDefaultDistro())
+	}
+	standing, err := project.StandingAt(cwd)
+	if err != nil {
+		return nil, err
+	}
+	if standing == nil {
+		logger.Info("Checking required overlays")
+		return checkAndInstallNamedOverlays(ctx, names, config.ResolvedDefaultDistro())
+	}
+	logger.Info("Checking required overlays", "project", standing.Root)
+	mounts, err := standing.ResolveNames(ctx, names)
+	if err != nil {
+		return nil, err
+	}
+	var missing []string
+	for i, mount := range mounts {
+		if mount.Path == "" {
+			missing = append(missing, names[i])
+		} else if mount.Live && mount.Name != catalog.Normalize(names[i]) {
+			logger.Info(fmt.Sprintf("%s -> %s", names[i], mount.Name), "kind", "note")
+		}
+	}
+	built := map[string]string{}
+	if len(missing) > 0 {
+		paths, err := checkAndInstallNamedOverlays(ctx, missing, standing.DefaultDistro())
 		if err != nil {
 			return nil, err
 		}
-		if standing != nil {
-			logger.Info("Checking required overlays", "project", standing.Root)
-			return standing.ResolveNames(ctx, names)
+		for i, name := range missing {
+			built[name] = paths[i]
 		}
 	}
-	logger.Info("Checking required overlays")
-	return checkAndInstallNamedOverlays(ctx, names)
+	out := make([]string, len(names))
+	for i, mount := range mounts {
+		out[i] = mount.Path
+		if mount.Path == "" {
+			out[i] = built[names[i]]
+		}
+	}
+	return out, nil
 }
 
 // CheckHelperPackages verifies that every package in meta.ImgPackages is

@@ -116,11 +116,12 @@ It exists because a project depends on artifacts no `#DEP:` names:
 - a helper declares `#REQUIRED_OVERLAYS: r{POSIT_R} rstudio-server
   build-essential`, which the project scanner never reads — it reads `#DEP:` in
   project scripts, and a helper's overlay list is a different declaration
-  entirely. `Standing.ResolveNames` (`standing.go`) is how those names still
-  reach the pins once launched with a project as their working directory:
-  `internal/helper.CheckRequiredOverlays` calls `project.StandingAt` first,
-  falling back to its ordinary on-disk check and auto-install only when there
-  is no project to resolve against;
+  entirely. A helper never pins: `internal/helper.CheckRequiredOverlays` resolves
+  its names through `Standing.ResolveNames` (`standing.go`), which answers like
+  `exec -o` — a pin the user set, else what is installed — and the helper
+  builds only what nothing answers. Those overlays are the user's to pin,
+  later, when they want the reproducibility; many, like `rstudio-server`, are
+  wanted newer, not held;
 - a **frozen environment** is named by nobody. It is what downstream analysis
   runs *in* rather than something a script consumes, so nothing selects one per
   script and no `#DEP:` ever mentions it.
@@ -162,10 +163,9 @@ history (`internal/helper/README.md`): which pin key each recorded overlay —
 a helper's required overlays and the ones the user added alike — would
 address, mapped to the helper names that used it.
 `UnpinnedHelperOverlays` is that index's keys with no matching pin — what
-answers "why does a helper's `#REQUIRED_OVERLAYS:` refuse instead of
-resolving ambiently" concretely: the strict resolution stays exactly as
-strict, and this only adds discoverability, surfaced in `project
-status`/`project lock`'s report under its own heading, never merged into the
+answers "which of a helper's `#REQUIRED_OVERLAYS:` does the project not
+hold", surfaced in `project status`/`project lock`'s report under its own
+heading, never merged into the
 `#DEP:`-derived unpinned list and never written as a pin. `ManualPinUsage` is
 the same index read the other way — for each manual pin, which helpers are
 recorded using it, the manual-pin equivalent of a `#DEP:` pin's own
@@ -713,14 +713,16 @@ error, and a catalog-only hit with nothing on disk is still unresolved.
 `exec -o`, `run`'s script scan and `check` set `LiveResolve: true`, matching
 the fact that `-o` and `#DEP:` already classify through the identical grammar
 and are meant to behave alike whether or not a project happens to be standing.
-A helper's `#REQUIRED_OVERLAYS:` (`Standing.ResolveNames`) and the project's
-own root (`Standing.Base`) leave it unset: both are fixed requirements a
-project locks rather than lets float, and their own callers already document
-why — see **Manual pins** and **The project's root**. A resolved mount that
-came from `LiveResolve` carries `Mount.Live` rather than a recorded
-`Identity`, since nothing was pinned to compare against; every caller that
-sets `LiveResolve` prints a note naming what it resolved to, so the outcome is
-visible without needing to be reconstructed.
+The project's own root (`Standing.Base`) leaves it unset: it is a fixed
+requirement a project locks rather than lets float — see **The project's
+root**. A helper's `#REQUIRED_OVERLAYS:` (`Standing.ResolveNames`) sets it,
+like `exec -o`, and expands bare names under the project's selected distro; a
+name nothing installed answers comes back with no path for the helper to build.
+
+A resolved mount that came from `LiveResolve` carries `Mount.Live` rather than
+a recorded `Identity`, since nothing was pinned to compare against; every
+caller that sets `LiveResolve` prints a note naming what it resolved to, so
+the outcome is visible without needing to be reconstructed.
 
 ## Verification
 

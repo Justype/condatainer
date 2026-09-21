@@ -17,7 +17,7 @@ See [Helper Scripts](./helpers.md) for SSH port forwarding setup, resource flags
 
 ## rstudio-server (Posit R)
 
-Uses [Posit R image overlays](https://hub.docker.com/r/posit/r-base) — a separate `r<version>` overlay is auto-installed alongside `rstudio-server` and `build-essential`.
+Uses [Posit R image overlays](https://hub.docker.com/r/posit/r-base) — a separate `r<version>` overlay is auto-installed alongside `rstudio-server` and `r-build-essential`.
 
 ### Writable Overlay
 
@@ -44,7 +44,7 @@ Partial versions are accepted: `-r 4.4` uses the latest 4.4.x available. See [He
 
 ### Installing R Packages
 
-The `build-essential` overlay provides common system libraries. Install packages normally:
+The `r-build-essential` overlay provides common system libraries. Install packages normally:
 
 ```R
 install.packages("tidyverse")
@@ -82,10 +82,10 @@ condatainer helper rstudio-server -o additional-deps.sqf
 ### Run R Without RStudio
 
 ```bash
-condatainer exec -o r4.4.3 -o build-essential -o env.img Rscript script.R
+condatainer exec -o r4.4.3 -o r-build-essential -o env.img Rscript script.R
 
 # If you have other overlays, append them
-condatainer exec -o r4.4.3 -o build-essential -o r-deps.sqf -o env.img Rscript script.R
+condatainer exec -o r4.4.3 -o r-build-essential -o r-deps.sqf -o env.img Rscript script.R
 ```
 
 ## rstudio-server-conda (Conda R)

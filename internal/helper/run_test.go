@@ -50,7 +50,7 @@ func TestCheckAndInstallNamedOverlaysReusesInstalled(t *testing.T) {
 		config.ResetCatalog()
 	})
 
-	paths, err := checkAndInstallNamedOverlays(context.Background(), []string{"rstudio-server"})
+	paths, err := checkAndInstallNamedOverlays(context.Background(), []string{"rstudio-server"}, "ubuntu24")
 	if err != nil {
 		t.Fatalf("checkAndInstallNamedOverlays: %v", err)
 	}

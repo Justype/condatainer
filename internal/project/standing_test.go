@@ -2,7 +2,6 @@ package project
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	"github.com/Justype/condatainer/internal/project/lock"
@@ -26,15 +25,14 @@ func TestStandingAtNilOutsideAProject(t *testing.T) {
 func TestStandingResolveNamesEmptyWithNoNames(t *testing.T) {
 	standing := &Standing{Root: projectRoot(t), Lock: lock.New()}
 
-	if paths, err := standing.ResolveNames(context.Background(), nil); paths != nil || err != nil {
-		t.Fatalf("paths = %v, err = %v, want nil and no error with no names", paths, err)
+	if mounts, err := standing.ResolveNames(context.Background(), nil); mounts != nil || err != nil {
+		t.Fatalf("mounts = %v, err = %v, want nil and no error with no names", mounts, err)
 	}
 }
 
-// A required overlay the project has not pinned is a refusal naming
-// `project restore`, never a fall back to whatever currently answers to the
-// name.
-func TestStandingResolveNamesRefusesAnUnpinnedName(t *testing.T) {
+// A required overlay the project has not pinned and nothing installed answers
+// is left for the caller to acquire: an empty path, no error.
+func TestStandingResolveNamesLeavesAnUnpinnedNameEmpty(t *testing.T) {
 	root := projectRoot(t)
 	if err := lock.Publish(root, lock.New()); err != nil {
 		t.Fatal(err)
@@ -44,12 +42,12 @@ func TestStandingResolveNamesRefusesAnUnpinnedName(t *testing.T) {
 		t.Fatalf("StandingAt: standing = %v, err = %v", standing, err)
 	}
 
-	_, err = standing.ResolveNames(context.Background(), []string{"ubuntu24/build-essential"})
-	if err == nil {
-		t.Fatal("an unpinned required overlay was accepted")
+	mounts, err := standing.ResolveNames(context.Background(), []string{"ubuntu24/build-essential"})
+	if err != nil {
+		t.Fatalf("an unpinned required overlay was refused: %v", err)
 	}
-	if !strings.Contains(err.Error(), "project restore") {
-		t.Errorf("error does not name the remedy: %v", err)
+	if len(mounts) != 1 || mounts[0].Path != "" {
+		t.Errorf("mounts = %+v, want one with no path", mounts)
 	}
 }
 

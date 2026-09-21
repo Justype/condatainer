@@ -284,15 +284,14 @@ func resolveOverlayTemplate(template string, params map[string]string) []string 
 // with a clear message before any build starts.
 // Unlike guided overlay creation (#IMG_PACKAGES:), no prompt is shown — named
 // overlays are fixed requirements, not user-configurable.
+// distro is what a bare name expands under.
 // Returns the resolved absolute paths to be prepended to opts.Overlays.
-func checkAndInstallNamedOverlays(ctx context.Context, names []string) ([]string, error) {
+func checkAndInstallNamedOverlays(ctx context.Context, names []string, distro string) ([]string, error) {
 	condaBin, err := os.Executable()
 	if err != nil {
 		condaBin = "condatainer"
 	}
 	logger := logging.FromContext(ctx)
-
-	distro := config.ResolvedDefaultDistro()
 
 	resolveAll := func(pending []string, installed map[string][]string) (map[string][]string, []string, error) {
 		found := make(map[string][]string, len(pending))

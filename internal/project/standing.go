@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Justype/condatainer/internal/config"
 	"github.com/Justype/condatainer/internal/project/lock"
 )
 
@@ -57,35 +58,67 @@ func (s *Standing) ResolveComplete(ctx context.Context, requests []lock.Request,
 	return resolution, nil
 }
 
+// DefaultDistro is the distro a bare name expands under here: the project's
+// selected root, else the configured default_distro.
+func (s *Standing) DefaultDistro() string {
+	if distro := s.SelectedDistro(); distro != "" {
+		return distro
+	}
+	return config.ResolvedDefaultDistro()
+}
+
 // ResolveNames resolves each of names — parsed with the same grammar a
-// `#DEP:` uses — against the standing project, in order.
-//
-// Every name must already be pinned: a caller reaching for this declares its
-// own fixed requirements outside any `#DEP:`, so they reach the lock only as
-// manual pins (see README, "Manual pins"). An unresolved name is therefore an
-// error naming `project restore`, never a fall back to whatever currently
-// answers to the name.
-func (s *Standing) ResolveNames(ctx context.Context, names []string) ([]string, error) {
+// `#DEP:` uses — the way `exec -o` does: a pinned name through its pin, any
+// other name live against what is installed. It returns one Mount per name, in
+// order; a name nothing installed answers has an empty Path, for the caller to
+// acquire. A pinned artifact absent here, and an unpinned path, refuse naming
+// `project restore`.
+func (s *Standing) ResolveNames(ctx context.Context, names []string) ([]Mount, error) {
 	if len(names) == 0 {
 		return nil, nil
 	}
-	requests := make([]lock.Request, 0, len(names))
-	for _, name := range names {
+	requests := make([]lock.Request, len(names))
+	for i, name := range names {
 		request, reason := lock.ParseDeclaration(name)
 		if reason != "" {
 			return nil, fmt.Errorf("%s: %s", name, reason)
 		}
-		requests = append(requests, request)
+		requests[i] = request
 	}
-	resolution, err := s.ResolveComplete(ctx, requests, ResolveOptions{})
+	resolution, err := Resolve(ctx, s.Root, s.Lock, requests, ResolveOptions{LiveResolve: true, Distro: s.DefaultDistro()})
 	if err != nil {
 		return nil, err
 	}
-	paths := make([]string, len(resolution.Mounts))
-	for i, mount := range resolution.Mounts {
-		paths[i] = mount.Path
+	answered := make(map[string]Mount, len(resolution.Mounts))
+	for _, mount := range resolution.Mounts {
+		answered[mount.Request] = mount
 	}
-	return paths, nil
+	var refused Resolution
+	mounts := make([]Mount, len(requests))
+	for i, request := range requests {
+		if mount, ok := answered[request.Key]; ok {
+			mounts[i] = mount
+			continue
+		}
+		if _, _, pinned := lock.MatchPin(s.Lock, request); pinned || request.Kind != lock.KindName {
+			refused.Unresolved = append(refused.Unresolved, unresolvedFor(resolution, request.Key))
+		}
+		mounts[i] = Mount{Request: request.Key}
+	}
+	if len(refused.Unresolved) > 0 {
+		return nil, unresolvedError(s.Root, &refused)
+	}
+	return mounts, nil
+}
+
+// unresolvedFor is the entry of resolution for key.
+func unresolvedFor(resolution *Resolution, key string) Unresolved {
+	for _, unresolved := range resolution.Unresolved {
+		if unresolved.Request == key {
+			return unresolved
+		}
+	}
+	return Unresolved{Request: key}
 }
 
 // Base resolves the standing project's reserved root pin (lock.BaseKey) to a
@@ -93,7 +126,7 @@ func (s *Standing) ResolveNames(ctx context.Context, names []string) ([]string, 
 // which `project lock` no longer leaves possible, but an older or hand-built
 // lock might — so a caller falls through to its own ordinary default.
 //
-// Strict otherwise, like ResolveNames: an unresolved pin refuses naming
+// Strict, unlike ResolveNames: an unresolved pin refuses naming
 // `project restore` rather than silently falling back to this machine's
 // configured default_distro. See README, "The project's root".
 func (s *Standing) Base(ctx context.Context) (string, error) {
