@@ -141,9 +141,24 @@ func (bg *BuildGraph) resolvePlan(ctx context.Context, roots []string, hidden ma
 		order = append(order, obj)
 	}
 
+	// Settled before the split below: a node with a prebuilt to pull is local
+	// work, whatever its recipe would ask of a scheduler.
+	for _, obj := range order {
+		if bg.installedAlready(obj) {
+			continue
+		}
+		planned, known := bg.dependencyPlan(obj)
+		obj.plannedDeps = planned
+		if err := obj.planPrebuilt(ctx, known); err != nil {
+			return err
+		}
+	}
+	order = bg.pruneDependencies(order, roots)
+
 	log := logging.FromContext(ctx)
 	for _, obj := range order {
-		scheduled := bg.submitJobs && bg.scheduler != nil && obj.RequiresScheduler()
+		pull := obj.prebuilt.choice == prebuiltPull
+		scheduled := !pull && bg.submitJobs && bg.scheduler != nil && obj.RequiresScheduler()
 		if scheduled {
 			bg.schedulerBuilds = append(bg.schedulerBuilds, obj)
 		} else {
@@ -152,13 +167,104 @@ func (bg *BuildGraph) resolvePlan(ctx context.Context, roots []string, hidden ma
 		if obj.IsInstalled() {
 			continue
 		}
-		if scheduled {
-			log.Info(obj.NameVersion()+" will be built by a scheduler job", "kind", "note")
-		} else {
-			log.Info(obj.NameVersion()+" will be built locally", "kind", "note")
+		verb := "installed"
+		if obj.prebuilt.choice == prebuiltNone {
+			verb = "built"
+		}
+		switch {
+		case pull:
+			log.Info(obj.NameVersion()+" will be pulled from "+obj.prebuilt.candidate.endpoint, "kind", "note")
+			if len(obj.prunedDeps) > 0 {
+				log.Info(fmt.Sprintf("its build dependencies are not installed: %s; `condatainer install` adds them",
+					strings.Join(obj.prunedDeps, ", ")), "kind", "note")
+			}
+		case scheduled:
+			log.Info(obj.NameVersion()+" will be "+verb+" by a scheduler job", "kind", "note")
+		default:
+			log.Info(obj.NameVersion()+" will be "+verb+" locally", "kind", "note")
 		}
 	}
 	return nil
+}
+
+// dependencyPlan returns what obj's dependencies will contribute to its
+// equivalence, for those not installed yet, and whether every dependency's
+// contribution is known: installed with keys, or planned. A dependency neither
+// installed nor planned leaves obj undecided.
+func (bg *BuildGraph) dependencyPlan(obj *BuildObject) (map[string]plannedDep, bool) {
+	planned := make(map[string]plannedDep)
+	for _, raw := range obj.Dependencies() {
+		requested, constrained := raw, raw
+		if !catalog.IsPathDep(raw) {
+			parsed, err := catalog.ParseDep(raw)
+			if err != nil {
+				continue
+			}
+			requested, constrained = parsed.NameVersion(), parsed.String()
+		}
+		if depObj, inGraph := bg.graph[requested]; inGraph && !bg.installedAlready(depObj) {
+			dep, ok := depObj.plannedAs()
+			if !ok {
+				return nil, false
+			}
+			planned[requested] = dep
+			continue
+		}
+		if _, _, err := readDependencyManifest(constrained); err != nil {
+			return nil, false
+		}
+	}
+	return planned, true
+}
+
+// pruneDependencies drops the nodes only a pulled node depended on. A pull opens
+// none of its build dependencies, so installing them is left to the user; a
+// dependency a root or a node that builds needs stays.
+func (bg *BuildGraph) pruneDependencies(order []*BuildObject, roots []string) []*BuildObject {
+	needed := make(map[string]bool, len(order))
+	for _, name := range roots {
+		needed[name] = true
+	}
+	for i := len(order) - 1; i >= 0; i-- {
+		obj := order[i]
+		if !needed[obj.NameVersion()] || obj.prebuilt.choice == prebuiltPull {
+			continue
+		}
+		for _, dep := range bg.graphDependencies(obj) {
+			needed[dep] = true
+		}
+	}
+	kept := make([]*BuildObject, 0, len(order))
+	for _, obj := range order {
+		if !needed[obj.NameVersion()] {
+			obj.pruned = true
+			continue
+		}
+		if obj.prebuilt.choice == prebuiltPull {
+			for _, dep := range bg.graphDependencies(obj) {
+				if !needed[dep] {
+					obj.prunedDeps = append(obj.prunedDeps, dep)
+				}
+			}
+		}
+		kept = append(kept, obj)
+	}
+	return kept
+}
+
+// graphDependencies names the dependencies of obj that are nodes of this graph.
+func (bg *BuildGraph) graphDependencies(obj *BuildObject) []string {
+	var out []string
+	for _, raw := range obj.Dependencies() {
+		name := raw
+		if parsed, err := catalog.ParseDep(raw); err == nil {
+			name = parsed.NameVersion()
+		}
+		if depObj, ok := bg.graph[name]; ok && !bg.installedAlready(depObj) {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 // resolveBase satisfies the implicit edge from every script and Conda build to
@@ -167,6 +273,11 @@ func (bg *BuildGraph) resolvePlan(ctx context.Context, roots []string, hidden ma
 func (bg *BuildGraph) resolveBase(ctx context.Context) error {
 	var dependents []*BuildObject
 	for _, obj := range bg.graph {
+		// A pull, and a node dropped for one, never runs in the base; a pull
+		// that falls back to a build resolves it then.
+		if obj.pruned || obj.prebuilt.choice == prebuiltPull {
+			continue
+		}
 		if obj.BuildType() != BuildTypeDef && (bg.update || !obj.IsInstalled()) {
 			dependents = append(dependents, obj)
 		}
@@ -235,7 +346,7 @@ func (bg *BuildGraph) runLocalStep(ctx context.Context) error {
 			continue
 		}
 		logging.FromContext(ctx).Debug("processing overlay (local build)", "name", obj.NameVersion())
-		if err := obj.Build(ctx, false); err != nil {
+		if err := obj.Build(ctx, len(obj.prunedDeps) > 0); err != nil {
 			return fmt.Errorf("failed to build %s: %w", obj.NameVersion(), err)
 		}
 	}
@@ -351,7 +462,7 @@ func (bg *BuildGraph) submitJob(obj *BuildObject, depIDs []string) (string, erro
 	// Create job specification
 	jobSpec := &scheduler.JobSpec{
 		Name:           obj.NameVersion(),
-		Command:        buildSchedulerCreateCommand(obj.jobTarget(), bg.jobFlags, bg.update, obj.StoreOverflow(), config.Global.Build.SkipPrebuilt, obj.InputAnswers()),
+		Command:        buildSchedulerCreateCommand(obj.jobTarget(), bg.jobFlags, bg.update, obj.StoreOverflow(), config.Global.Build.SkipPrebuilt || obj.prebuilt.choice == prebuiltNone, obj.InputAnswers()),
 		Specs:          specs,
 		DepJobIDs:      depIDs,
 		OverrideOutput: true,

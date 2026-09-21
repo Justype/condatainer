@@ -87,6 +87,18 @@ type BuildObject struct {
 	// descriptor supplies automatic prebuilt endpoints; local and Conda builds
 	// leave it nil.
 	catalogSource *catalog.Source
+	// prebuilt is what planning decided about a published artifact for this node.
+	prebuilt prebuiltPlan
+	// plannedEquiv is the equivalence key this node will carry, derived while
+	// planning so a dependent can be decided before this one is installed.
+	plannedEquiv meta.KeyRef
+	// plannedDeps is what dependencies not yet installed contribute to this
+	// node's equivalence, by the name the dependency was requested under.
+	plannedDeps map[string]plannedDep
+	// prunedDeps are the dependencies a planned pull leaves out of the plan.
+	prunedDeps []string
+	// pruned marks a node the plan dropped because only pulled nodes needed it.
+	pruned bool
 
 	// Build type and conda-specific fields
 	buildType      BuildType

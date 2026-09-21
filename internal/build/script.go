@@ -51,9 +51,14 @@ func (b *BuildObject) buildScript(ctx context.Context, buildDeps bool) error {
 		return err
 	}
 
-	if err := ensureMicromamba(ctx); err != nil {
-		b.Cleanup(true) //nolint:errcheck
-		return err
+	// A planned pull needs neither the toolchain nor the dependencies: only the
+	// build it may fall back to does.
+	planned := b.prebuilt.choice == prebuiltPull
+	if !planned {
+		if err := ensureMicromamba(ctx); err != nil {
+			b.Cleanup(true) //nolint:errcheck
+			return err
+		}
 	}
 
 	if err := b.createBuildLock(); err != nil {
@@ -63,16 +68,30 @@ func (b *BuildObject) buildScript(ctx context.Context, buildDeps bool) error {
 	defer b.removeBuildLock()
 	preparedPath := b.tgt.Prepared
 
+	if planned {
+		if pulled, err := b.tryPrebuilt(ctx); err != nil || pulled {
+			b.Cleanup(err != nil) //nolint:errcheck
+			return err
+		}
+		if err := ensureMicromamba(ctx); err != nil {
+			b.Cleanup(true) //nolint:errcheck
+			return err
+		}
+	}
+
 	// Data equivalence includes dependency equivalence, so dependencies must be
-	// present before deciding whether a published artifact can substitute. This
-	// still happens before creating the target's workspace or running its recipe.
+	// present before deciding whether a published artifact can substitute — unless
+	// planning already decided. This still happens before creating the target's
+	// workspace or running its recipe.
 	if err := b.buildDependencies(ctx, buildDeps); err != nil {
 		b.Cleanup(true) //nolint:errcheck
 		return err
 	}
-	if pulled, err := b.tryPrebuilt(ctx); err != nil || pulled {
-		b.Cleanup(err != nil) //nolint:errcheck
-		return err
+	if !planned {
+		if pulled, err := b.tryPrebuilt(ctx); err != nil || pulled {
+			b.Cleanup(err != nil) //nolint:errcheck
+			return err
+		}
 	}
 
 	// Sources are part of the identity, so they must arrive before it can be

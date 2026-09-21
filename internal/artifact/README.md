@@ -197,8 +197,9 @@ sorted placeholders.
 For script-identity-v1, every dependency is pinned by name and exact identity.
 For script-equiv-v1, a data dependency contributes its equivalence key, an app
 or OS named by the artifact contributes name/version, and a history-only app or
-OS contributes nothing. The manifest freezes this role, so verification never
-reapplies newer policy.
+OS contributes nothing. Only a data dependency's equivalence key is read, so a build can
+derive its key from that dependency's recipe before the dependency exists. The manifest freezes
+this role, so verification never reapplies newer policy.
 
 script-identity-v1 also carries one `src=<name>=<digest>` line for each `#SOURCE:` the build fetched,
 sorted by name. The digest is of the bytes as served and the URL never enters, because where a file

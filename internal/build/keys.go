@@ -183,6 +183,10 @@ func (b *BuildObject) dependencyKeys(ctx context.Context) []key.Dep {
 		// version it admits, so the edge names that one and carries its keys.
 		path, manifest, err := readDependencyManifest(constrained)
 		if err != nil {
+			if planned, ok := b.plannedDeps[requested]; ok {
+				out = append(out, key.Dep{Name: planned.Name, Type: planned.Type, Equiv: planned.Equiv})
+				continue
+			}
 			log.Debug("dependency carries no scheme-backed keys", "dep", requested, "err", err)
 			out = append(out, dep)
 			continue

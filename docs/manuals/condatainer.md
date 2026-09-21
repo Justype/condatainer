@@ -530,7 +530,7 @@ Check the layer if it matters who can see the result — `(app-root)` or `(extra
 
 * `--block-size [SIZE]`: SquashFS block size for app/env/external overlays (e.g. `128k`, `512k`; default: `128k`). Must be a power of two between `4k` and `1m`.
 * `--data-block-size [SIZE]`: SquashFS block size for data/reference overlays (e.g. `512k`, `1m`; default: `512k`). Must be a power of two between `4k` and `1m`.
-* `--no-prebuilt`: Build from the recipe even when a registry publishes a prebuilt artifact for it. Without it, a matching prebuilt is pulled instead of built.
+* `--no-prebuilt`: Build from the recipe even when a registry publishes a prebuilt artifact for it. Without it, a matching prebuilt is pulled instead of built: a pulled overlay's build dependencies are not installed (install them with their own `create`); an overlay that has to be built installs them first.
 * `--store`: Build into the [store](#store), filed under this build's identity instead of taking the plain name.
 
   It never skips and never replaces. Ordinarily a build of an already-installed name is skipped, and `-u` swaps the installed one out; `--store` is how you get a second build of that name installed alongside the first. It behaves the same when nothing holds the name yet — the build is filed by identity either way, so it stays out of `condatainer list` and out of `exec -o <name>` until you promote it with [`store use`](#store). That is the point of the flag: a build that changes nothing anyone else resolves.

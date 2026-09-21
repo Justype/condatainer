@@ -18,8 +18,9 @@ import (
 //   - named app/OS dependencies as name/version only
 //   - data dependencies by equivalence key only
 //
-// History-only app/OS dependencies are omitted. An unkeyed data dependency uses
-// "unrecorded" plus its name. Exact dependency identities never enter.
+// History-only app/OS dependencies are omitted. A data dependency with no
+// equivalence key uses "unrecorded" plus its name. Exact dependency identities
+// never enter, so a dependency that has only an equivalence key is enough.
 func deriveScriptEquivV1(a Artifact) (Value, Model, error) {
 	if a.Type != catalog.TypeApp && a.Type != catalog.TypeData {
 		return Value{}, Model{}, fmt.Errorf("%s cannot derive type %s", ScriptEquivV1, a.Type)
@@ -49,7 +50,7 @@ func scriptEquivDependenciesV1(name string, deps []Dep) []DependencyValue {
 		}
 		switch role {
 		case meta.RoleData:
-			if dep.Recorded() {
+			if dep.Equiv.Digest() != "" {
 				out = append(out, DependencyValue{
 					Type:   catalog.TypeData,
 					Fields: []string{dep.Equiv.Scheme, dep.Equiv.Digest()},

@@ -69,7 +69,7 @@ local path, or `#INPUT:` answer can reach either.
 
 **BuildType** - `BuildTypeConda`, `BuildTypeDef`, `BuildTypeScript`
 
-**BuildGraph** - Turns a solved `catalog.Plan` into build work: a BuildObject per missing node, run in dependency order — local builds sequentially, then scheduler submissions with job dependencies.
+**BuildGraph** - Turns a solved `catalog.Plan` into build work: a BuildObject per missing node, run in dependency order — local builds and prebuilt pulls sequentially, then scheduler submissions with job dependencies.
 
 **LockedSpec** - A rebuild described by a project lock rather than the catalog. See **Locked rebuilds** below.
 
@@ -208,9 +208,10 @@ directory got filled. Both end in `packOutput`.
 3. Create build lock (local, or adopt scheduler lock)
 4. Build missing dependencies (if enabled), derive the recipe equivalence key,
    and try the selected source's ordered pull endpoints. A matching artifact is
-   installed and stops here; absent, unsupported-platform, or unavailable
-   artifacts fall through to the local build. Credential, schema, type, and key
-   failures stop instead.
+   installed and stops here (a planned pull uses the candidate planning found);
+   absent, unsupported-platform, or unavailable
+   artifacts fall through to the local build, as does one made from a different
+   recipe, with a warning. Credential, schema and type failures stop instead.
 5. Fetch each `#SOURCE:` into the workspace and record its digest
 6. Resolve the build base and create the temporary overlay
 7. Run recipe inside container. The payload directory is bound at
@@ -493,20 +494,38 @@ somewhere a file-existence check never guessed.
    Installed versions come from the `Have` callback, so an installed dep is a map
    lookup rather than a build object.
 2. **Plan** - Create a BuildObject per missing node, in the solved order
-3. **Resolve the base** - Every script and Conda build runs inside it, so it is
-   built first; a scheduler job cannot build one on the node
-4. **Separate local/scheduler** - A build goes to the scheduler when its recipe carries directives,
+3. **Decide prebuilts** - In solved order, each node derives its equivalence from its recipe,
+   placeholders and what its dependencies contribute: an installed dependency's own keys, or, for
+   one still to be acquired, the key derived for it earlier in this pass (`plannedDeps`), so no
+   dependency has to be installed to decide. A node whose source lists pull endpoints is then looked
+   up at them by metadata alone (`planPrebuilt`). An artifact made from the same recipe makes it a
+   pull; anything else makes it a build, and one made from a different recipe is warned about. A
+   dependency neither installed nor planned — a path, a constraint nothing satisfies — leaves the
+   node undecided, and it looks when it builds. A Conda build, a source with no endpoints and
+   `--no-prebuilt` are decided as builds without a lookup. It is decided here so the plan can say
+   what will happen, and so a pull is never queued behind a scheduler job.
+
+   **A pull opens none of its build dependencies**, so `pruneDependencies` drops the nodes only
+   pulled nodes need and the plan lists them as not installed; the user adds them later with a
+   `create` of their own. A dependency a root or a node that builds needs stays. A pull that falls
+   through to a build acquires them then, which is why `buildScript` tries a planned pull before the
+   toolchain and the dependencies, and why the local step passes `buildDeps` for such a node.
+4. **Resolve the base** - Every script and Conda build runs inside it, so it is
+   built first; a scheduler job cannot build one on the node. A pull, and a node dropped for one,
+   does not need it; a pull that falls back to a build resolves it then
+5. **Separate local/scheduler** - A pull is always local. A build goes to the scheduler when its recipe carries directives,
    or when it is `data` and `build.always_submit_data` is set. A job re-runs `create`, so only a build
    that command can reproduce is submitted: a catalog name, or an external shell script, re-run as
    `create --name|--prefix … --file …` (`SetJobArgs`). A Conda build from packages or a file, a
    definition and a `.sif` or sandbox import run here.
-5. **Execute:**
-   - Local builds: sequentially, in dependency order
+6. **Execute:**
+   - Local builds and pulls: sequentially, in dependency order
    - Scheduler builds: submitted with dependency chains, each waiting on its deps. A job re-runs
      `condatainer create <name>` on the node, so the flags that change what is built or where it
      lands travel with it: `--channel`, `--source`, `--layer`, the block sizes and compression
      flag (`BuildGraph.SetJobFlags`), and `--update`, `--store` (only on the build that was asked
-     for, never a dependency) and `--no-prebuilt`. Submission flags are not repeated: the job is
+     for, never a dependency) and `--no-prebuilt`, which is also set on a node planning decided to
+     build, so the node need not look again. Submission flags are not repeated: the job is
      the submission.
 
 ## Environment Variables
