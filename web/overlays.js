@@ -1,4 +1,14 @@
 /* ── Overlays section ────────────────────── */
+// ensureOverlaysLoaded fills allOverlays once, for callers that match names
+// against it before the Overlays section has been opened, such as a rerun from
+// the History page. Concurrent callers share one request.
+let _overlaysLoading = null;
+function ensureOverlaysLoaded() {
+  if (allOverlays.length) return Promise.resolve();
+  if (!_overlaysLoading) _overlaysLoading = loadOverlays().finally(() => { _overlaysLoading = null; });
+  return _overlaysLoading;
+}
+
 async function loadOverlays() {
   try {
     const r = await fetch('/api/overlays');

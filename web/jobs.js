@@ -367,12 +367,13 @@ function detailStop() {
   if (btn && detailJobId) stopJob(detailJobId, btn);
 }
 
-function rerunJob(jobOrId) {
+async function rerunJob(jobOrId) {
   const id = typeof jobOrId === 'string' ? jobOrId : detailJobId;
   const job = typeof jobOrId === 'object' && jobOrId
     ? jobOrId
     : allJobs.find(j => j.id === id) || allHistory.find(j => j.id === id);
   if (!job) return;
+  await ensureOverlaysLoaded();
   queueStartSelection(job.name, {
     cpus:    job.cpus,
     mem:     job.mem,

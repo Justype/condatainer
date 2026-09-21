@@ -894,8 +894,9 @@ async function checkProjectReuse() {
 // applyReuseOverlays fills selectedModules/selectedExternalOverlays from the
 // newest combination — confirmed by the user clicking "Use", never applied
 // silently.
-function applyReuseOverlays() {
+async function applyReuseOverlays() {
   if (!_reuseCombos.length) return;
+  await ensureOverlaysLoaded();
   const overlays = _reuseCombos[0].overlays || [];
   selectedModules = [];
   selectedExternalOverlays = [];

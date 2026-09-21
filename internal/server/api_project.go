@@ -84,18 +84,13 @@ func (s *srv) handleProjectInfo(w http.ResponseWriter, r *http.Request) {
 func resolveRequired(r *http.Request, standing *project.Standing, distro, name string) requiredResolution {
 	out := requiredResolution{Name: name}
 	if standing != nil {
-		request, reason := lock.ParseDeclaration(name)
-		if reason != "" {
+		// As a launch resolves it: a pin if there is one, else what is installed.
+		mounts, err := standing.ResolveNames(r.Context(), []string{name})
+		if err != nil || len(mounts) != 1 || mounts[0].Path == "" {
 			return out
 		}
-		resolution, err := project.Resolve(r.Context(), standing.Root, standing.Lock,
-			[]lock.Request{request}, project.ResolveOptions{})
-		if err != nil || !resolution.Complete() {
-			return out
-		}
-		mount := resolution.Mounts[0]
-		out.Resolved = mount.Name
-		out.Ident = shortIdentity(mount.Identity)
+		out.Resolved = mounts[0].Name
+		out.Ident = shortIdentity(mounts[0].Identity)
 		return out
 	}
 	installed, err := image.ScanOverlays(image.ScanOptions{})
