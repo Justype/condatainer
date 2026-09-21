@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -59,7 +60,10 @@ own, from the recipe source the artifact was built from.
 
 What may be published depends on the endpoint's audience and on what the recipe
 declared about redistribution; a push that is not allowed is refused, never
-downgraded.`,
+downgraded.
+
+It shows where the artifact will go and asks before uploading. -y skips the
+question.`,
 		Example: `  condatainer registry push star/2.7.11b
   condatainer registry push ./overlays/star.sqf --registry ghcr.io/my-lab/cnt`,
 		Args:              cobra.ExactArgs(1),
@@ -74,9 +78,15 @@ downgraded.`,
 			if err != nil {
 				return err
 			}
-			if _, err := registry.Publish(cmd.Context(), registry.PublishRequest{
+			_, err = registry.Publish(cmd.Context(), registry.PublishRequest{
 				Path: artifact.path, Base: base, Audience: audience, Force: opts.force,
-			}); err != nil {
+				Confirm: func(plan registry.PublishPlan) bool { return confirmPush(cmd, plan) },
+			})
+			if errors.Is(err, registry.ErrDeclined) {
+				utils.PrintNote("Cancelled")
+				return nil
+			}
+			if err != nil {
 				return err
 			}
 			reportDone(cmd, "published", artifact.path)
@@ -628,4 +638,23 @@ func printFindings(findings []registry.Finding) {
 			utils.PrintNote("%s", finding.Text)
 		}
 	}
+}
+
+// confirmPush shows what a push is about to do and asks to go on. -y answers yes.
+func confirmPush(cmd *cobra.Command, plan registry.PublishPlan) bool {
+	utils.PrintMessage("Publish %s (%s)", utils.StyleName(plan.Name), utils.FormatSize(plan.Size))
+	utils.PrintMessage("  to %s (%s)", plan.Reference, plan.Audience)
+	utils.PrintMessage("  %d layer(s) of up to %s", plan.Layers, utils.FormatSize(plan.LayerSize))
+	if len(plan.Tags) > 1 {
+		utils.PrintMessage("  tags %s", strings.Join(plan.Tags, ", "))
+	}
+	if plan.Replace {
+		utils.PrintWarning("--force replaces this platform at an existing versioned tag.")
+	}
+	if utils.ShouldAnswerYes() {
+		return true
+	}
+	fmt.Fprint(cmd.ErrOrStderr(), "Push? [y/N]: ")
+	choice, err := utils.ReadLineContext(cmd.Context())
+	return err == nil && (choice == "y" || choice == "yes")
 }

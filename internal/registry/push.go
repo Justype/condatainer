@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -115,7 +116,25 @@ type PublishRequest struct {
 	// is not what that package's source is. The artifact keeps its own
 	// Build.Source in the embedded manifest either way.
 	Source string
+	// Confirm, when set, is asked once the destination is settled and before
+	// any bytes move. Returning false stops the push with ErrDeclined.
+	Confirm func(PublishPlan) bool
 }
+
+// PublishPlan is what a push is about to do, for a caller to show and confirm.
+type PublishPlan struct {
+	Name      string
+	Reference string   // the canonical tag's full reference
+	Tags      []string // every tag written
+	Size      int64
+	Layers    int
+	LayerSize int64
+	Audience  Audience
+	Replace   bool // Force will replace an existing versioned tag
+}
+
+// ErrDeclined reports a push its caller's Confirm turned down.
+var ErrDeclined = errors.New("push declined")
 
 // Publish validates an artifact against its destination, then pushes it, and
 // reports the platform manifest descriptor it published.
@@ -196,6 +215,21 @@ func Publish(ctx context.Context, req PublishRequest) (ocispec.Descriptor, error
 	if err := catalog.ValidSourceURL(annotations[AnnSource]); err != nil {
 		log.Warn("dropping the source annotation", "artifact", m.Name, "err", err)
 		delete(annotations, AnnSource)
+	}
+	if req.Confirm != nil {
+		var size int64
+		if info, err := os.Stat(req.Path); err == nil {
+			size = info.Size()
+		}
+		layerSize, _ := planLayerSize(size, profileFor(registryHost(req.Base)).MaxLayerSize)
+		plan := PublishPlan{
+			Name: m.Name, Reference: FullRef(req.Base, repo, tags[0]), Tags: tags,
+			Size: size, Layers: layerCount(size, layerSize), LayerSize: layerSize,
+			Audience: req.Audience, Replace: req.Force,
+		}
+		if !req.Confirm(plan) {
+			return ocispec.Descriptor{}, ErrDeclined
+		}
 	}
 	log.Info("publishing", "artifact", m.Name, "reference", FullRef(req.Base, repo, tags[0]))
 	return Push(ctx, req.Path, req.Base, repo, tags, annotations, m.Platform.Arch == meta.ArchNone)

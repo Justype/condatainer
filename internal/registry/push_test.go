@@ -426,3 +426,34 @@ func TestPublishKeepsTheSourceAnnotationUsable(t *testing.T) {
 		t.Errorf("%s = %q, want it dropped", AnnSource, got)
 	}
 }
+
+// A declined confirmation ends the push before anything is uploaded, and the
+// plan it was shown names the destination.
+func TestPublishStopsWhenTheConfirmationIsDeclined(t *testing.T) {
+	requireSquashfsTools(t)
+	source, m := packImage(t, imageSpec{
+		name: "grch38/genome/gencode49", typ: catalog.TypeData, recipe: "#!/bin/bash\nbuild index\n",
+	})
+	f := newFakeRegistry(t)
+	ctx := context.Background()
+
+	var shown PublishPlan
+	_, err := Publish(ctx, PublishRequest{Path: source, Base: f.base(),
+		Confirm: func(plan PublishPlan) bool { shown = plan; return false }})
+	if !errors.Is(err, ErrDeclined) {
+		t.Fatalf("err = %v, want ErrDeclined", err)
+	}
+	if shown.Layers < 1 || shown.LayerSize <= 0 {
+		t.Errorf("plan has no layer plan: %+v", shown)
+	}
+	if shown.Name != m.Name || shown.Size == 0 || !strings.HasPrefix(shown.Reference, f.base()) {
+		t.Errorf("plan = %+v", shown)
+	}
+	repo, tag, err := PullReference(m.Type, m.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := ResolveArtifact(ctx, f.base(), repo, tag); err == nil {
+		t.Error("a declined push uploaded the artifact")
+	}
+}

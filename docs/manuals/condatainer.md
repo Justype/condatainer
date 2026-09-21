@@ -1974,8 +1974,8 @@ condatainer registry list
 # Publish by installed name, inferring the selected source's oci.push endpoint.
 condatainer registry push grch38/genome/gencode49
 
-# A path states its endpoint. Public is the safe default; say restricted only
-# when a known set of people are the only ones who can pull.
+# A path states its endpoint. Public is the default and refuses an app whose
+# recipe does not allow redistribution; restricted takes anything.
 condatainer registry push ./licensed-app.sqf \
   --registry registry.lab.example/cnt --audience restricted
 
@@ -2002,6 +2002,10 @@ condatainer registry pull grch38/genome:gencode49 --prefix /project/images/genco
 version selection and may build when no published artifact exists. Pull never
 falls back to a build. Placement precedence is `--prefix`, `--name`, the exact
 address when it contains a complete name, then the published OCI title.
+
+`registry push` shows the artifact, its size and where it will go, then asks
+`Push? [y/N]` before uploading. `-y` answers yes, and `--force` adds a warning that
+it replaces an existing versioned tag.
 
 Credentials come from `GITHUB_TOKEN` for `ghcr.io`, then from those saved by
 `registry login`, then anonymous access. A saved credential is keyed by a host
