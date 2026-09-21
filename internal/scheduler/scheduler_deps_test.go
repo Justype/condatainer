@@ -328,3 +328,28 @@ func TestBuildLsfArgs(t *testing.T) {
 		})
 	}
 }
+
+func TestCheckDependencies(t *testing.T) {
+	afterOK := []Dependency{{Type: DependencyAfterOK, JobIDs: []string{"1"}}}
+	tests := []struct {
+		name    string
+		sched   SchedulerType
+		deps    []Dependency
+		wantErr bool
+	}{
+		{"none", SchedulerHTCondor, nil, false},
+		{"no job IDs", SchedulerHTCondor, []Dependency{{Type: DependencyAfterOK}}, false},
+		{"slurm afterok", SchedulerSLURM, afterOK, false},
+		{"pbs afternotok", SchedulerPBS, []Dependency{{Type: DependencyAfterNotOK, JobIDs: []string{"1"}}}, false},
+		{"lsf afterany", SchedulerLSF, []Dependency{{Type: DependencyAfterAny, JobIDs: []string{"1"}}}, false},
+		{"unknown type", SchedulerLSF, []Dependency{{Type: "afterburner", JobIDs: []string{"1"}}}, true},
+		{"htcondor refuses any", SchedulerHTCondor, afterOK, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := CheckDependencies(tt.sched, tt.deps); (err != nil) != tt.wantErr {
+				t.Errorf("CheckDependencies() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}

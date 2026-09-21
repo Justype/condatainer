@@ -1282,6 +1282,8 @@ These override the script's scheduler directives (`#SBATCH`, `#PBS`, `#BSUB`) fo
 * `--afterok IDS`: Submit job that runs only if all listed jobs **succeed**. Colon-separated IDs: `123:456:789`.
 * `--afternotok IDS`: Submit job that runs only if any listed job **fails**. Colon-separated IDs.
 * `--afterany IDS`: Submit job that runs after all listed jobs finish **regardless of outcome**. Colon-separated IDs.
+
+  HTCondor cannot express job dependencies: with `--afterok`, `--afternotok` or `--afterany`, `condatainer run` stops before building or submitting anything. Wait for the jobs to finish, then run without the flag.
 * `--array FILE`: Input file for an array job — one subjob per line, tokens become positional args.
 * `--array-limit N`: Max concurrently running subjobs (0 = unlimited).
 * `--dry-run`: Preview what would be submitted without executing anything, including the base, dependencies, and how nested running would get apptainer (`nested_run`).

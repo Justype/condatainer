@@ -262,6 +262,14 @@ func runScript(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// A dependency the scheduler cannot express is refused here, before any
+	// overlay is built or job submitted for this run.
+	if deps := runDependencies(); len(deps) > 0 && willSubmitRun(scriptSpecs) {
+		if err := scheduler.CheckDependencies(scheduler.ActiveScheduler().GetType(), deps); err != nil {
+			ExitWithError("%v", err)
+		}
+	}
+
 	// 2. Embedded #CNT args + dependency check/install
 	if err := processEmbeddedArgs(contentScript); err != nil {
 		return err
@@ -338,25 +346,7 @@ func runScript(cmd *cobra.Command, args []string) error {
 		if sched == nil {
 			utils.PrintNote("Script has scheduler specs but no scheduler is available. Running locally.")
 		} else {
-			var deps []scheduler.Dependency
-			parseDepFlag := func(val, depType string) {
-				if val == "" {
-					return
-				}
-				var ids []string
-				for _, id := range strings.Split(val, ":") {
-					if id = strings.TrimSpace(id); id != "" {
-						ids = append(ids, id)
-					}
-				}
-				if len(ids) > 0 {
-					deps = append(deps, scheduler.Dependency{Type: depType, JobIDs: ids})
-				}
-			}
-			parseDepFlag(runAfterOK, scheduler.DependencyAfterOK)
-			parseDepFlag(runAfterNotOK, scheduler.DependencyAfterNotOK)
-			parseDepFlag(runAfterAny, scheduler.DependencyAfterAny)
-			return submitRunJob(cmd.Context(), sched, originScriptPath, contentScript, scriptSpecs, deps, scriptArgs, arraySpec)
+			return submitRunJob(cmd.Context(), sched, originScriptPath, contentScript, scriptSpecs, runDependencies(), scriptArgs, arraySpec)
 		}
 	} else if !scheduler.HasSchedulerSpecs(scriptSpecs) {
 		utils.PrintNote("No scheduler specs found in script. Running locally.")
@@ -365,6 +355,35 @@ func runScript(cmd *cobra.Command, args []string) error {
 		utils.PrintNote("-o/-e/-m/-t/-g/-A/-p are only used for submitted jobs and will be ignored when running locally.")
 	}
 	return runLocally(cmd.Context(), contentScript, overlays, scriptSpecs, scriptArgs)
+}
+
+// runDependencies returns the typed dependencies given by --afterok,
+// --afternotok and --afterany.
+func runDependencies() []scheduler.Dependency {
+	var deps []scheduler.Dependency
+	for _, flag := range []struct{ val, depType string }{
+		{runAfterOK, scheduler.DependencyAfterOK},
+		{runAfterNotOK, scheduler.DependencyAfterNotOK},
+		{runAfterAny, scheduler.DependencyAfterAny},
+	} {
+		var ids []string
+		for id := range strings.SplitSeq(flag.val, ":") {
+			if id = strings.TrimSpace(id); id != "" {
+				ids = append(ids, id)
+			}
+		}
+		if len(ids) > 0 {
+			deps = append(deps, scheduler.Dependency{Type: flag.depType, JobIDs: ids})
+		}
+	}
+	return deps
+}
+
+// willSubmitRun reports whether this run goes to a scheduler rather than running
+// locally, which is when a dependency has anything to apply to.
+func willSubmitRun(specs *scheduler.ScriptSpecs) bool {
+	return config.Global.SubmitJob && scheduler.HasSchedulerSpecs(specs) &&
+		!scheduler.IsInsideJob() && !config.IsInsideContainer() && scheduler.ActiveScheduler() != nil
 }
 
 // resolveScriptAndSpecs tries to read scheduler specs and resolves the content script path.

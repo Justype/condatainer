@@ -769,6 +769,9 @@ func buildLsfArgs(deps []Dependency) []string {
 }
 
 func (l *LsfScheduler) Submit(ctx context.Context, scriptPath string, deps []Dependency) (string, error) {
+	if err := CheckDependencies(SchedulerLSF, deps); err != nil {
+		return "", err
+	}
 	args := buildLsfArgs(deps)
 
 	// LSF reads the script from stdin: bsub < script.lsf

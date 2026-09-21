@@ -239,7 +239,7 @@ PBS Pro/OpenPBS only; Torque not supported.
 
 - Parses native `.sub` files; `executable` → `ScriptSpecs.ScriptPath`
 - Resource keys: `request_cpus`, `request_memory`, `request_gpus`, `+MaxRuntime` (seconds)
-- Always single-task; no dependency support
+- Always single-task; no dependency support (`CheckDependencies` refuses any)
 
 ## Partition and Account
 
@@ -278,7 +278,7 @@ Pass `JobSpec.Array = &ArraySpec{...}` to `CreateScriptWithSpec`.
 
 ## Dependency Formats
 
-`Submit` accepts a `[]Dependency` slice. Each `Dependency` has a `Type` (`afterok`, `afternotok`, `afterany`) and a list of `JobIDs`. HTCondor does not support dependencies (requires DAGMan) — passing a non-empty dep list returns an error.
+`Submit` accepts a `[]Dependency` slice. Each `Dependency` has a `Type` (`afterok`, `afternotok`, `afterany`) and a list of `JobIDs`. `CheckDependencies` (`scheduler.go`) is the first thing every `Submit` does: it refuses a dependency the scheduler cannot express — a type outside `dependencyTypes`, and any dependency at all on HTCondor (which would need DAGMan) — so nothing is submitted, dropped or downgraded. `condatainer run` calls it before it builds or submits anything for the run.
 
 | Scheduler | Format |
 |-----------|--------|

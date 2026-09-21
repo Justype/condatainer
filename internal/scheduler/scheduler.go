@@ -3,9 +3,11 @@ package scheduler
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -318,6 +320,33 @@ const (
 type Dependency struct {
 	Type   string   // DependencyAfterOK, DependencyAfterNotOK, or DependencyAfterAny
 	JobIDs []string // Job IDs to depend on
+}
+
+// dependencyTypes are the Dependency types each scheduler can express. HTCondor
+// has no entry: it needs DAGMan, which is out of scope.
+var dependencyTypes = map[SchedulerType][]string{
+	SchedulerSLURM: {DependencyAfterOK, DependencyAfterNotOK, DependencyAfterAny},
+	SchedulerPBS:   {DependencyAfterOK, DependencyAfterNotOK, DependencyAfterAny},
+	SchedulerLSF:   {DependencyAfterOK, DependencyAfterNotOK, DependencyAfterAny},
+}
+
+// CheckDependencies returns an error for the first dependency in deps that
+// scheduler t cannot express, or nil. Every Submit calls it first, so an
+// unsupported dependency is refused rather than dropped or downgraded.
+func CheckDependencies(t SchedulerType, deps []Dependency) error {
+	for _, dep := range deps {
+		if len(dep.JobIDs) == 0 {
+			continue
+		}
+		if !slices.Contains(dependencyTypes[t], dep.Type) {
+			if len(dependencyTypes[t]) == 0 {
+				return fmt.Errorf("%s does not support job dependencies; nothing was submitted. Re-run once job(s) %s have finished",
+					t, strings.Join(dep.JobIDs, ", "))
+			}
+			return fmt.Errorf("%s does not support %q dependencies; nothing was submitted", t, dep.Type)
+		}
+	}
+	return nil
 }
 
 // JobSpec represents specifications for submitting a batch job

@@ -555,19 +555,10 @@ func (h *HTCondorScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir str
 	return subPath, nil
 }
 
-// Submit submits an HTCondor job with optional dependency chain
+// Submit submits an HTCondor job. Any dependency is refused: see dependencyTypes.
 func (h *HTCondorScheduler) Submit(ctx context.Context, scriptPath string, deps []Dependency) (string, error) {
-	// HTCondor does not support simple dependency flags like SLURM/PBS/LSF.
-	// Job dependencies require DAGMan, which is out of scope here.
-	// Return an error so the caller knows the run job was NOT submitted — the user
-	// must wait for the build jobs to complete and then re-run manually.
-	if len(deps) > 0 {
-		var allIDs []string
-		for _, dep := range deps {
-			allIDs = append(allIDs, dep.JobIDs...)
-		}
-		return "", fmt.Errorf("HTCondor does not support job dependencies: build job(s) %s were submitted; re-run once they finish",
-			strings.Join(allIDs, ", "))
+	if err := CheckDependencies(SchedulerHTCondor, deps); err != nil {
+		return "", err
 	}
 
 	// Execute condor_submit

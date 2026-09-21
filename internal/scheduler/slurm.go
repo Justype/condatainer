@@ -725,6 +725,9 @@ func buildSlurmSubmitArgs(deps []Dependency, scriptPath string) []string {
 }
 
 func (s *SlurmScheduler) Submit(ctx context.Context, scriptPath string, deps []Dependency) (string, error) {
+	if err := CheckDependencies(SchedulerSLURM, deps); err != nil {
+		return "", err
+	}
 	args := buildSlurmSubmitArgs(deps, scriptPath)
 
 	// Execute sbatch

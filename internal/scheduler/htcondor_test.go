@@ -947,3 +947,26 @@ install_app() {
 		t.Errorf("RawFlags = %v; want empty for plain bash script", specs.RawFlags)
 	}
 }
+
+// A dependency is refused before condor_submit runs; without one the job is submitted.
+func TestHTCondorSubmitRefusesDependencies(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "called")
+	bin := filepath.Join(dir, "condor_submit")
+	script := fmt.Sprintf("#!/bin/sh\necho called >> %s\necho '1 job(s) submitted to cluster 7.'\n", marker)
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sched := &HTCondorScheduler{condorSubmitBin: bin, jobIDRe: regexp.MustCompile(`submitted to cluster (\d+)`)}
+
+	deps := []Dependency{{Type: DependencyAfterOK, JobIDs: []string{"5"}}}
+	if _, err := sched.Submit(t.Context(), "job.sub", deps); err == nil {
+		t.Fatal("Submit with a dependency succeeded")
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("condor_submit ran for a job with a dependency")
+	}
+	if id, err := sched.Submit(t.Context(), "job.sub", nil); err != nil || id != "7" {
+		t.Fatalf("Submit without dependencies = %q, %v; want 7", id, err)
+	}
+}

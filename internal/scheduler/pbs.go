@@ -754,6 +754,9 @@ func buildPbsDepFlag(deps []Dependency) string {
 }
 
 func (p *PbsScheduler) Submit(ctx context.Context, scriptPath string, deps []Dependency) (string, error) {
+	if err := CheckDependencies(SchedulerPBS, deps); err != nil {
+		return "", err
+	}
 	args := []string{scriptPath}
 
 	// Add dependency flag if provided
