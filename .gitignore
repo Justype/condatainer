@@ -61,7 +61,8 @@ images
 /.libexec*
 
 # Ignore the configuration files
-config.yaml
+/config.yaml
+/registry-auth.json
 
 # --- Helper & Build Scripts ---
 # Generated helper scripts (downloaded dynamically)

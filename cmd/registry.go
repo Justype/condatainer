@@ -29,6 +29,7 @@ type registryOptions struct {
 	username      string
 	password      string
 	passwordStdin bool
+	layer         string
 }
 
 var registryCmd = newRegistryCommand()
@@ -43,9 +44,8 @@ func newRegistryCommand() *cobra.Command {
 		Long: `Publish and fetch read-only .sqf artifacts, overlays and bases alike, through an OCI
 registry such as ghcr.io.
 
-Credentials are taken from GITHUB_TOKEN for ghcr.io first, then from the Docker
-credential store (set DOCKER_CONFIG to use another directory), and anonymous
-access last.`,
+Credentials are taken from GITHUB_TOKEN for ghcr.io first, then from those saved
+by 'condatainer registry login', and anonymous access last.`,
 	}
 
 	push := &cobra.Command{
@@ -161,54 +161,76 @@ downloads nothing.`,
 	tags.Flags().StringVar(&opts.base, "registry", "", "Registry base, including owner/prefix (required)")
 
 	login := &cobra.Command{
-		Use:   "login <registry-host>",
+		Use:   "login <host>[/<owner>/<repo>]",
 		Short: "Verify and store registry credentials",
-		Long: `Checks the credentials against the registry and saves them in the Docker
-credential store once they work.
+		Long: `Checks the credentials against the registry and saves them once they work.
 
-Without --password or --password-stdin, the password is asked for on the
-terminal.`,
+Accepts a host or a repository (host/owner/repo). A push or pull uses the
+repository's credential before the host's, and the layers in the order user,
+extra-root, app-root, system.
+
+-l chooses which config layer keeps the credential, in registry-auth.json next to
+that layer's config file. The default is the user layer.
+
+` + configLayersHelp + `
+
+Without --username or --password, they are asked for on the terminal.`,
 		Example: `  condatainer registry login ghcr.io -u my-user
-  echo "$GITHUB_TOKEN" | condatainer registry login ghcr.io -u my-user --password-stdin`,
+  condatainer registry login ghcr.io/my-lab/rnaseq -u my-user --password-stdin
+  condatainer registry login ghcr.io -l extra-root -u my-user`,
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			layer := config.NormalizeConfigLayer(opts.layer)
+			if layer != "user" {
+				if opts.passwordStdin && !utils.ShouldAnswerYes() {
+					return fmt.Errorf("saving to the %s layer needs confirmation; pass -y to confirm when the password comes from stdin", layer)
+				}
+				if !confirmSharedLogin(cmd, layer) {
+					utils.PrintNote("Cancelled")
+					return nil
+				}
+			}
+			username := registryUsername(cmd, opts)
 			password, err := registryPassword(cmd, opts)
 			if err != nil {
 				return err
 			}
-			if err := registry.Login(cmd.Context(), args[0], opts.username, password); err != nil {
+			if err := registry.Login(cmd.Context(), args[0], layer, username, password); err != nil {
 				return err
 			}
 			reportDone(cmd, "logged in to", registry.TrimBaseScheme(args[0]))
+			reportPermissions(layer)
 			return nil
 		},
 	}
 	login.Flags().StringVarP(&opts.username, "username", "u", "", "Registry username")
 	login.Flags().StringVarP(&opts.password, "password", "p", "", "Registry password or token")
 	login.Flags().BoolVar(&opts.passwordStdin, "password-stdin", false, "Read the password/token from stdin")
+	login.Flags().StringVarP(&opts.layer, "layer", "l", "user", "Config layer to save in: user, extra-root, app-root, system")
 
 	logout := &cobra.Command{
-		Use:   "logout <registry-host>",
+		Use:   "logout <host>[/<owner>/<repo>]",
 		Short: "Remove stored registry credentials",
-		Long: `Removes the saved credentials for one registry host. Credentials given
-through GITHUB_TOKEN are unaffected.`,
+		Long: `Removes the credential saved under exactly this host or repository, from the
+layer chosen with -l. Credentials given through GITHUB_TOKEN are unaffected.`,
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := registry.Logout(cmd.Context(), args[0]); err != nil {
+			if err := registry.Logout(cmd.Context(), args[0], config.NormalizeConfigLayer(opts.layer)); err != nil {
 				return err
 			}
 			reportDone(cmd, "logged out of", registry.TrimBaseScheme(args[0]))
 			return nil
 		},
 	}
+	logout.Flags().StringVarP(&opts.layer, "layer", "l", "user", "Config layer to remove from: user, extra-root, app-root, system")
 
 	list := &cobra.Command{
 		Use:   "list",
-		Short: "List registries with stored credentials",
-		Long: `Lists the registry hosts that have saved credentials, with the username where
-one is recorded. Passwords and tokens are never shown.
+		Short: "List stored registry credentials",
+		Long: `Lists the saved credentials with their layer and the username where one is
+recorded. Passwords and tokens are never shown.
 
 GITHUB_TOKEN, when set, is used for ghcr.io ahead of these.`,
 		Args:         cobra.NoArgs,
@@ -223,15 +245,18 @@ GITHUB_TOKEN, when set, is used for ghcr.io ahead of these.`,
 				fmt.Fprintln(out, "No stored registry credentials.")
 			} else {
 				tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-				fmt.Fprintln(tw, "HOST\tUSER\tSTORE")
+				fmt.Fprintln(tw, "REGISTRY\tUSER\tLAYER\tREADABLE BY")
 				for _, c := range stored {
-					store := "config"
-					if c.Helper != "" {
-						store = "helper: " + c.Helper
-					}
-					fmt.Fprintf(tw, "%s\t%s\t%s\n", c.Host, c.Username, store)
+					fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", c.Key, c.Username, c.Layer, c.ReadableBy)
 				}
 				tw.Flush()
+				reported := map[string]bool{}
+				for _, c := range stored {
+					if !reported[c.Path] {
+						reported[c.Path] = true
+						printFindings(registry.Findings(c.Layer, c.Path))
+					}
+				}
 			}
 			if os.Getenv(registry.EnvGitHubToken) != "" {
 				fmt.Fprintf(out, "%s is set and applies to ghcr.io.\n", registry.EnvGitHubToken)
@@ -533,6 +558,20 @@ func addressPlacementName(name, selector, title string) string {
 	return name + "/" + selector
 }
 
+// registryUsername is --username, or one typed on the terminal when it is
+// omitted. Anything else is left empty, and the registry refuses it.
+func registryUsername(cmd *cobra.Command, opts *registryOptions) string {
+	if opts.username != "" {
+		return opts.username
+	}
+	if file, ok := cmd.InOrStdin().(*os.File); ok && term.IsTerminal(int(file.Fd())) {
+		fmt.Fprint(cmd.ErrOrStderr(), "Username: ")
+		name, _ := utils.ReadLineContext(cmd.Context())
+		return name
+	}
+	return ""
+}
+
 func registryPassword(cmd *cobra.Command, opts *registryOptions) (string, error) {
 	if opts.passwordStdin && opts.password != "" {
 		return "", fmt.Errorf("--password and --password-stdin are mutually exclusive")
@@ -558,4 +597,35 @@ func registryPassword(cmd *cobra.Command, opts *registryOptions) (string, error)
 		return "", fmt.Errorf("cannot read password: %w", err)
 	}
 	return string(password), nil
+}
+
+// confirmSharedLogin warns that a credential saved outside the user's own layer
+// can be read by anyone who can read that file, and asks to go on. -y answers yes.
+func confirmSharedLogin(cmd *cobra.Command, layer string) bool {
+	utils.PrintWarning("The credential is saved in the %s layer: anyone who can read that file can use it. Use a read-only token.", layer)
+	utils.PrintNote("The file is written private to you (mode 0600). Access follows the file's and directory's permissions, so check them.")
+	if utils.ShouldAnswerYes() {
+		return true
+	}
+	fmt.Fprint(cmd.ErrOrStderr(), "Continue? [y/N]: ")
+	choice, err := utils.ReadLineContext(cmd.Context())
+	return err == nil && (choice == "y" || choice == "yes")
+}
+
+// reportPermissions tells the person who just saved a credential if the file
+// can be reached by more people than it should.
+func reportPermissions(layer string) {
+	if path, err := registry.LayerFile(layer); err == nil {
+		printFindings(registry.Findings(layer, path))
+	}
+}
+
+func printFindings(findings []registry.Finding) {
+	for _, finding := range findings {
+		if finding.Warn {
+			utils.PrintWarning("%s", finding.Text)
+		} else {
+			utils.PrintNote("%s", finding.Text)
+		}
+	}
 }

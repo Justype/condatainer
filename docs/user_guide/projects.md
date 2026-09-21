@@ -148,6 +148,12 @@ printf '%s\n' "$TOKEN" | condatainer registry login ghcr.io --username "$USER" -
 
 For GHCR, a token with `write:packages` can push. A restore from a private package needs `read:packages`.
 
+A login covers a whole registry, or one repository when you give its path, and the most specific one wins. So you can keep your group's read-only token on `ghcr.io` and a write token for just this project's repository:
+
+```bash
+condatainer registry login ghcr.io/my-lab/rnaseq --username "$USER" --password-stdin
+```
+
 ### Push
 
 Preview first:

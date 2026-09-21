@@ -181,13 +181,20 @@ declare for it. Publish to an endpoint you have declared `restricted`.
 Both commands read the same sources, in order:
 
 1. `GITHUB_TOKEN`, for `ghcr.io`
-2. the Docker/OCI credential store, in `~/.docker`, or in `$DOCKER_CONFIG` when set
+2. a credential saved by `registry login`: the most specific key that covers the
+   repository, then the nearest config layer (user, extra-root, app-root)
 3. anonymous
 
 ```bash
 printf '%s\n' "$TOKEN" | condatainer registry login ghcr.io \
   --username "$USER" --password-stdin
 ```
+
+A login covers a whole host, or one repository when you give it a path, such as
+`registry login ghcr.io/my-lab/rnaseq`. That is how a group's read-only token and your
+own write token for one research repository live side by side: save the group's on the
+host in the shared layer your group's install uses (`-l extra-root` or `-l app-root`),
+and yours on the repository in your own.
 
 For GHCR a classic PAT with `write:packages` is what a push needs; `read:packages`
 is enough for a restore from a private package. In CI, the workflow's

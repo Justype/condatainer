@@ -313,7 +313,7 @@ func TestUserAgentIdentifiesCondaTainer(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := newAuthClient()
+	client := newAuthClient("registry.example.test")
 	resp, err := client.Do(newRequest(t, http.MethodGet, srv.URL+"/v2/", nil))
 	if err != nil {
 		t.Fatal(err)

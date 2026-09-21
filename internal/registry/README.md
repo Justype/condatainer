@@ -340,11 +340,32 @@ artifact being pushed, rather than guessed.
 Credential precedence is:
 
 1. `GITHUB_TOKEN` for `ghcr.io` only;
-2. Docker/OCI credential store, including configured credential helpers;
+2. a saved credential: the most specific key covering the repository, then the
+   nearest config layer;
 3. anonymous access.
 
-`Login` and `Logout` manage the same store, and `StoredCredentials` lists its
-hosts. Tokens are never logged or listed.
+A key is a host or `host/owner/repo`, and specificity is tried before layer, so
+a personal entry for one repository beats a group's entry for the whole host.
+`GITHUB_TOKEN` is not scoped and stays first because it is what CI provides.
+
+The store is CondaTainer's own `registry-auth.json` in each config layer's
+directory, in Docker's `auths` shape, and not the Docker store. On the systems
+this runs on Docker is not in use, so sharing its file bought nothing, and its
+keys are hosts only. ORAS's file store is not used either: its lookup resolves a
+host key to any entry whose host matches, which would hand one repository's
+token to another. `Login` verifies the token against the host, then writes it;
+`StoredCredentials` lists keys and layers. Tokens are never logged or listed.
+
+A shared layer's file is written mode 0600 and its directory is never created.
+Whether the group can read it is left to whoever saved it, and `login` says so.
+
+What is reported comes from the mode bits of the file and its directory, not from
+the layer's name, because an app-root may be a personal install or a site's. A
+class reads when it can enter the directory and read the file. It replaces when it
+can enter and either the file or, outside a sticky directory, the directory is
+writable by it. The user layer is personal by definition, so others reading it is
+a warning; in a shared layer the readers are only shown. Anyone but the owner being
+able to replace the file is always reported. ACLs are not consulted.
 
 ## Callers
 

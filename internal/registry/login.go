@@ -2,118 +2,140 @@ package registry
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
 	"oras.land/oras-go/v2/registry/remote"
 	"oras.land/oras-go/v2/registry/remote/auth"
-	"oras.land/oras-go/v2/registry/remote/credentials"
 	"oras.land/oras-go/v2/registry/remote/retry"
 )
 
-// Login verifies a credential against registry and stores it in the Docker/OCI
-// credential store used by every other operation in this package.
-func Login(ctx context.Context, registry, username, password string) error {
-	registry = TrimBaseScheme(registry)
-	if registry == "" || strings.Contains(registry, "/") {
-		return fmt.Errorf("registry login needs a host, got %q", registry)
+// Login verifies a credential against the registry host in target and stores it
+// in one config layer, under target itself: a bare host, or host/owner/repo to
+// cover one repository. The layer is "user", "extra-root", "app-root" or
+// "system". The layer's directory must already exist unless it is the user's.
+func Login(ctx context.Context, target, layer, username, password string) error {
+	key, err := splitTarget(target)
+	if err != nil {
+		return err
 	}
 	if password == "" {
 		return fmt.Errorf("registry password or token is empty")
 	}
-
-	store, err := credentials.NewStoreFromDocker(credentials.StoreOptions{AllowPlaintextPut: true})
+	path, err := layerFile(layer)
 	if err != nil {
-		return fmt.Errorf("cannot open registry credential store: %w", err)
+		return err
 	}
-	reg, err := remote.NewRegistry(registry)
-	if err != nil {
-		return fmt.Errorf("invalid registry %q: %w", registry, err)
-	}
-	reg.Client = &auth.Client{Client: retry.DefaultClient, Cache: auth.NewCache()}
-	reg.PlainHTTP = isLoopback(reg.Reference.Registry)
 
+	host, _, _ := strings.Cut(key, "/")
+	reg, err := remote.NewRegistry(host)
+	if err != nil {
+		return fmt.Errorf("invalid registry %q: %w", host, err)
+	}
 	cred := auth.Credential{Username: username, Password: password}
-	if username == "" {
-		cred = auth.Credential{Password: password, AccessToken: password}
+	reg.Client = &auth.Client{
+		Client:     retry.DefaultClient,
+		Cache:      auth.NewCache(),
+		Credential: auth.StaticCredential(reg.Reference.Registry, cred),
 	}
-	if err := credentials.Login(ctx, store, reg, cred); err != nil {
-		return fmt.Errorf("login to %s failed: %w", registry, classify(err))
+	reg.PlainHTTP = isLoopback(reg.Reference.Registry)
+	if err := reg.Ping(ctx); err != nil {
+		return fmt.Errorf("login to %s failed: %w", key, classify(err))
 	}
-	return nil
-}
 
-// Logout removes the stored credential for registry.
-func Logout(ctx context.Context, registry string) error {
-	registry = TrimBaseScheme(registry)
-	if registry == "" || strings.Contains(registry, "/") {
-		return fmt.Errorf("registry logout needs a host, got %q", registry)
-	}
-	store, err := credentials.NewStoreFromDocker(credentials.StoreOptions{})
+	file, err := readAuthFile(path)
 	if err != nil {
-		return fmt.Errorf("cannot open registry credential store: %w", err)
+		return err
 	}
-	if err := credentials.Logout(ctx, store, registry); err != nil {
-		return fmt.Errorf("logout from %s failed: %w", registry, err)
+	if file.Auths == nil {
+		file.Auths = map[string]authEntry{}
 	}
-	return nil
+	file.Auths[key] = entryFor(cred)
+	return writeAuthFile(path, file)
 }
 
-// StoredCredential is one host with a saved credential. The secret is never
-// read into it.
+// Logout removes the credential stored under target in one config layer.
+func Logout(ctx context.Context, target, layer string) error {
+	key, err := splitTarget(target)
+	if err != nil {
+		return err
+	}
+	path, err := layerFile(layer)
+	if err != nil {
+		return err
+	}
+	file, err := readAuthFile(path)
+	if err != nil {
+		return err
+	}
+	if _, ok := file.Auths[key]; !ok {
+		return fmt.Errorf("no stored credential for %s in the %s layer", key, layer)
+	}
+	delete(file.Auths, key)
+	return writeAuthFile(path, file)
+}
+
+// layerFile is the credential file for a layer, refusing a directory that does
+// not exist unless it is the user's: a shared layer's directory is not ours to
+// create.
+func layerFile(layer string) (string, error) {
+	path, err := credentialFilePath(layer)
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Dir(path)
+	if layer == "user" {
+		return path, os.MkdirAll(dir, 0o700)
+	}
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		return "", fmt.Errorf("%s does not exist", dir)
+	}
+	return path, nil
+}
+
+// StoredCredential is one saved credential. The secret is never read into it.
 type StoredCredential struct {
-	Host     string
-	Username string // empty when a helper holds the credential or it is a bare token
-	Helper   string // credential helper serving this host, empty for the config file
+	Key      string // a registry host, or host/owner/repo
+	Layer    string
+	Username string
+	Path     string // the file that holds it
+
+	// ReadableBy is who can read that file: "you", "group <name>" or "everyone".
+	ReadableBy string
 }
 
-// StoredCredentials lists the hosts the Docker/OCI credential store has
-// credentials for, sorted by host. A host held only by a global credsStore
-// helper is not listed: the helper cannot be asked which hosts it knows.
+// StoredCredentials lists every saved credential across the layers, by key and
+// then nearest layer first.
 func StoredCredentials(ctx context.Context) ([]StoredCredential, error) {
-	store, err := credentials.NewStoreFromDocker(credentials.StoreOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("cannot open registry credential store: %w", err)
-	}
-	data, err := os.ReadFile(store.ConfigPath())
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("cannot read %s: %w", store.ConfigPath(), err)
-	}
-	var cfg struct {
-		Auths map[string]struct {
-			Auth     string `json:"auth"`
-			Username string `json:"username"`
-		} `json:"auths"`
-		CredHelpers map[string]string `json:"credHelpers"`
-	}
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("cannot parse %s: %w", store.ConfigPath(), err)
-	}
-
-	byHost := map[string]StoredCredential{}
-	for host, entry := range cfg.Auths {
-		user := entry.Username
-		if raw, err := base64.StdEncoding.DecodeString(entry.Auth); err == nil && user == "" {
-			user, _, _ = strings.Cut(string(raw), ":")
+	var out []StoredCredential
+	for _, layer := range credentialLayerNames {
+		path, err := credentialFilePath(layer)
+		if err != nil {
+			continue
 		}
-		byHost[host] = StoredCredential{Host: host, Username: user}
+		file, err := readAuthFile(path)
+		if err != nil {
+			return nil, err
+		}
+		for key, entry := range file.Auths {
+			out = append(out, StoredCredential{
+				Key: key, Layer: layer, Username: entry.credential().Username, Path: path,
+				ReadableBy: ReadableBy(path),
+			})
+		}
 	}
-	for host, helper := range cfg.CredHelpers {
-		byHost[host] = StoredCredential{Host: host, Helper: helper}
+	rank := map[string]int{}
+	for i, layer := range credentialLayerNames {
+		rank[layer] = i
 	}
-	out := make([]StoredCredential, 0, len(byHost))
-	for _, c := range byHost {
-		out = append(out, c)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Host < out[j].Host })
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Key != out[j].Key {
+			return out[i].Key < out[j].Key
+		}
+		return rank[out[i].Layer] < rank[out[j].Layer]
+	})
 	return out, nil
 }

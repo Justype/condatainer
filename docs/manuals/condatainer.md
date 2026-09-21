@@ -1958,11 +1958,17 @@ destination is stated rather than guessed. Pull, tags, and resolve require it
 too, because they do not start from a local artifact.
 
 ```bash
-# Store a token in the Docker/OCI credential store
+# Save a token for a whole registry
 printf '%s\n' "$TOKEN" | condatainer registry login ghcr.io \
   --username "$USER" --password-stdin
 
-# Show which registries have stored credentials (never the secrets)
+# Save a different token for one repository
+condatainer registry login ghcr.io/my-lab/rnaseq --username "$USER"
+
+# Save a token in a shared layer, where everyone who reads that layer finds it
+condatainer registry login ghcr.io -l extra-root --username group-bot
+
+# Show the saved credentials and their layers (never the secrets)
 condatainer registry list
 
 # Publish by installed name, inferring the selected source's oci.push endpoint.
@@ -1997,9 +2003,31 @@ version selection and may build when no published artifact exists. Pull never
 falls back to a build. Placement precedence is `--prefix`, `--name`, the exact
 address when it contains a complete name, then the published OCI title.
 
-Authentication precedence is `GITHUB_TOKEN` for `ghcr.io`, the Docker credential
-store (`$DOCKER_CONFIG` when set, else `~/.docker`), then anonymous access. Versioned tags are immutable unless `push --force` is
-used; version-less OS artifacts publish a `YYYYMMDD` tag and `latest`.
+Credentials come from `GITHUB_TOKEN` for `ghcr.io`, then from those saved by
+`registry login`, then anonymous access. A saved credential is keyed by a host
+(`ghcr.io`) or by one repository (`ghcr.io/my-lab/rnaseq`). A push or pull uses the
+most specific key that covers its repository, and for the same key the nearest
+config layer: user, extra-root, app-root, system. So a group's read-only token on
+the host and your write token on one repository can be saved side by side.
+
+`registry login -l <layer>` chooses the layer; the default is `user`. Credentials
+are saved in `registry-auth.json` beside that layer's `config.yaml`, readable only
+by you (mode 0600). Saving into a shared layer warns that anyone who can read the
+file can use the token, asks for confirmation (`-y` answers yes), and leaves the
+file's permissions to you.
+
+`registry list` shows who can read each file: `you`, `group <name>`, or `everyone`,
+from the file's and its directory's permissions. `login` and `list` also warn when:
+
+- the `user` layer's file can be read by anyone else (`chmod 600` fixes it);
+- anyone other than you can replace a credential, because its file or its
+  directory is writable by others. In a shared layer, group members replacing it
+  is only a note.
+
+Access control lists are not checked.
+
+Versioned tags are immutable unless `push --force` is used; version-less OS
+artifacts publish a `YYYYMMDD` tag and `latest`.
 
 ### Large pushes
 

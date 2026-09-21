@@ -36,7 +36,7 @@ func resolveOn(ctx context.Context, ref string, platform *ocispec.Platform) (str
 	if err != nil {
 		return "", fmt.Errorf("%s is not a usable registry reference: %w", ref, err)
 	}
-	repo.Client = newAuthClient()
+	repo.Client = newAuthClient(repo.Reference.Registry + "/" + repo.Reference.Repository)
 
 	ctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
 	defer cancel()

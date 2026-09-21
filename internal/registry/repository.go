@@ -20,7 +20,7 @@ func newRepository(base, repo string) (*remote.Repository, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid registry reference %q: %w", ref, err)
 	}
-	r.Client = newAuthClient()
+	r.Client = newAuthClient(ref)
 	r.PlainHTTP = isLoopback(r.Reference.Registry)
 	return r, nil
 }

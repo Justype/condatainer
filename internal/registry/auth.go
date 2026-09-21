@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"oras.land/oras-go/v2/registry/remote/auth"
-	"oras.land/oras-go/v2/registry/remote/credentials"
 	"oras.land/oras-go/v2/registry/remote/retry"
 )
 
@@ -25,20 +24,66 @@ const (
 	defaultTokenUser = "x-access-token"
 )
 
-// credentialFunc resolves credentials per registry host, in order: GITHUB_TOKEN
-// for ghcr.io, the Docker/OCI credential store, then anonymous. Anonymous is the
-// normal case for public artifacts, so a missing store is not an error.
-func credentialFunc() auth.CredentialFunc {
-	store, storeErr := credentials.NewStoreFromDocker(credentials.StoreOptions{})
+// credentialFunc resolves credentials for the repository at scope
+// ("host/owner/repo", no tag), in order: GITHUB_TOKEN for ghcr.io, then the
+// stored credentials, then anonymous. Anonymous is the normal case for public
+// artifacts, so an unreadable store is not an error.
+//
+// A stored credential is the first hit going from the most specific key (the
+// repository) to the general one (the host), trying the layers nearest first
+// for each key.
+func credentialFunc(scope string) auth.CredentialFunc {
+	var files []authFile
+	loaded := false
 	return func(ctx context.Context, host string) (auth.Credential, error) {
 		if cred, ok := envCredential(host); ok {
 			return cred, nil
 		}
-		if storeErr != nil {
-			return auth.EmptyCredential, nil
+		if !loaded {
+			files, loaded = readLayers(), true
 		}
-		return credentials.Credential(store)(ctx, host)
+		for _, key := range storeKeys(scope, host) {
+			for _, file := range files {
+				if entry, ok := file.Auths[key]; ok {
+					if cred := entry.credential(); cred != auth.EmptyCredential {
+						return cred, nil
+					}
+				}
+			}
+		}
+		return auth.EmptyCredential, nil
 	}
+}
+
+// readLayers reads every layer's credential file, nearest first. A layer that is
+// unavailable or unreadable holds nothing.
+func readLayers() []authFile {
+	var files []authFile
+	for _, layer := range credentialLayerNames {
+		path, err := credentialFilePath(layer)
+		if err != nil {
+			continue
+		}
+		if file, err := readAuthFile(path); err == nil {
+			files = append(files, file)
+		}
+	}
+	return files
+}
+
+// storeKeys lists the keys that may hold a credential for host, most specific
+// first: scope itself, each parent path, then the bare host. A scope on another
+// host contributes only that host's key.
+func storeKeys(scope, host string) []string {
+	scopeHost, _, _ := strings.Cut(scope, "/")
+	if !strings.EqualFold(scopeHost, host) {
+		return []string{host}
+	}
+	var keys []string
+	for path := scope; strings.Contains(path, "/"); path = path[:strings.LastIndex(path, "/")] {
+		keys = append(keys, path)
+	}
+	return append(keys, scopeHost)
 }
 
 // HasCredential reports whether any credential is available for the registry
@@ -54,7 +99,7 @@ func HasCredential(ctx context.Context, ref string) bool {
 	if host == "" {
 		return false
 	}
-	cred, err := credentialFunc()(ctx, host)
+	cred, err := credentialFunc(TrimBaseScheme(ref))(ctx, host)
 	if err != nil {
 		return false
 	}
@@ -74,8 +119,8 @@ func envCredential(host string) (auth.Credential, bool) {
 	return auth.Credential{Username: defaultTokenUser, Password: token}, true
 }
 
-// newAuthClient is the client every registry operation uses: retrying transport,
-// per-host token cache, and the credential chain above.
+// newAuthClient is the client every registry operation on the repository at scope
+// uses: retrying transport, per-host token cache, and the credential chain above.
 //
 // The retrying transport stays for the small requests — token exchange, HEAD,
 // manifest reads — and is irrelevant to a rate-limited blob: its waits are
@@ -86,14 +131,14 @@ func envCredential(host string) (auth.Credential, bool) {
 //
 // [inspectTransport] wraps it to keep the response metadata ORAS discards and to
 // ask permission before sending a large body.
-func newAuthClient() *auth.Client {
+func newAuthClient(scope string) *auth.Client {
 	inner := *retry.DefaultClient
 	inner.Transport = &inspectTransport{next: cmp.Or(inner.Transport, http.DefaultTransport)}
 
 	client := &auth.Client{
 		Client:     &inner,
 		Cache:      auth.NewCache(),
-		Credential: credentialFunc(),
+		Credential: credentialFunc(scope),
 	}
 	client.SetUserAgent(userAgent())
 	return client
