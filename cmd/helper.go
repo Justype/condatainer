@@ -1004,10 +1004,13 @@ func runHelperStop(ctx context.Context, name string, stopAll bool) error {
 	return nil
 }
 
-// stopHelperRun stops a single helper run with helper.StopRun and always marks
-// its history entry "done", even if the signal fails (process already dead).
+// stopHelperRun stops a single helper run with helper.StopRun and marks its
+// history entry "done", even if the signal fails (process already dead). A
+// helper on another host is left running and the error returned.
 func stopHelperRun(ctx context.Context, r *helper.HelperRun) error {
-	if err := helper.StopRun(ctx, r); err != nil {
+	if err := helper.StopRun(ctx, r); errors.Is(err, helper.ErrOtherHost) {
+		return err
+	} else if err != nil {
 		utils.PrintDebug("stop %s: %v", r.ID, err)
 	}
 	return helper.UpdateHistoryStatus(r.ID, "done", time.Now())

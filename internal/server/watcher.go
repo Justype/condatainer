@@ -48,6 +48,7 @@ func reopenInterval(failures int) time.Duration {
 // Avoids re-reading history.jsonl on every tick.
 type helperInfo struct {
 	jobID     string
+	headless  bool   // a local process, not a scheduler job
 	name      string // helper script name (e.g. "code-server")
 	status    string
 	startedAt time.Time
@@ -112,6 +113,7 @@ func (w *watcher) prePopulateDone() {
 		} else {
 			w.info[r.ID] = helperInfo{
 				jobID:     r.JobID,
+				headless:  r.Headless(),
 				name:      r.Name,
 				status:    r.Status,
 				startedAt: r.StartedAt,
@@ -225,6 +227,7 @@ func (w *watcher) pollHelper(id string) {
 		if run := helper.HistoryEntryForID(id); run != nil {
 			w.info[id] = helperInfo{
 				jobID:     run.JobID,
+				headless:  run.Headless(),
 				name:      run.Name,
 				status:    run.Status,
 				startedAt: run.StartedAt,
@@ -258,18 +261,14 @@ func (w *watcher) pollHelper(id string) {
 		return
 	}
 
-	// Headless crash detection: if the pid file exists but the process is gone and
-	// no done event was written, synthesize done immediately rather than waiting
-	// for walltime expiry. The pid file gate prevents false positives during the
-	// brief window between cmd.Start() and WriteHelperPid completing.
-	if inf, ok := w.info[id]; ok && inf.jobID == "" {
-		if _, pidErr := helper.ReadHelperPid(id); pidErr == nil {
-			if !helper.IsHeadlessProcessAlive(id) {
-				logging.FromContext(w.s.ctx).Debug("server: headless process gone, synthesizing done", "id", id)
-				w.synthesizeDone(id)
-				w.closeDone(id, 0, time.Now())
-				return
-			}
+	// Headless crash detection: the wrapper's lock was released without a done
+	// event, so it was killed; synthesize done rather than wait for walltime.
+	if inf, ok := w.info[id]; ok && inf.headless {
+		if live, _ := helper.HeadlessLiveness(id); live == helper.LivenessGone {
+			logging.FromContext(w.s.ctx).Debug("server: headless lock released, synthesizing done", "id", id)
+			w.synthesizeDone(id)
+			w.closeDone(id, 0, time.Now())
+			return
 		}
 	}
 
@@ -306,6 +305,7 @@ func (w *watcher) pollHelper(id string) {
 			// bindAll is preserved from the initial history entry (set at submission time).
 			w.info[id] = helperInfo{
 				jobID:     inf.jobID,
+				headless:  inf.headless,
 				name:      inf.name,
 				status:    "running",
 				startedAt: rs.Timestamp,

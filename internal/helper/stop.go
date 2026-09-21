@@ -18,7 +18,7 @@ var ErrNoScheduler = errors.New("no scheduler available")
 // returned, but the caller still closes the run out, since the process may
 // already be gone.
 func StopRun(ctx context.Context, r *HelperRun) error {
-	if r.JobID == "" {
+	if r.Headless() {
 		return KillHeadlessProcess(r.ID)
 	}
 	sched := scheduler.ActiveScheduler()

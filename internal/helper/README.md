@@ -323,6 +323,21 @@ Until the container is launched there is nothing to forward to, so an earlier tr
 cleans up directly. The forwarding trap is armed just before the launch, and a stop that lands before the
 container has a pid is forwarded as soon as it has one.
 
+## Headless liveness
+
+A headless wrapper has no scheduler to ask, and several login nodes can share one state directory, so
+a pid is meaningless off the host that owns it. Instead the wrapper's first step starts
+`_helper_hold`, a child that takes an exclusive `fcntl` lock on `{state dir}/lock` and records
+`producer.Info` (runner `local`, host, the wrapper's pid) in it. Locks are visible from every host and
+the kernel drops one when its holder dies, however it dies. The holder ignores TERM, so a stop's group
+signal cannot release the lock before the wrapper has recorded `done`; it exits when the wrapper does.
+
+`HeadlessLiveness` probes with a shared lock: contended is alive; free with an owner recorded is gone
+(the watcher and `RunningHelpers` then close the run out if no `done` event exists); free and never
+written, or no file, is unknown and claims nothing, leaving `done`, the ready event and walltime as the
+backstops. `KillHeadlessProcess` signals the recorded pid only on the recorded host and otherwise
+returns `ErrOtherHost`, and neither stop path closes out a run it could not signal.
+
 ## NFS State Files
 
 Written by the script on the compute node; read by the CLI monitor and server watcher on the login node.
@@ -333,6 +348,7 @@ Written by the script on the compute node; read by the CLI monitor and server wa
     done        — JSON written by the wrapper on exit (always fires, even on crash)
     messages    — append-only JSONL written by _server_message
     job.log     — scheduler stdout/stderr (streamed by server dashboard)
+    lock        — headless only: held while the wrapper runs; holds the owner's host and pid
 ```
 
 ### `ready` JSON

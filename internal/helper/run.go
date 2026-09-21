@@ -522,6 +522,12 @@ func buildHelperCommandBody(id, name, cwd, scriptDir, stateDir string, walltime 
 	fmt.Fprintln(&sb, `exec >> "$CNT_HELPER_STATE_DIR/job.log" 2>&1`)
 	fmt.Fprintln(&sb)
 
+	// Headless: a child process holds the lock file for as long as this wrapper
+	// lives, so the wrapper's liveness is visible from every host.
+	if sched == nil {
+		fmt.Fprintln(&sb, `condatainer _helper_hold "$CNT_HELPER_STATE_DIR/lock" $$ &`)
+	}
+
 	// Free port (resolved on the compute node, not the login node)
 	fmt.Fprintln(&sb, `export CNT_HELPER_PORT=$(condatainer _pick_port)`)
 

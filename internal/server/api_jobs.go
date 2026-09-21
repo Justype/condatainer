@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -227,7 +228,10 @@ func (s *srv) handleHelperStop(w http.ResponseWriter, r *http.Request, id string
 	log := logging.FromContext(s.ctx)
 	if run := helper.HistoryEntryForID(id); run == nil {
 		log.Warn("server: stop — history entry not found", "id", id)
-	} else if err := helper.StopRun(s.ctx, run); err != nil {
+	} else if err := helper.StopRun(s.ctx, run); errors.Is(err, helper.ErrOtherHost) {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	} else if err != nil {
 		log.Warn("server: stop failed", "id", id, "jobID", run.JobID, "err", err)
 	}
 	// closeDone cleans up the proxy, updates history, decrements runningCount, and

@@ -5,10 +5,13 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
 	"time"
 
 	"github.com/Justype/condatainer/internal/helper"
+	"github.com/Justype/condatainer/internal/image/producer"
 	"github.com/Justype/condatainer/internal/server"
 	"github.com/spf13/cobra"
 )
@@ -18,6 +21,7 @@ func init() {
 	rootCmd.AddCommand(serverMessageCmd)
 	rootCmd.AddCommand(serverDoneCmd)
 	rootCmd.AddCommand(pickPortCmd)
+	rootCmd.AddCommand(helperHoldCmd)
 	rootCmd.AddCommand(helperStateDirCmd)
 	rootCmd.AddCommand(serverDaemonCmd)
 }
@@ -205,6 +209,39 @@ func pickFreePort() (int, error) {
 	port := ln.Addr().(*net.TCPAddr).Port
 	ln.Close()
 	return port, nil
+}
+
+// ── _helper_hold ───────────────────────────────────────────────────────────
+
+var helperHoldCmd = &cobra.Command{
+	Use:    "_helper_hold <lock-file> <wrapper-pid>",
+	Hidden: true,
+	Short:  "Hold a headless helper's lock file until its wrapper exits (called from the wrapper)",
+	Args:   cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cmd.SilenceUsage = true
+		pid, err := strconv.Atoi(args[1])
+		if err != nil || pid <= 0 {
+			return fmt.Errorf("invalid wrapper pid %q", args[1])
+		}
+		// The wrapper's group TERM must not release the lock before it has
+		// recorded done; the holder ends only when the wrapper does.
+		signal.Ignore(syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
+		lock, err := helper.HoldLock(args[0], producer.Info{
+			Runner:    "local",
+			Node:      producer.ShortHostname(),
+			PID:       pid,
+			CreatedAt: time.Now().Format(time.RFC3339),
+		})
+		if err != nil {
+			return err
+		}
+		defer lock.Close()
+		for os.Getppid() == pid {
+			time.Sleep(time.Second)
+		}
+		return nil
+	},
 }
 
 // ── _helper_state_dir ──────────────────────────────────────────────────────

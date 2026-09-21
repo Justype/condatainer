@@ -302,12 +302,6 @@ func ExecutePlan(ctx context.Context, plan *RunPlan) (string, error) {
 		os.RemoveAll(stateDir)
 		return "", fmt.Errorf("starting helper: %w", err)
 	}
-	// PID == process-group ID (Setsid), so KillHeadlessProcess can signal the
-	// whole group. Non-fatal on write error: stop then degrades gracefully
-	// (history still marked done by the watcher).
-	if err := WriteHelperPid(helperID, cmd.Process.Pid); err != nil {
-		logger.Debug("helper: failed to write pid file", "id", helperID, "err", err)
-	}
 	run := newHelperRun(helperID, plan.Options.ScriptName, "", cwd, plan.Spec.Time,
 		plan.Options, plan.UserOverlays, plan.Spec, plan.Params, "starting", "local")
 	_ = AppendHistory(run)

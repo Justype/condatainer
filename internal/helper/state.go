@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -38,6 +37,15 @@ type HelperRun struct {
 	StartedAt   time.Time         `json:"started_at"`
 	EndedAt     *time.Time        `json:"ended_at,omitempty"`
 	Status      string            `json:"status"` // "running"|"done"|"failed"
+}
+
+// Headless reports whether the run is a local process rather than a scheduler
+// job. Runs recorded without a runner are judged by having no job ID.
+func (r *HelperRun) Headless() bool {
+	if r.Runner != "" {
+		return r.Runner == "local"
+	}
+	return r.JobID == ""
 }
 
 // AccessURL returns the link the user should open.
@@ -133,56 +141,6 @@ func EventsFilePath(id string) string {
 // JobLogFilePath returns the path to the job output log.
 func JobLogFilePath(id string) string {
 	return filepath.Join(StateDir(id), "job.log")
-}
-
-// PidFilePath returns the path to the ephemeral PID file for a headless helper run.
-func PidFilePath(id string) string {
-	return filepath.Join(StateDir(id), "pid")
-}
-
-// WriteHelperPid writes the bash wrapper's PID to {stateDir}/pid.
-func WriteHelperPid(id string, pid int) error {
-	return os.WriteFile(PidFilePath(id), []byte(strconv.Itoa(pid)+"\n"), utils.PermFile)
-}
-
-// ReadHelperPid reads the PID from {stateDir}/pid.
-// Returns an error if the file does not exist or contains an invalid PID.
-func ReadHelperPid(id string) (int, error) {
-	data, err := os.ReadFile(PidFilePath(id))
-	if err != nil {
-		return 0, err
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil || pid <= 0 {
-		return 0, fmt.Errorf("helper %s: invalid pid file content", id)
-	}
-	return pid, nil
-}
-
-// KillHeadlessProcess sends SIGTERM to the process group of the headless helper.
-// PGID == bash wrapper PID because ExecutePlan sets Setpgid: true.
-// The wrapper's SIGTERM trap calls condatainer _server_done and exits cleanly.
-func KillHeadlessProcess(id string) error {
-	pid, err := ReadHelperPid(id)
-	if err != nil {
-		return fmt.Errorf("reading pid file: %w", err)
-	}
-	return syscall.Kill(-pid, syscall.SIGTERM)
-}
-
-// IsHeadlessProcessAlive reports whether the process in {stateDir}/pid is still
-// running. Returns false if the pid file is absent, unreadable, or the process
-// no longer exists.
-func IsHeadlessProcessAlive(id string) bool {
-	pid, err := ReadHelperPid(id)
-	if err != nil {
-		return false
-	}
-	p, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	return p.Signal(syscall.Signal(0)) == nil
 }
 
 // AppendEvent appends a StateEvent to the events file for the given helper ID.
@@ -587,10 +545,9 @@ func RunningHelpers(name string) ([]*HelperRun, error) {
 			_ = UpdateHistoryStatus(r.ID, "done", r.StartedAt.Add(r.Walltime))
 			continue
 		}
-		// Headless: if the pid file exists but the process is gone, treat as done.
-		// Catches SIGKILL'd jobs when the server is not running to detect them.
-		if r.JobID == "" {
-			if _, pidErr := ReadHelperPid(r.ID); pidErr == nil && !IsHeadlessProcessAlive(r.ID) {
+		// Headless: a released lock with no done event means the wrapper was killed.
+		if r.Headless() {
+			if live, _ := HeadlessLiveness(r.ID); live == LivenessGone {
 				_ = UpdateHistoryStatus(r.ID, "done", time.Now())
 				continue
 			}
