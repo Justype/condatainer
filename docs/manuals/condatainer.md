@@ -704,7 +704,7 @@ Note: When exit code `3` is returned, CondaTainer prints a message showing the n
 condatainer run --no-submit analysis.sh
 
 # Or set in config
-condatainer config set submit_job false
+condatainer config set scheduler.submit_job false
 ```
 
 ## Container Management (Avail, List, Remove, Search)
@@ -1325,7 +1325,7 @@ If your script contains scheduler directives (`#SBATCH`, `#PBS`, or `#BSUB`), `c
 | Condition | Behavior |
 |-----------|----------|
 | Already inside a running job or container | Always runs locally (no nested submission) |
-| `--no-submit` flag or `submit_job: false` in config | Always runs locally |
+| `--no-submit` flag or `scheduler.submit_job: false` in config | Always runs locally |
 | Script has no scheduler specs | Runs locally (prints a note) |
 | Script has `#SBATCH`/`#PBS`/`#BSUB` + scheduler available | Submits as a scheduler job |
 | Script has scheduler specs but scheduler not found/available | Runs locally (prints a note) |
@@ -1744,7 +1744,7 @@ condatainer helper code-server -c 4
 To run a single helper without submitting a job, pass `--no-submit`
 (`condatainer helper --no-submit code-server`) — useful for a quick inspection or debug session,
 or to keep working when the scheduler itself is unavailable. To disable submission for every run,
-set `submit_job: false` in the config (`condatainer config set submit_job false`) instead. The
+set `scheduler.submit_job: false` in the config (`condatainer config set scheduler.submit_job false`) instead. The
 dashboard offers the same override as a "Run headless" checkbox next to Start, shown only when a
 scheduler is actually available to opt out of.
 
@@ -1781,7 +1781,7 @@ condatainer config get <key>
 ```bash
 condatainer config get build.system_apptainer
 condatainer config get build.ncpus
-condatainer config get submit_job
+condatainer config get scheduler.submit_job
 ```
 
 ### Config Set
@@ -1796,7 +1796,7 @@ condatainer config set <key> <value>
 
 ```bash
 condatainer config set build.system_apptainer /usr/bin/apptainer
-condatainer config set submit_job false
+condatainer config set scheduler.submit_job false
 condatainer config set build.ncpus 8
 condatainer config set build.time 4h
 ```
@@ -1910,9 +1910,7 @@ build:
   system_apptainer: /usr/bin/apptainer  # scheduler type is auto-detected from scheduler.bin
 scheduler:
   bin: /usr/bin/sbatch
-
-# Submission settings
-submit_job: true
+  submit_job: true
 
 # Default distro for the container root (default: the first source's default_distro)
 default_distro: ubuntu24
@@ -2985,15 +2983,16 @@ Lookup order: per-job proxy → shared proxy.
 
 The proxy port speaks both HTTP CONNECT (`http_proxy`) and SOCKS5 (`all_proxy`) — compatible with all tools (curl, wget, pip, micromamba, etc.).
 
-### `proxy_perjob` config option
+### `scheduler.proxy_perjob` config option
 
-When `proxy_perjob: true`, condatainer injects `condatainer proxy start --via <login-node>` at the top of every generated scheduler script (build, run, helper jobs). The per-job proxy starts automatically on the compute node before the job body runs.
+When `scheduler.proxy_perjob` is `true`, condatainer injects `condatainer proxy start --via <login-node>` at the top of every generated scheduler script (build, run, helper jobs). The per-job proxy starts automatically on the compute node before the job body runs.
 
 ```yaml
-proxy_perjob: true   # default: false
+scheduler:
+  proxy_perjob: true   # default: false
 ```
 
-`CNT_PROXY_PERJOB=1` enables it for a single invocation without changing the config file.
+`CNT_SCHEDULER_PROXY_PERJOB=1` enables it for a single invocation without changing the config file.
 
 ## Completion
 

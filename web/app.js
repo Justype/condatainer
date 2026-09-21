@@ -114,7 +114,7 @@ let currentPath = '';
 let srvHome    = '';
 let srvScratch = '';
 let srvNotification = '';
-let srvWillSubmit = false; // true when a scheduler is active and submit_job isn't disabled
+let srvWillSubmit = false; // true when a scheduler is active and scheduler.submit_job isn't disabled
 
 // file picker modal
 let fpTargetId = '', fpMode = 'dir', fpPath = '', fpSuffix = '';

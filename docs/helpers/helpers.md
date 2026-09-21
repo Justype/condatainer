@@ -325,20 +325,20 @@ Config files use `KEY="VALUE"` format and can be edited directly. The next run p
 
 ### Clusters Without Inter-Node SSH
 
-If your cluster does not allow SSH between nodes, enable `helper_bind_all`:
+If your cluster does not allow SSH between nodes, enable `helper.bind_all`:
 
 ```bash
-condatainer config set helper_bind_all true
+condatainer config set helper.bind_all true
 ```
 
 Helper services will then bind to all interfaces on the compute node. The compute node must be reachable from the login node for this to work.
 
 ### Server has scheduler but not functional
 
-If you wants helper explitly on the same machine, set `submit_job: false` in your CondaTainer config to make headless mode permanent.
+If you wants helper explitly on the same machine, set `scheduler.submit_job: false` in your CondaTainer config to make headless mode permanent.
 
 ```bash
-condatainer config set submit_job false
+condatainer config set scheduler.submit_job false
 ```
 
 then run `server` or `helper`

@@ -29,15 +29,15 @@ var (
 var configKeyDefs = map[string]bool{
 	"logs_dir":                 false,
 	"default_distro":           false,
-	"submit_job":               false,
+	"scheduler.submit_job":     false,
 	"sources":                  true,
 	"autoload_gpu":             false,
 	"nested_run":               false,
-	"notification":             false,
+	"helper.notification":      false,
 	"metadata_cache_ttl":       false,
 	"store_gc_grace":           false,
-	"proxy_perjob":             false,
-	"helper_bind_all":          false,
+	"scheduler.proxy_perjob":   false,
+	"helper.bind_all":          false,
 	"build.system_apptainer":   false,
 	"build.ncpus":              false,
 	"build.mem":                false,
@@ -60,7 +60,7 @@ func isArrayKey(key string) bool { return configKeyDefs[key] }
 
 func isBoolKey(key string) bool {
 	switch key {
-	case "submit_job", "proxy_perjob", "helper_bind_all", "autoload_gpu",
+	case "scheduler.submit_job", "scheduler.proxy_perjob", "helper.bind_all", "autoload_gpu",
 		"build.always_submit_data":
 		return true
 	}
@@ -210,7 +210,7 @@ func recipeExists(ctx context.Context, name string) bool {
 // configValueCompletion returns suggested values for a config key
 func configValueCompletion(key string) []string {
 	switch key {
-	case "submit_job", "proxy_perjob", "helper_bind_all":
+	case "scheduler.submit_job", "scheduler.proxy_perjob", "helper.bind_all":
 		return []string{"true", "false"}
 	case "autoload_gpu":
 		return []string{"true", "false"}
@@ -234,7 +234,7 @@ func configValueCompletion(key string) []string {
 		return []string{"2g", "4g", "8g", "16g"}
 	case "scheduler.time":
 		return []string{"1h", "2h", "4h", "8h"}
-	case "notification":
+	case "helper.notification":
 		return []string{"none", "terminal", "web", "both"}
 	case "metadata_cache_ttl":
 		return []string{"1", "3", "7", "14", "0"}
@@ -446,14 +446,6 @@ var configShowCmd = &cobra.Command{
 					utils.StyleHint(fmt.Sprintf("sources now recommend %s — `config set default_distro %s` to switch", def, def)))
 			}
 		}
-		submitJobConfig := viper.GetBool("submit_job")
-		submitJobActual := config.Global.SubmitJob
-		if submitJobConfig && !submitJobActual {
-			fmt.Printf("  %-19s %v (disabled: scheduler not accessible)%s\n", "submit_job:", submitJobConfig, srcTag("submit_job"))
-		} else {
-			fmt.Printf("  %-19s %v%s\n", "submit_job:", submitJobActual, srcTag("submit_job"))
-		}
-		printOverridden("                      ", "submit_job")
 		fmt.Printf("  %-19s %v%s\n", "autoload_gpu:", config.Global.AutoloadGPU, srcTag("autoload_gpu"))
 		printOverridden("                      ", "autoload_gpu")
 		fmt.Printf("  %-19s %v%s\n", "nested_run:", config.Global.NestedRun, srcTag("nested_run"))
@@ -466,8 +458,6 @@ var configShowCmd = &cobra.Command{
 		printOverridden("                      ", "metadata_cache_ttl")
 		fmt.Printf("  %-19s %dd%s\n", "store_gc_grace:", int(config.Global.StoreGCGrace.Hours()/24), srcTag("store_gc_grace"))
 		printOverridden("                      ", "store_gc_grace")
-		fmt.Printf("  %-19s %v%s\n", "proxy_perjob:", config.Global.ProxyPerJob, srcTag("proxy_perjob"))
-		printOverridden("                      ", "proxy_perjob")
 		channels := config.Global.Build.Channels
 		if len(channels) > 0 {
 			fmt.Printf("  %-19s\n", "channels:")
@@ -479,15 +469,16 @@ var configShowCmd = &cobra.Command{
 		}
 		fmt.Println()
 
-		fmt.Println(utils.StyleTitle("Helper:"))
-		fmt.Printf("  %-19s %v%s\n", "helper_bind_all:", config.Global.HelperBindAll, srcTag("helper_bind_all"))
-		printOverridden("                       ", "helper_bind_all")
+		// Helper settings (longest key: notification = 13 chars)
+		fmt.Printf("%s %s\n", utils.StyleTitle("Helper Configuration:"), "helper.*")
+		fmt.Printf("  %-14s %v%s\n", "bind_all:", config.Global.HelperBindAll, srcTag("helper.bind_all"))
+		printOverridden("                 ", "helper.bind_all")
 		notif := config.Global.Notification
 		if notif == "" {
 			notif = "none"
 		}
-		fmt.Printf("  %-19s %s%s\n", "notification:", notif, srcTag("notification"))
-		printOverridden("                       ", "notification")
+		fmt.Printf("  %-14s %s%s\n", "notification:", notif, srcTag("helper.notification"))
+		printOverridden("                 ", "helper.notification")
 		fmt.Println()
 
 		// Build settings
@@ -518,40 +509,50 @@ var configShowCmd = &cobra.Command{
 		printOverridden("                        ", "build.data_block_size")
 		fmt.Println()
 
-		// Scheduler settings (longest key: partition = 10 chars)
+		// Scheduler settings (longest key: proxy_perjob = 12 chars)
 		fmt.Printf("%s %s\n", utils.StyleTitle("Scheduler Configuration:"), "scheduler.*")
+		submitJobConfig := viper.GetBool("scheduler.submit_job")
+		submitJobActual := config.Global.SubmitJob
+		if submitJobConfig && !submitJobActual {
+			fmt.Printf("  %-14s %v (disabled: scheduler not accessible)%s\n", "submit_job:", submitJobConfig, srcTag("scheduler.submit_job"))
+		} else {
+			fmt.Printf("  %-14s %v%s\n", "submit_job:", submitJobActual, srcTag("scheduler.submit_job"))
+		}
+		printOverridden("                 ", "scheduler.submit_job")
 		schedulerBin := config.Global.Scheduler.Bin
 		schedulerType := config.GetSchedulerTypeFromBin(schedulerBin)
 		if schedulerBin != "" {
-			fmt.Printf("  %-12s %s (%s)%s\n", "bin:", schedulerBin, schedulerType, srcTag("scheduler.bin"))
+			fmt.Printf("  %-14s %s (%s)%s\n", "bin:", schedulerBin, schedulerType, srcTag("scheduler.bin"))
 		} else {
-			fmt.Printf("  %-12s %s%s\n", "bin:", schedulerBin, srcTag("scheduler.bin"))
+			fmt.Printf("  %-14s %s%s\n", "bin:", schedulerBin, srcTag("scheduler.bin"))
 		}
-		printOverridden("             ", "scheduler.bin")
+		printOverridden("                 ", "scheduler.bin")
 		if config.Global.Scheduler.Timeout == 0 {
-			fmt.Printf("  %-12s 0 (disabled)%s\n", "timeout:", srcTag("scheduler.timeout"))
+			fmt.Printf("  %-14s 0 (disabled)%s\n", "timeout:", srcTag("scheduler.timeout"))
 		} else {
-			fmt.Printf("  %-12s %s%s\n", "timeout:", utils.FormatDuration(config.Global.Scheduler.Timeout), srcTag("scheduler.timeout"))
+			fmt.Printf("  %-14s %s%s\n", "timeout:", utils.FormatDuration(config.Global.Scheduler.Timeout), srcTag("scheduler.timeout"))
 		}
-		printOverridden("             ", "scheduler.timeout")
+		printOverridden("                 ", "scheduler.timeout")
 		account := config.Global.Scheduler.Account
 		if account == "" {
 			account = "(scheduler default)"
 		}
-		fmt.Printf("  %-12s %s%s\n", "account:", account, srcTag("scheduler.account"))
-		printOverridden("             ", "scheduler.account")
+		fmt.Printf("  %-14s %s%s\n", "account:", account, srcTag("scheduler.account"))
+		printOverridden("                 ", "scheduler.account")
 		partition := config.Global.Scheduler.Partition
 		if partition == "" {
 			partition = "(scheduler default)"
 		}
-		fmt.Printf("  %-12s %s%s\n", "partition:", partition, srcTag("scheduler.partition"))
-		printOverridden("             ", "scheduler.partition")
-		fmt.Printf("  %-12s %d%s\n", "ncpus:", config.Global.Scheduler.Defaults.CpusPerTask, srcTag("scheduler.ncpus"))
-		printOverridden("             ", "scheduler.ncpus")
-		fmt.Printf("  %-12s %s%s\n", "mem:", utils.FormatMemoryMB(config.Global.Scheduler.Defaults.MemPerNodeMB), srcTag("scheduler.mem"))
-		printOverridden("             ", "scheduler.mem")
-		fmt.Printf("  %-12s %s%s\n", "time:", utils.FormatDuration(config.Global.Scheduler.Defaults.Time), srcTag("scheduler.time"))
-		printOverridden("             ", "scheduler.time")
+		fmt.Printf("  %-14s %s%s\n", "partition:", partition, srcTag("scheduler.partition"))
+		printOverridden("                 ", "scheduler.partition")
+		fmt.Printf("  %-14s %d%s\n", "ncpus:", config.Global.Scheduler.Defaults.CpusPerTask, srcTag("scheduler.ncpus"))
+		printOverridden("                 ", "scheduler.ncpus")
+		fmt.Printf("  %-14s %s%s\n", "mem:", utils.FormatMemoryMB(config.Global.Scheduler.Defaults.MemPerNodeMB), srcTag("scheduler.mem"))
+		printOverridden("                 ", "scheduler.mem")
+		fmt.Printf("  %-14s %s%s\n", "time:", utils.FormatDuration(config.Global.Scheduler.Defaults.Time), srcTag("scheduler.time"))
+		printOverridden("                 ", "scheduler.time")
+		fmt.Printf("  %-14s %v%s\n", "proxy_perjob:", config.Global.ProxyPerJob, srcTag("scheduler.proxy_perjob"))
+		printOverridden("                 ", "scheduler.proxy_perjob")
 		fmt.Println()
 
 		// Show environment variable overrides
@@ -661,7 +662,7 @@ Time duration format (for build.time):
 	Example: `  condatainer config set build.system_apptainer /usr/bin/apptainer
   condatainer config set build.ncpus 8
   condatainer config set build.time 02:00:00
-  condatainer config set submit_job false`,
+  condatainer config set scheduler.submit_job false`,
 	Args:              cobra.ExactArgs(2),
 	ValidArgsFunction: configSetKeysCompletion,
 	Run: func(cmd *cobra.Command, args []string) {
@@ -711,10 +712,10 @@ Time duration format (for build.time):
 			value = normalized
 		}
 
-		if key == "notification" {
+		if key == "helper.notification" {
 			v := strings.ToLower(value)
 			if v != "" && v != "none" && v != "terminal" && v != "web" && v != "both" {
-				utils.PrintError("Invalid value for notification: %q (valid values: none, terminal, web, both)", value)
+				utils.PrintError("Invalid value for helper.notification: %q (valid values: none, terminal, web, both)", value)
 				os.Exit(ExitCodeError)
 			}
 		}

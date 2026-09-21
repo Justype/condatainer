@@ -525,7 +525,7 @@ func buildHelperCommandBody(id, name, cwd, scriptDir, stateDir string, walltime 
 	// Free port (resolved on the compute node, not the login node)
 	fmt.Fprintln(&sb, `export CNT_HELPER_PORT=$(condatainer _pick_port)`)
 
-	// Bind address: 0.0.0.0 when helper_bind_all is set (direct TCP proxy, no SSH tunnel).
+	// Bind address: 0.0.0.0 when helper.bind_all is set (direct TCP proxy, no SSH tunnel).
 	if bindAll {
 		fmt.Fprintln(&sb, `export CNT_HELPER_BIND_ADDR=0.0.0.0`)
 		fmt.Fprintln(&sb, `export CNT_HELPER_BIND_ALL=1`)

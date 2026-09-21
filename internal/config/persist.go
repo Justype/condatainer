@@ -114,7 +114,7 @@ func InitViper() error {
 
 // setDefaults sets default values for all config keys
 func setDefaults() {
-	viper.SetDefault("submit_job", true)
+	viper.SetDefault("scheduler.submit_job", true)
 	viper.SetDefault("logs_dir", DefaultLogsDir())
 
 	// Build config defaults
@@ -140,11 +140,11 @@ func setDefaults() {
 	viper.SetDefault("autoload_gpu", true)
 	viper.SetDefault("nested_run", DefaultNestedRun)
 	// "web" = browser notification via dashboard; "terminal" = bell; "both" = terminal + web; "" or "none" = silent
-	viper.SetDefault("notification", DefaultNotification)
+	viper.SetDefault("helper.notification", DefaultNotification)
 	viper.SetDefault("metadata_cache_ttl", DefaultCacheTTLDay) // days
 	viper.SetDefault("store_gc_grace", DefaultGCGraceDay)      // days
-	viper.SetDefault("proxy_perjob", false)
-	viper.SetDefault("helper_bind_all", false)
+	viper.SetDefault("scheduler.proxy_perjob", false)
+	viper.SetDefault("helper.bind_all", false)
 }
 
 // GetUserConfigPath returns the path to the user config file
@@ -898,8 +898,8 @@ func LoadFromViper() {
 		Global.Scheduler.Bin = bin
 	}
 
-	// Handle submit_job: disable if scheduler is not accessible
-	if submitJob, ok := layerBool("submit_job"); ok && !submitJob {
+	// Handle scheduler.submit_job: disable if scheduler is not accessible
+	if submitJob, ok := layerBool("scheduler.submit_job"); ok && !submitJob {
 		Global.SubmitJob = false
 	} else {
 		// Auto-disable if no scheduler binary is available
@@ -1014,13 +1014,13 @@ func LoadFromViper() {
 	}
 
 	// Only when set: "" means silent, so an unset key must keep DefaultNotification.
-	if v, ok := layerStringSet("notification"); ok {
+	if v, ok := layerStringSet("helper.notification"); ok {
 		Global.Notification = v
 		switch Global.Notification {
 		case "", "none", "terminal", "web", "both":
 			// valid
 		default:
-			fmt.Fprintf(os.Stderr, "[WARN] Unknown notification value %q. Valid values: terminal, web, both, none. Treating as none.\n", Global.Notification)
+			fmt.Fprintf(os.Stderr, "[WARN] Unknown helper.notification value %q. Valid values: terminal, web, both, none. Treating as none.\n", Global.Notification)
 			Global.Notification = ""
 		}
 	}
@@ -1033,11 +1033,11 @@ func LoadFromViper() {
 		Global.StoreGCGrace = time.Duration(grace) * 24 * time.Hour
 	}
 
-	if proxyPerJob, ok := layerBool("proxy_perjob"); ok {
+	if proxyPerJob, ok := layerBool("scheduler.proxy_perjob"); ok {
 		Global.ProxyPerJob = proxyPerJob
 	}
 
-	if helperBindAll, ok := layerBool("helper_bind_all"); ok {
+	if helperBindAll, ok := layerBool("helper.bind_all"); ok {
 		Global.HelperBindAll = helperBindAll
 	}
 

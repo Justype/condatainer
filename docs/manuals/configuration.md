@@ -23,7 +23,7 @@ All three config files are loaded and merged when they exist:
 6. **System config file** (`/etc/condatainer/config.yaml`)
 7. **Defaults** (lowest priority)
 
-**Scalar keys** (`build.system_apptainer`, `default_distro`, `submit_job`, etc.): the highest-priority config file that sets the key wins.
+**Scalar keys** (`build.system_apptainer`, `default_distro`, `scheduler.submit_job`, etc.): the highest-priority config file that sets the key wins.
 
 **`sources`**: **merged** across all config files. Entries from user config appear first (higher search priority), followed by extra-root, app-root, then system. This lets a sysadmin publish shared recipe collections in an app-root or system config without requiring every user to copy them into their own config. See [How Array Settings Merge](#how-array-settings-merge) for a worked example.
 
@@ -142,15 +142,11 @@ a GitHub package's visibility setting, which CondaTainer never reads or changes.
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `submit_job` | `true` | Submit builds as scheduler jobs (disabled if no scheduler found) |
 | `autoload_gpu` | `true` | Pass `--nv` / `--rocm` when the host has the device node. Set `false` if the driver is present but unusable |
 | `nested_run` | `auto` | Provide apptainer inside `e`, `exec` and `run` containers, so containers can be started from within one. `auto` uses the apptainer installed by `condatainer update --libexec apptainer`, otherwise an installed `apptainer/<version>` overlay, and builds nothing. `true` also builds that overlay when it is missing, on the host that ran the command and before any job is submitted (`build.always_submit_data` does not apply), and stops with an error if apptainer cannot be provided. `false` turns it off |
 | `default_distro` | first source's `default_distro` | Default distro for the container root, e.g. `ubuntu24` → `ubuntu24/base` |
-| `notification` | `web` | Alert when a helper job starts: `web`, `terminal`, `both`, `none` |
 | `metadata_cache_ttl` | `7` | Days to cache remote recipe metadata. `0` always fetches |
 | `store_gc_grace` | `30` | Days before `store gc` will report an entry collectable. `--grace` overrides it per run |
-| `proxy_perjob` | `false` | Auto-start a per-job SOCKS5 proxy inside submitted jobs. See [Proxy](condatainer.md#proxy). |
-| `helper_bind_all` | `false` | Bind helper services to `0.0.0.0` for direct TCP instead of an SSH tunnel |
 
 ### Build Configuration
 
@@ -174,6 +170,7 @@ a GitHub package's visibility setting, which CondaTainer never reads or changes.
 
 | Key | Default | Description |
 |-----|---------|-------------|
+| `scheduler.submit_job` | `true` | Submit builds and scripts with scheduler directives as jobs (disabled if no scheduler found) |
 | `scheduler.bin` | Auto-detected | Path to job scheduler binary (sbatch, qsub, bsub, condor_submit, etc.) |
 | `scheduler.timeout` | `0` | Seconds to wait for a scheduler command before erroring. `0` disables the timeout |
 | `scheduler.account` | none | Default billing/allocation account for submitted jobs (e.g. helper). Empty uses the scheduler's own default |
@@ -181,10 +178,18 @@ a GitHub package's visibility setting, which CondaTainer never reads or changes.
 | `scheduler.ncpus` | `1` | CPUs for a job with no script directives (e.g. helper) |
 | `scheduler.mem` | `2048` | Memory for a job with no script directives (supports units: `2g`, `2048`) |
 | `scheduler.time` | `2h` | Time limit for a job with no script directives |
+| `scheduler.proxy_perjob` | `false` | Auto-start a per-job SOCKS5 proxy inside submitted jobs. See [Proxy](condatainer.md#proxy). |
 
 `scheduler.ncpus`/`.mem`/`.time` apply whether or not the job actually ends up submitted to a
-scheduler — the same as `build.ncpus`/`.mem`/`.time` apply to a build regardless of `submit_job`.
+scheduler — the same as `build.ncpus`/`.mem`/`.time` apply to a build regardless of `scheduler.submit_job`.
 `scheduler.account`/`.partition` only matter when a scheduler is present.
+
+### Helper Configuration
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `helper.bind_all` | `false` | Bind helper services to `0.0.0.0` for direct TCP instead of an SSH tunnel |
+| `helper.notification` | `web` | Alert when a helper job starts: `web`, `terminal`, `both`, `none` |
 
 ## Managing Configuration
 
@@ -219,7 +224,7 @@ condatainer config set build.time 4h
 condatainer config set build.time 02:00:00
 
 # Disable job submission (run builds locally)
-condatainer config set submit_job false
+condatainer config set scheduler.submit_job false
 
 # Set scheduler command timeout (seconds)
 condatainer config set scheduler.timeout 10
@@ -295,7 +300,7 @@ mapping is consistent for every key handled by the CLI:
 | Environment Variable               | Config Key             |
 |-----------------------------------|------------------------|
 | `CNT_BUILD_SYSTEM_APPTAINER`| `build.system_apptainer` |
-| `CNT_SUBMIT_JOB`           | `submit_job`           |
+| `CNT_SCHEDULER_SUBMIT_JOB` | `scheduler.submit_job` |
 | `CNT_AUTOLOAD_GPU`         | `autoload_gpu`         |
 | `CNT_NESTED_RUN`           | `nested_run`           |
 | `CNT_DEFAULT_DISTRO`       | `default_distro`       |
@@ -310,11 +315,11 @@ mapping is consistent for every key handled by the CLI:
 | `CNT_SCHEDULER_TIMEOUT`    | `scheduler.timeout`    |
 | `CNT_SCHEDULER_ACCOUNT`    | `scheduler.account`    |
 | `CNT_SCHEDULER_PARTITION`  | `scheduler.partition`  |
-| `CNT_NOTIFICATION`         | `notification`         |
+| `CNT_HELPER_NOTIFICATION`  | `helper.notification`  |
 | `CNT_METADATA_CACHE_TTL`   | `metadata_cache_ttl`   |
 | `CNT_STORE_GC_GRACE`       | `store_gc_grace`       |
-| `CNT_PROXY_PERJOB`         | `proxy_perjob`         |
-| `CNT_HELPER_BIND_ALL`      | `helper_bind_all`      |
+| `CNT_SCHEDULER_PROXY_PERJOB` | `scheduler.proxy_perjob` |
+| `CNT_HELPER_BIND_ALL`      | `helper.bind_all`      |
 | `CNT_TMPDIR`               | (fast build root; no config key) |
 
 Example:
@@ -384,9 +389,6 @@ Each base directory follows this structure:
 # Log directory for build jobs
 logs_dir: /home/user/logs
 
-# Submit builds as scheduler jobs
-submit_job: true
-
 # Recipe collections, in priority order (first match wins).
 # The public cnt collection is appended automatically unless redefined here.
 sources:
@@ -405,10 +407,6 @@ default_distro: ubuntu24
 
 # Days to cache remote recipe metadata (default: 7 = 1 week, 0 = disabled)
 metadata_cache_ttl: 7
-
-# Notification when a helper job starts running (default: web)
-# Values: web | terminal | both | none (or empty)
-# notification: web
 
 # Extra base directories (standard layout: images/, helper-scripts/)
 # For a group/lab root with standard layout, set in module file:
@@ -434,8 +432,13 @@ scheduler:
   ncpus: 1              # CPUs for a job with no script directives
   mem: 2g               # memory for a job with no script directives
   time: 2h              # time limit for a job with no script directives
+  submit_job: true      # submit builds and scripts with directives as scheduler jobs
+  proxy_perjob: false   # auto-start a per-job proxy inside submitted jobs
 
-# proxy_perjob: true   # auto-start per-job proxy inside submitted jobs
+# Helper configuration
+helper:
+  bind_all: false       # bind helper services to 0.0.0.0 instead of an SSH tunnel
+  notification: web     # web | terminal | both | none (or empty): alert when a helper job starts
 
 # Default: conda-forge then bioconda
 channels:
@@ -742,5 +745,5 @@ the normal Conda fallback.
 For systems without a scheduler or for local builds:
 
 ```bash
-condatainer config set submit_job false
+condatainer config set scheduler.submit_job false
 ```

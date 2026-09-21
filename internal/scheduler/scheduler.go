@@ -201,7 +201,7 @@ type ScriptSpecs struct {
 	ScriptType     SchedulerType // Scheduler type detected from script directives
 	// ProxyVia, when non-empty, causes writeJobHeader to emit
 	// "condatainer proxy start --via <host>" at the top of the job body.
-	// Set by callers when proxy_perjob=true.
+	// Set by callers when scheduler.proxy_perjob=true.
 	ProxyVia string
 }
 
