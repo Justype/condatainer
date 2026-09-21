@@ -75,7 +75,8 @@ var rootCmd = &cobra.Command{
 		config.LoadFromViper()
 
 		// Warn if apptainer is still not accessible after auto-detection, unless
-		// the toolchain has its own. Skip for all `config` commands so users can
+		// the toolchain has its own or this is already inside a container, where
+		// none is reachable. Skip for all `config` commands so users can
 		// inspect/repair config without seeing contradictory warnings before
 		// re-detection runs.
 		isConfigCommand := strings.HasPrefix(cmd.CommandPath(), "condatainer config")
@@ -87,8 +88,8 @@ var rootCmd = &cobra.Command{
 				utils.PrintWarning("build.system_apptainer %q is not usable, and no apptainer was found on PATH.", bad)
 			}
 			utils.PrintHint("Run: %s", utils.StyleAction("condatainer config init"))
-		} else if !isCompleteRequest && !isConfigCommand && !libexec.Installed("apptainer") &&
-			!config.ValidateBinary(config.Global.Build.SystemApptainer) {
+		} else if !isCompleteRequest && !isConfigCommand && !config.IsInsideContainer() &&
+			!libexec.Installed("apptainer") && !config.ValidateBinary(config.Global.Build.SystemApptainer) {
 			utils.PrintWarning("Apptainer not accessible. The module may have been unloaded or removed.")
 			utils.PrintHint("Run: %s", utils.StyleAction("condatainer config init"))
 		}
