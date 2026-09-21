@@ -145,7 +145,7 @@ a GitHub package's visibility setting, which CondaTainer never reads or changes.
 | `autoload_gpu` | `true` | Pass `--nv` / `--rocm` when the host has the device node. Set `false` if the driver is present but unusable |
 | `nested_run` | `auto` | Provide apptainer inside `e`, `exec` and `run` containers, so containers can be started from within one. `auto` uses the apptainer installed by `condatainer update --libexec apptainer`, otherwise an installed `apptainer/<version>` overlay, and builds nothing. `true` also builds that overlay when it is missing, on the host that ran the command and before any job is submitted (`build.always_submit_data` does not apply), and stops with an error if apptainer cannot be provided. `false` turns it off |
 | `default_distro` | first source's `default_distro` | Default distro for the container root, e.g. `ubuntu24` → `ubuntu24/base` |
-| `metadata_cache_ttl` | `7` | Days to cache remote recipe metadata. `0` always fetches |
+| `metadata_cache_ttl` | `1` | Days to cache remote recipe metadata. `0` always fetches |
 | `store_gc_grace` | `30` | Days before `store gc` will report an entry collectable. `--grace` overrides it per run |
 
 ### Build Configuration
@@ -405,8 +405,8 @@ nested_run: auto
 # Default distro for the container root (default: the first source's default_distro)
 default_distro: ubuntu24
 
-# Days to cache remote recipe metadata (default: 7 = 1 week, 0 = disabled)
-metadata_cache_ttl: 7
+# Days to cache remote recipe metadata (default: 1, 0 = disabled)
+metadata_cache_ttl: 1
 
 # Extra base directories (standard layout: images/, helper-scripts/)
 # For a group/lab root with standard layout, set in module file:
@@ -687,7 +687,7 @@ condatainer config set scheduler.timeout 0   # disable timeout entirely
 
 ### Remote metadata unavailable or stale
 
-CondaTainer caches remote build script and helper script metadata for 1 week by default. If the cache is expired and the network is unavailable, the stale cache is used with a warning. To force a refresh:
+CondaTainer caches remote build script and helper script metadata for 1 day by default. If the cache is expired and the network is unavailable, the stale cache is used with a warning. To force a refresh:
 
 ```bash
 condatainer update           # re-fetch build + helper metadata (default)

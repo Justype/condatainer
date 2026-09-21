@@ -83,7 +83,7 @@ type Config struct {
 	// "both" (terminal + web), "" or "none" (silent).
 	Notification string
 
-	// Max age of the on-disk remote build script metadata cache (default: 1 week)
+	// Max age of the on-disk remote build script metadata cache (default: 1 day)
 	MetadataCacheTTL time.Duration
 
 	// Age below which `store gc` never reports an entry collectable (default: 30
@@ -160,7 +160,7 @@ const (
 	DefaultNcpus        = 4     // CPUs for a build job
 	DefaultMemMB        = 12288 // memory for a build job
 	DefaultBuildTime    = "2h"  // walltime for a build job
-	DefaultCacheTTLDay  = 7     // remote recipe metadata cache, 1 week
+	DefaultCacheTTLDay  = 1     // remote recipe metadata cache, 1 day
 	DefaultGCGraceDay   = 30    // store gc: age below which an entry is never collectable
 	DefaultNotification = "web"
 	DefaultNestedRun    = NestedRunAuto

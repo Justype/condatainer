@@ -1923,7 +1923,7 @@ sources:
   - cnt: https://raw.githubusercontent.com/condatainer/cnt/main
 
 # Days to cache remote metadata (default: 7, set 0 to always fetch live)
-metadata_cache_ttl: 7
+metadata_cache_ttl: 1
 
 # Build configuration
 build:
@@ -2840,7 +2840,7 @@ By default (no flags), both `--build` and `--helper` are enabled.
 **Features:**
 
 * Prints each remote URL as it fetches metadata.
-* Downloads and caches metadata locally per remote URL (default TTL: 7 days).
+* Downloads and caches metadata locally per remote URL (default TTL: 1 day).
 * Cached metadata is reused by `avail` and `create` without a network round-trip.
 * Supports multiple recipe collections (`sources`); each remote gets its own cache file.
 * Removes cache files for remotes no longer configured (orphan cleanup).
