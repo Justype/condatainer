@@ -104,6 +104,9 @@ any push runs, so the free location is tried first.
 `Prune` is not what reconciles the map — `Publish` does, before it marshals, so
 the bytes that get written never name an artifact the closure no longer reaches.
 Pruning is filesystem-only and runs after the rename.
+A re-pin at a new identity therefore leaves the artifact it replaces on disk, unreachable, when
+`applyEntry` verifies the new pin; that one problem is ignored there because `Publish` prunes it,
+where refusing would make an artifact impossible to replace.
 
 ## Manual pins
 

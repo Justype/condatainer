@@ -485,3 +485,29 @@ func TestPinFirstCandidatePrefersTheRootRelativeFile(t *testing.T) {
 		t.Errorf("Name = %q, want the root file's %q", pinned.Name, rootManifest.Name)
 	}
 }
+
+// Re-pinning a name at a new identity leaves the artifact it replaces on disk
+// until Publish prunes it, which must not refuse the pin.
+func TestApplyEntryRepinsAtANewIdentity(t *testing.T) {
+	root := projectRoot(t)
+	oldManifest, oldFiles := recipeArtifact(t, "ubuntu24/base", "echo old\n")
+	oldPath := vendor(t, root, oldManifest, oldFiles)
+	l := New()
+	l.Pins[BaseKey] = PinEntry{Artifact: oldPath, Manual: true}
+
+	newManifest, newFiles := recipeArtifact(t, "ubuntu24/base", "echo new\n")
+	newPath := vendor(t, root, newManifest, newFiles)
+	if err := applyEntry(root, l, BaseKey, PinEntry{Artifact: newPath, Manual: true}); err != nil {
+		t.Fatalf("re-pin refused: %v", err)
+	}
+
+	if l.Pins[BaseKey].Artifact != newPath {
+		t.Errorf("pin = %s, want %s", l.Pins[BaseKey].Artifact, newPath)
+	}
+	if _, err := os.Stat(filepath.Join(Dir(root), oldPath)); !os.IsNotExist(err) {
+		t.Errorf("the replaced entry survived: %v", err)
+	}
+	if _, problems := Verify(root, l); len(problems) > 0 {
+		t.Errorf("the lock does not verify after the re-pin:\n%s", problemText(problems))
+	}
+}

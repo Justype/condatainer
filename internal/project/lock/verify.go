@@ -38,6 +38,10 @@ type Verified struct {
 	Reachable map[string]bool
 }
 
+// reasonUnreachable is the problem for a vendored entry no pin leads to. Publish
+// prunes such entries, so it does not stop a lock being written.
+const reasonUnreachable = "artifact directory is not reachable from any pin"
+
 // Problem is one validation failure, attributed to what it is about.
 type Problem struct {
 	// Artifact is the relative artifact path, empty for a project-level issue.
@@ -131,7 +135,7 @@ func Verify(root string, l *Lock) (*Verified, []Problem) {
 	for _, relative := range present {
 		if !out.Reachable[relative] {
 			problems = append(problems, Problem{Artifact: relative,
-				Reason: "artifact directory is not reachable from any pin"})
+				Reason: reasonUnreachable})
 		}
 	}
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -399,7 +400,10 @@ func applyEntry(root string, l *Lock, key string, entry PinEntry) error {
 	previous, had := l.Pins[key]
 	l.Pins[key] = entry
 
-	if _, problems := Verify(root, l); len(problems) > 0 {
+	// An entry the new pin no longer reaches, such as the artifact it replaces, is
+	// left for Publish to prune.
+	_, problems := Verify(root, l)
+	if problems = dropPrunable(problems); len(problems) > 0 {
 		if had {
 			l.Pins[key] = previous
 		} else {
@@ -458,6 +462,11 @@ func SelectDistro(root string, l *Lock, distro string, opts PinOptions) (*Pinned
 // `project select-distro --auto`.
 func AutoDistro(root string, l *Lock, distro string, opts PinOptions) (*Pinned, error) {
 	return pinBase(root, l, distro, false, opts)
+}
+
+// dropPrunable removes the problems Publish resolves by pruning.
+func dropPrunable(problems []Problem) []Problem {
+	return slices.DeleteFunc(slices.Clone(problems), func(p Problem) bool { return p.Reason == reasonUnreachable })
 }
 
 func joinProblems(problems []Problem) string {
