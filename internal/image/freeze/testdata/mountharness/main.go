@@ -6,7 +6,7 @@
 //
 // Usage:
 //
-//	mountharness _mount_sentinel <fuseBin> <mnt> [fuseArgs...]   see freeze.RunSentinel; work comes from $CNT_MOUNT_WORK
+//	mountharness _mount_sentinel <fuseBin> <mnt> -- [fuseArgs...]   see freeze.RunSentinel; work comes from $CNT_MOUNT_WORK
 //	mountharness _payload_key <dir> <base> <workers>             prints the payload key of dir, as the hidden command does
 //	mountharness drive <fuseBin> <sqf> <mnt> <work>              calls freeze.MountedRun directly and blocks until it returns
 package main
@@ -24,16 +24,21 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fail("usage: mountharness _mount_sentinel <fuseBin> <mnt> [fuseArgs...] | drive <fuseBin> <sqf> <mnt> <work>")
+		fail("usage: mountharness _mount_sentinel <fuseBin> <mnt> -- [fuseArgs...] | drive <fuseBin> <sqf> <mnt> <work>")
 	}
 
 	switch os.Args[1] {
 	case "_mount_sentinel":
 		if len(os.Args) < 4 {
-			fail("usage: mountharness _mount_sentinel <fuseBin> <mnt> [fuseArgs...]")
+			fail("usage: mountharness _mount_sentinel <fuseBin> <mnt> -- [fuseArgs...]")
 		}
 		fuseBin, mnt := os.Args[2], os.Args[3]
 		fuseArgs := os.Args[4:]
+		// MountedRun inserts "--" ahead of fuseArgs so cobra's real
+		// _mount_sentinel won't parse them as its own flags; mirror that here.
+		if len(fuseArgs) > 0 && fuseArgs[0] == "--" {
+			fuseArgs = fuseArgs[1:]
+		}
 		if err := freeze.RunSentinel(fuseBin, mnt, os.Getenv(freeze.EnvSentinelWork), fuseArgs); err != nil {
 			fail("%v", err)
 		}

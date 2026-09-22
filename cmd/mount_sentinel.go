@@ -12,7 +12,7 @@ func init() {
 }
 
 var mountSentinelCmd = &cobra.Command{
-	Use:    "_mount_sentinel <fuseBin> <mnt> [fuseArgs...]",
+	Use:    "_mount_sentinel <fuseBin> <mnt> -- [fuseArgs...]",
 	Hidden: true,
 	Short:  "Run the FUSE-mount sentinel condatainer re-execs itself into (internal)",
 	Args:   cobra.MinimumNArgs(2),

@@ -59,7 +59,9 @@ func MountedRun(ctx context.Context, fuseBin string, fuseArgs []string, mnt stri
 		return fmt.Errorf("locating condatainer binary: %w", err)
 	}
 
-	sentinelArgs := append([]string{"_mount_sentinel", fuseBin, mnt}, fuseArgs...)
+	// "--" stops cobra from parsing fuseArgs as its own flags: an option like
+	// squashfuse's "-o" would otherwise be rejected as an unknown shorthand.
+	sentinelArgs := append([]string{"_mount_sentinel", fuseBin, mnt, "--"}, fuseArgs...)
 	cmd := exec.CommandContext(ctx, self, sentinelArgs...)
 	cmd.Env = append(os.Environ(), EnvSentinelWork+"="+work)
 	cmd.Stdin = io.Stdin
