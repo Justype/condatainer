@@ -6,6 +6,9 @@
 
 [![Read the Docs](https://readthedocs.org/projects/condatainer/badge/?version=latest)](https://condatainer.readthedocs.io/en/latest/) [![Go Reference](https://pkg.go.dev/badge/github.com/Justype/condatainer.svg)](https://pkg.go.dev/github.com/Justype/condatainer) [![GitHub Release](https://img.shields.io/github/v/release/Justype/condatainer)](https://github.com/Justype/condatainer/releases)
 
+> [!WARNING]
+> This tool will be archived and ported to [condatainer/condatainer](https://github.com/condatainer/condatainer) with new OCI registry and project feature with **no backward compatibility**.
+
 **CondaTainer** is a rootless CLI for managing *tools* / *data* / *project environments* and launching apps on HPC — designed for individuals and small teams using institutional or regional compute resources.
 
 * **Web-App Ready:** Launch *RStudio*, *VS Code*, *noVNC* and more with one command.
