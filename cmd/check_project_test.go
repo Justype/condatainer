@@ -75,7 +75,7 @@ func TestProjectCheckRefusesAutoInstallInsideAProject(t *testing.T) {
 	if !handled || err == nil {
 		t.Fatalf("-a was allowed inside a project (handled=%v, err=%v)", handled, err)
 	}
-	if !strings.Contains(err.Error(), "project restore") {
+	if !strings.Contains(err.Error(), "project lock") {
 		t.Errorf("refusal does not name the remedy: %v", err)
 	}
 }

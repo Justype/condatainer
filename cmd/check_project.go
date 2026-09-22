@@ -47,10 +47,14 @@ func projectCheck(ctx context.Context, scriptPaths []string, metaDeps []string) 
 		// -a installs by name into a shared images directory, which is one
 		// checkout's dependency silently replacing the artifact every other user
 		// of that directory sees. This holds even when nothing is pinned yet:
-		// the answer is to lock them, not to install them by name.
+		// the answer is to lock them, not to install them by name. Nor is -a a
+		// safe substitute even outside a project: it skips whatever already
+		// exists at that name/version, verified by presence and not by digest,
+		// so it can silently hand back a build from before the recipe changed.
 		return true, fmt.Errorf(
 			"-a installs by name and cannot run inside a project, which pins exact identities\n"+
-				"run `condatainer project restore --project %s` instead", root)
+				"run `condatainer check %s` (without -a) to see which declarations are not yet pinned\n"+
+				"install those manually, then pin them with `condatainer project lock --project %s`", script, root)
 	}
 
 	scanned, err := lock.ScanScript(root, script)
@@ -78,7 +82,12 @@ func projectCheck(ctx context.Context, scriptPaths []string, metaDeps []string) 
 		utils.PrintSuccess("%s can run: %d declaration(s) resolved.", filepath.Base(script), len(resolution.Mounts))
 		return true, nil
 	}
-	utils.PrintHint("Run %s to make them available.",
+	// Reasons above already name the exact remedy per declaration — pin what
+	// is not pinned, restore what is pinned but not here — so this only
+	// points at both commands rather than asserting the one that fixed
+	// whichever declaration happened to be checked last.
+	utils.PrintHint("Pin what's not pinned with %s, then make the rest available with %s.",
+		utils.StyleAction("condatainer project lock --project "+root),
 		utils.StyleAction("condatainer project restore --project "+root))
 	return true, fmt.Errorf("%d declaration(s) cannot be resolved", len(resolution.Unresolved))
 }

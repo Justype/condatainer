@@ -45,6 +45,18 @@ Without either, conda initialization is deferred until the first install.`
 // overlayProfiles are the selectable filesystem tuning profiles for a new image.
 var overlayProfiles = []string{"small", "balanced", "large"}
 
+// displayPath is p relative to cwd when possible, so a message about a plain
+// "env.img" typed on the command line doesn't balloon into a long absolute
+// path — matches the display convention in checkDeps.
+func displayPath(p string) string {
+	if cwd, err := os.Getwd(); err == nil {
+		if rel, err := filepath.Rel(cwd, p); err == nil && !strings.HasPrefix(rel, "..") {
+			return rel
+		}
+	}
+	return p
+}
+
 // registerOverlayCreateFlags registers the full flag set for creating an overlay,
 // shared by 'overlay create' and its 'o' shortcut so the two cannot drift apart.
 // --profile matches image/ext3's Profile vocabulary.
@@ -114,18 +126,6 @@ func runOverlayCreate(cmd *cobra.Command, args []string) {
 
 	if utils.FileExists(path) || utils.DirExists(path) {
 		ExitWithError("Path %s already exists.", utils.StylePath(path))
-	}
-
-	// Shown relative to cwd when possible, so a message about a plain
-	// "env.img" typed on the command line doesn't balloon into a long
-	// absolute path — matches the display convention in checkDeps.
-	displayPath := func(p string) string {
-		if cwd, err := os.Getwd(); err == nil {
-			if rel, err := filepath.Rel(cwd, p); err == nil && !strings.HasPrefix(rel, "..") {
-				return rel
-			}
-		}
-		return p
 	}
 
 	// lookup.Path is always beside path (LookupSnapshot's own invariant), so
@@ -699,9 +699,9 @@ func initCondaInOverlay(ctx context.Context, overlayPath, finalPath, envFile str
 
 	if envFile != "" {
 		if snapshot != "" {
-			utils.PrintMessage("Installing %s on top of the paired snapshot...", utils.StylePath(envFile))
+			utils.PrintMessage("Installing %s on top of the paired snapshot...", utils.StylePath(displayPath(envFile)))
 		} else {
-			utils.PrintMessage("Initializing conda environment using %s...", utils.StylePath(envFile))
+			utils.PrintMessage("Initializing conda environment using %s...", utils.StylePath(displayPath(envFile)))
 		}
 	} else if len(packages) > 0 {
 		if snapshot != "" {

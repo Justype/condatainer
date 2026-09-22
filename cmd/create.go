@@ -562,7 +562,7 @@ func solveCreateName(ctx context.Context, nameVersion string) (string, bool, err
 		return normalized, false, err
 	}
 	if resolved != "" {
-		return resolved, true, nil
+		return resolved, resolved != normalized, nil
 	}
 	return normalized, false, nil
 }

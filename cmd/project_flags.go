@@ -18,9 +18,9 @@ var noProjectRequested bool
 // which project it is standing in.
 var projectAnnounced bool
 
-// announceProject prints "Project: <root>" the first time anything in this
-// invocation resolves through a project's lock, and does nothing on any
-// later call — overlays, the root, and a script scan can each trigger a
+// announceProject prints "Project detected: <root>" the first time anything
+// in this invocation resolves through a project's lock, and does nothing on
+// any later call — overlays, the root, and a script scan can each trigger a
 // resolution, and the user needs to see the fact once, not once per thing
 // that used it.
 func announceProject(root string) {
@@ -28,7 +28,7 @@ func announceProject(root string) {
 		return
 	}
 	projectAnnounced = true
-	utils.PrintMessage("Project: %s", utils.StylePath(root))
+	utils.PrintMessage("Project detected: %s", root)
 }
 
 // RegisterProjectFlags registers --project and --no-project on a command

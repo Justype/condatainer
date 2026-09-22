@@ -90,32 +90,47 @@ func runE(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Auto-load env.img if not disabled and no .img in overlays
+	// Auto-load env.img if not disabled and no .img in overlays.
+	// Reported after Project detection
+	var announceAutoload func()
 	if !eNoAutoload {
 		hasImgOverlay := slices.ContainsFunc(overlays, utils.IsImg)
 		if !hasImgOverlay {
 			if pwd, err := os.Getwd(); err == nil {
 				switch candidate := utils.FindEnvOverlay("", pwd); {
 				case candidate != "":
-					// The probe asks for the lock the mount will take, so a
-					// writable session is not told an overlay is free that it
-					// then cannot have.
 					err := image.CheckAvailable(candidate, !eReadOnly)
 					switch {
 					case errors.Is(err, image.ErrProtected):
-						utils.PrintWarning("%s is write-protected, running without it; -r mounts it read-only",
-							filepath.Base(candidate))
+						announceAutoload = func() {
+							utils.PrintWarning("%s is write-protected, running without it",
+								filepath.Base(candidate))
+						}
 					case err != nil:
-						utils.PrintWarning("%s is in use, running without it", filepath.Base(candidate))
+						announceAutoload = func() {
+							utils.PrintWarning("%s is in use, running without it", filepath.Base(candidate))
+						}
 					default:
-						utils.PrintNote("Autoload environment overlay at %s", utils.StylePath(candidate))
-						overlays = append(overlays, candidate)
+						if lookup := container.LookupSnapshot(candidate); lookup.Path != "" {
+							imgName, sqfName := filepath.Base(candidate), filepath.Base(lookup.Path)
+							announceAutoload = func() {
+								utils.PrintNote("Autoload environment overlay %s with %s", imgName, sqfName)
+							}
+							overlays = append(overlays, candidate, lookup.Path)
+						} else {
+							imgName := filepath.Base(candidate)
+							announceAutoload = func() {
+								utils.PrintNote("Autoload environment overlay %s", imgName)
+							}
+							overlays = append(overlays, candidate)
+						}
 					}
 				default:
-					// No .img: fall back to its read-only snapshot, if any.
 					if snapshot := helper.FindEnvSnapshot(pwd); snapshot != "" {
-						utils.PrintNote("No env.img here; auto-loading its snapshot %s, read-only. `overlay create env.img` for a writable copy.",
-							utils.StylePath(snapshot))
+						snapshotName := filepath.Base(snapshot)
+						announceAutoload = func() {
+							utils.PrintNote("Autoload read-only environment overlay %s", snapshotName)
+						}
 						overlays = append(overlays, snapshot)
 					}
 				}
@@ -139,6 +154,9 @@ func runE(cmd *cobra.Command, args []string) error {
 	baseImageResolved, err := ensureRootBaseImage(cmd.Context(), resolvedOverlays)
 	if err != nil {
 		return err
+	}
+	if announceAutoload != nil {
+		announceAutoload()
 	}
 
 	resolvedOverlays, bindLibexec, err := nestedRun(cmd.Context(), resolvedOverlays)

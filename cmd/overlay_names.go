@@ -77,8 +77,8 @@ func resolveOverlayValues(ctx context.Context, values []string, standing *projec
 			utils.PrintNote("%s is mounted from an equivalent artifact, not %s",
 				utils.StyleName(mount.Name), short(mount.Identity))
 		case mount.Live && standing != nil:
-			utils.PrintNote("%s resolved to %s, not pinned — run `condatainer project pin %s` to lock it",
-				utils.StyleName(mount.Request), utils.StyleName(mount.Name), mount.Name)
+			utils.PrintNote("%s resolved to %s, not pinned",
+				utils.StyleName(mount.Request), utils.StyleName(mount.Name))
 		case mount.Live && mount.Name != mount.Request:
 			utils.PrintNote("Expanding '%s' to '%s'", mount.Request, mount.Name)
 		}
