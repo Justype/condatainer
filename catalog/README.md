@@ -133,11 +133,10 @@ and `${v#pre}` both carry a `#` that is not one. Neither function touches what i
 stored or what runs — `/.cnt/recipe` is the original bytes, and so is the script
 the build executes.
 
-## Validation and lint
+## Validation
 
-`Recipe.Validate` reports headers a recipe of that type may not declare, and
-`Recipe.Lint` reports declarations that are legal but probably wrong. Both are
-returned, never printed — nothing here writes to a terminal — and both run when a
+`Recipe.Validate` reports headers a recipe of that type may not declare. It is
+returned, never printed — nothing here writes to a terminal — and it runs when a
 recipe is fetched for a build rather than while indexing, so one bad recipe stops
 its own build instead of taking a whole collection out of every listing.
 
@@ -147,19 +146,23 @@ its own build instead of taking a whole collection out of every listing.
 | `#ARCH:` on an OS, or a value other than `native`/`noarch` | error |
 | `#SOURCE:` malformed or declared twice under one name | error |
 | `#SOURCE:` or `#INPUT:` on a `.def` | error |
-| a dependency mentioned in the name but not as whole components | lint |
 
 Only data has build dependencies: an app is prebuilt and self-contained, and an
 OS is self-contained by definition. A recipe that genuinely needs a compiler is
 an `os` artifact providing that toolchain, not an app depending on one.
 
-`HasComponents` is the matching rule the lint is built on: a dependency's
-slash-separated components must occur as a contiguous run of the artifact name's.
-Components compare as exact strings and versions are never compared semantically,
-so `star/2.7.11b` matches `grch38/star/2.7.11b/gencode49` and not
-`grch38/star2.7.11b/gencode49`. The second is the near-miss the lint reports — the
-author meant the version to be load-bearing, and the `#TARGET:` quietly stopped it
-counting.
+`HasComponents` reports whether a dependency's slash-separated components occur
+as a contiguous run of an artifact name's — `star/2.7.11b` matches
+`grch38/star/2.7.11b/gencode49` and not `grch38/star2.7.11b/gencode49`. This
+package exports it for `internal/artifact/key.Role`, not for anything of its
+own: it is how script-equiv-v1 decides whether an app or OS dependency
+contributes name/version to equivalence or is build history that contributes
+nothing (see `internal/artifact/README.md`). Nothing lints a near-miss glued
+version (`star2.7.11b` instead of `star/2.7.11b`): a `data` dependency's name
+is often several components deep (`grch38/transcript/gencode/50`), and
+expecting all of it to reappear in the depending artifact's name, the way one
+extra token like an OS distro reasonably can, would only false-positive on
+ordinary compact naming.
 
 ## `#SOURCE:` and the prompt list
 

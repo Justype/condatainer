@@ -76,6 +76,29 @@ func ValidateDeps(name string, typ Type, deps []string) error {
 	return errors.Join(errs...)
 }
 
+// HasComponents reports whether dep's slash-separated components occur as a
+// contiguous run of name's.
+//
+// Components are compared as exact strings and versions are never compared
+// semantically, since 2.7.11b and 2.7.11 name different builds. Substring
+// matching is never used: star/2.7.11b must not be found inside a component such
+// as star2.7.11b-old. internal/artifact/key.Role is the caller that matters: an
+// app or OS dependency contributes to equivalence only when this is true,
+// otherwise it is build history.
+func HasComponents(name, dep string) bool {
+	n := strings.Split(Normalize(name), "/")
+	d := strings.Split(Normalize(dep), "/")
+	if len(d) == 0 || len(d) > len(n) {
+		return false
+	}
+	for i := 0; i+len(d) <= len(n); i++ {
+		if slices.Equal(n[i:i+len(d)], d) {
+			return true
+		}
+	}
+	return false
+}
+
 // Validate reports headers a recipe of this type may not declare. It is called
 // once the recipe is fetched and about to be built, not while indexing: one bad
 // recipe must not take a whole collection out of a listing.
@@ -182,62 +205,4 @@ func (r *Recipe) Validate() error {
 	}
 
 	return errors.Join(errs...)
-}
-
-// Lint reports declarations that are legal but probably not what the author
-// meant. A lint blocks nothing and changes no key; it is returned rather than
-// printed, because this package never writes to a terminal.
-//
-// The one rule so far is the near-miss on the naming convention that decides
-// which tools define a dataset. An app or OS dependency shapes what a dataset may
-// substitute for only when its name/version appears as a clean run of components
-// in the dataset's own name — so a #TARGET: rendering .../star{star_version}/...
-// produces the single component star2.7.11b, and a version the author clearly
-// meant to be load-bearing quietly stops counting. The fix is to the #TARGET:,
-// which is why this names the dependency rather than guessing at a repair.
-func (r *Recipe) Lint() []string {
-	var out []string
-	for _, raw := range r.Deps {
-		dep, err := ParseDep(raw)
-		if err != nil || dep.Version == "" {
-			continue
-		}
-		nameVersion := dep.NameVersion()
-		if HasComponents(r.Name, nameVersion) {
-			continue
-		}
-		// The tool's own component, not the whole dep path: an OS dependency
-		// carries its distro, and a dataset that mentions ".../pytorch/2.9/..."
-		// without it is exactly the near-miss worth reporting.
-		tool := dep.Name
-		if i := strings.LastIndex(tool, "/"); i >= 0 {
-			tool = tool[i+1:]
-		}
-		if strings.Contains(r.Name, tool) && strings.Contains(r.Name, dep.Version) {
-			out = append(out, fmt.Sprintf("%s: dependency %s is in the name but not as whole components, so it does not count toward equivalence; fix the #TARGET: or the name",
-				r.Name, nameVersion))
-		}
-	}
-	return out
-}
-
-// HasComponents reports whether dep's slash-separated components occur as a
-// contiguous run of name's.
-//
-// Components are compared as exact strings and versions are never compared
-// semantically, since 2.7.11b and 2.7.11 name different builds. Substring
-// matching is never used: star/2.7.11b must not be found inside a component such
-// as star2.7.11b-old.
-func HasComponents(name, dep string) bool {
-	n := strings.Split(Normalize(name), "/")
-	d := strings.Split(Normalize(dep), "/")
-	if len(d) == 0 || len(d) > len(n) {
-		return false
-	}
-	for i := 0; i+len(d) <= len(n); i++ {
-		if slices.Equal(n[i:i+len(d)], d) {
-			return true
-		}
-	}
-	return false
 }

@@ -92,57 +92,6 @@ func TestHasComponents(t *testing.T) {
 	}
 }
 
-// The failure mode of the naming convention is a miss, not a mis-fire, so it
-// earns a lint rather than an error: the author meant the version to be
-// load-bearing and the #TARGET: quietly stopped it counting.
-func TestLintNearMissOnComponents(t *testing.T) {
-	tests := []struct {
-		name     string
-		path     string
-		text     string
-		wantLint bool
-	}{
-		{
-			name:     "glued version",
-			path:     "grch38/star2.7.11b/gencode49",
-			text:     "#DEP:star/2.7.11b\necho\n",
-			wantLint: true,
-		},
-		{
-			name:     "clean components",
-			path:     "grch38/star/2.7.11b/gencode49",
-			text:     "#DEP:star/2.7.11b\necho\n",
-			wantLint: false,
-		},
-		{
-			name:     "history-only dependency is not a near miss",
-			path:     "grch38/genome/gencode",
-			text:     "#DEP:samtools/1.23.1\necho\n",
-			wantLint: false,
-		},
-		{
-			name:     "an OS dependency missing its distro",
-			path:     "grch38/pytorch/2.9/embeddings",
-			text:     "#DEP:ubuntu24/pytorch/2.9\necho\n",
-			wantLint: true,
-		},
-		{
-			name:     "a dep with no version says nothing about the name",
-			path:     "grch38/star/index",
-			text:     "#DEP:star\necho\n",
-			wantLint: false,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			lints := parse(t, tt.path, tt.text).Lint()
-			if got := len(lints) > 0; got != tt.wantLint {
-				t.Errorf("lints = %v, wantLint %v", lints, tt.wantLint)
-			}
-		})
-	}
-}
-
 // Only data may depend on anything, and an edge is a name/version rather than a
 // path. Both rules live in ValidateDeps so a catalog recipe and an external
 // build cannot answer to different ones.

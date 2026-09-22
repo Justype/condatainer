@@ -1143,9 +1143,6 @@ func resolveBuildSource(ctx context.Context, base *BuildObject, tmpDir string) (
 	if err := recipe.Validate(); err != nil {
 		return false, false, err
 	}
-	for _, warning := range recipe.Lint() {
-		logging.FromContext(ctx).Warn("recipe lint", "detail", warning)
-	}
 
 	if isContainer {
 		base.asDefinitionBuild()
