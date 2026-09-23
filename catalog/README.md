@@ -53,18 +53,16 @@ hit:
    version, the same "check what's already installed first, no network
    call" rule the load side follows. Only once nothing is installed does the
    catalog decide: a flat sibling one segment below `name`, or a `#PH:` axis
-   on a template named exactly `name`. Always safe to pick newest here,
-   because an app's candidates, flat or templated, are the same tool at
+   on a template whose `#TARGET:` is `name/{axis}`. Always safe to pick newest
+   here, because an app's candidates, flat or templated, are the same tool at
    different points in time by construction, never a different tool sharing
    a name prefix.
 3. **OS pool**, only tried when `raw` has at most two slashes: the first
    segment is `distro`, the rest is `name` or `name/version`. Same
-   have-first order as the app pool; only once nothing is installed does the
-   entry at `distro/name` have to exist and declare the `#PH:` axis a
-   version query is checked against — never a scan of the distro's other
-   children. The catalog side of this is a direct, exact-key lookup, not a
-   scan, so it costs the same whether the catalog holds a dozen entries or a
-   hundred thousand.
+   have-first order as the app pool; only once nothing is installed does a
+   template whose `#TARGET:` is `distro/name/{axis}` have to declare the `#PH:`
+   axis a version query is checked against — never the distro's other
+   children.
 
 An installed overlay resolves through either pool even when the catalog has
 nothing backing it — an empty source, or a recipe that has since moved or
@@ -89,12 +87,12 @@ already names one exactly.
 candidates and picked wrong," there is no candidate step it can even reach.
 `condatainer create ubuntu24` means nothing on its own and reports not found
 rather than guessing. A misparsed multi-segment bare name recovers the same
-way any other bare name does: `"ubuntu24/rstudio-server"` fails step 1 (bare
-template) and step 2 (not app-shaped, more than one slash), then step 3 finds
-the one entry at `ubuntu24/rstudio-server` and its `#PH:` axis directly — no
-separate "is this actually a distro" check needed, because step 3 never scans
-for what a distro's children *are*, it only ever looks up the one address it
-was given.
+way any other bare name does: `"ubuntu24/rstudio-server"` fails step 1 (no such
+key) and step 2 (not app-shaped, more than one slash), then step 3 finds
+the template targeting `ubuntu24/rstudio-server/{version}` and its `#PH:` axis
+— no separate "is this actually a distro" check needed, because step 3 never
+asks what a distro's children *are*, only which template targets the one
+address it was given.
 
 `have` and `distro` are always parameters, never derived from ambient state.
 That is what lets `SolveName` mean the same thing regardless of which package

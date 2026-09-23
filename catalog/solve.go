@@ -73,7 +73,9 @@ func (c Catalog) solveGiven(ctx context.Context, have Have, name string) (Resolv
 // lookupExact resolves name as a complete module: an exact index key, or a
 // template whose placeholder is already filled. A bare template hit — the
 // key exists, but nothing supplied its axis — does not count: that names a
-// family, not a module, and is left for solveApp/solveOS to auto-fill.
+// family, not a module, and is left for solveApp/solveOS to auto-fill. So a
+// name that is also a template's key resolves to its latest version, never
+// to the template.
 func (c Catalog) lookupExact(ctx context.Context, name string) (Resolved, bool, error) {
 	m, found, err := c.Lookup(ctx, name)
 	if err != nil {
@@ -90,7 +92,7 @@ func (c Catalog) lookupExact(ctx context.Context, name string) (Resolved, bool, 
 
 // solveApp resolves name as an app — bare ("openjdk") or name/version
 // ("openjdk/17") — against TypeApp candidates only: a flat sibling one
-// segment below name, or a #PH: axis on a template named exactly name.
+// segment below name, or a #PH: axis on a template whose #TARGET: is name/{axis}.
 //
 // Checks have first and, if it already answers, never touches the catalog
 // at all — installed beats a catalog lookup entirely, not just beats a
@@ -144,21 +146,21 @@ func (c Catalog) solveApp(ctx context.Context, have Have, name string) (Resolved
 }
 
 // solveOS resolves name as an os artifact: distro/name (bare) or
-// distro/name/version (partial), against the one entry at distro/name and
-// its own #PH: axis.
+// distro/name/version (partial), against the #PH: axis of the template whose
+// #TARGET: is distro/name/{axis}.
 //
 // Checks have first, exactly as solveApp does and for the same reason —
 // installed beats a catalog lookup entirely, not just beats a newer
-// version. Only once nothing is installed does the entry at distro/name
-// have to exist and declare the axis a version query is checked against.
+// version. Only once nothing is installed does a template have to declare the
+// axis a version query is checked against.
 //
-// Never a scan of the distro's other children — an os entry's second
-// component names a different app, not a version of the first, so the only
-// catalog candidates ever considered are one entry's own declared version
-// list, the one place multiple candidates are actually guaranteed to be
-// versions of the same thing. A flat, versionless entry ("ubuntu24/xfce4")
-// is a lookupExact case already, not this one; a distro with no name at all
-// ("ubuntu24" alone) has no entry to look up here in the first place.
+// Never the distro's other children — an os entry's second component names a
+// different app, not a version of the first, so the only catalog candidates
+// ever considered are a template's own declared version list, the one place
+// multiple candidates are actually guaranteed to be versions of the same
+// thing. A flat, versionless entry ("ubuntu24/xfce4") is a lookupExact case
+// already, not this one; a distro with no name at all ("ubuntu24" alone)
+// has no template to match in the first place.
 func (c Catalog) solveOS(ctx context.Context, have Have, name string) (Resolved, bool, error) {
 	parts := strings.SplitN(name, "/", 3)
 	if len(parts) < 2 {
@@ -175,19 +177,12 @@ func (c Catalog) solveOS(ctx context.Context, have Have, name string) (Resolved,
 	version, fromCatalog := installed, false
 	if version == "" {
 		fromCatalog = true
-		m, found, err := c.Lookup(ctx, base)
-		if err != nil {
-			return Resolved{}, false, err
-		}
-		if !found || !m.Entry.IsTemplate {
-			return Resolved{}, false, nil
-		}
-		axis, ok := versionAxis(base, m.Entry)
-		if !ok {
-			return Resolved{}, false, nil
-		}
-		for _, v := range m.Entry.PH[axis] {
-			version = pickNewest(dep, version, v)
+		for _, e := range c.Entries(ctx) {
+			if axis, ok := versionAxis(base, e); ok {
+				for _, v := range e.PH[axis] {
+					version = pickNewest(dep, version, v)
+				}
+			}
 		}
 	}
 	if version == "" {
