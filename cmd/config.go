@@ -37,6 +37,7 @@ var configKeyDefs = map[string]bool{
 	"metadata_cache_ttl":       false,
 	"store_gc_grace":           false,
 	"scheduler.proxy_perjob":   false,
+	"scheduler.slurm.mem":      false,
 	"helper.bind_all":          false,
 	"build.system_apptainer":   false,
 	"build.ncpus":              false,
@@ -60,7 +61,7 @@ func isArrayKey(key string) bool { return configKeyDefs[key] }
 
 func isBoolKey(key string) bool {
 	switch key {
-	case "scheduler.submit_job", "scheduler.proxy_perjob", "helper.bind_all", "autoload_gpu",
+	case "scheduler.submit_job", "scheduler.proxy_perjob", "scheduler.slurm.mem", "helper.bind_all", "autoload_gpu",
 		"build.always_submit_data":
 		return true
 	}
@@ -210,7 +211,7 @@ func recipeExists(ctx context.Context, name string) bool {
 // configValueCompletion returns suggested values for a config key
 func configValueCompletion(key string) []string {
 	switch key {
-	case "scheduler.submit_job", "scheduler.proxy_perjob", "helper.bind_all":
+	case "scheduler.submit_job", "scheduler.proxy_perjob", "scheduler.slurm.mem", "helper.bind_all":
 		return []string{"true", "false"}
 	case "autoload_gpu":
 		return []string{"true", "false"}
@@ -551,6 +552,8 @@ var configShowCmd = &cobra.Command{
 		printOverridden("                 ", "scheduler.mem")
 		fmt.Printf("  %-14s %s%s\n", "time:", utils.FormatDuration(config.Global.Scheduler.Defaults.Time), srcTag("scheduler.time"))
 		printOverridden("                 ", "scheduler.time")
+		fmt.Printf("  %-14s %v%s\n", "slurm.mem:", config.Global.Scheduler.SlurmMem, srcTag("scheduler.slurm.mem"))
+		printOverridden("                 ", "scheduler.slurm.mem")
 		fmt.Printf("  %-14s %v%s\n", "proxy_perjob:", config.Global.ProxyPerJob, srcTag("scheduler.proxy_perjob"))
 		printOverridden("                 ", "scheduler.proxy_perjob")
 		fmt.Println()

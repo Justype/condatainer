@@ -179,6 +179,7 @@ a GitHub package's visibility setting, which CondaTainer never reads or changes.
 | `scheduler.mem` | `2048` | Memory for a job with no script directives (supports units: `2g`, `2048`) |
 | `scheduler.time` | `2h` | Time limit for a job with no script directives |
 | `scheduler.proxy_perjob` | `false` | Auto-start a per-job SOCKS5 proxy inside submitted jobs. See [Proxy](condatainer.md#proxy). |
+| `scheduler.slurm.mem` | `true` | Put `--mem` in generated SLURM scripts. Set `false` on a cluster that rejects it (e.g. one that always gives whole nodes). |
 
 `scheduler.ncpus`/`.mem`/`.time` apply whether or not the job actually ends up submitted to a
 scheduler — the same as `build.ncpus`/`.mem`/`.time` apply to a build regardless of `scheduler.submit_job`.
@@ -319,6 +320,7 @@ mapping is consistent for every key handled by the CLI:
 | `CNT_METADATA_CACHE_TTL`   | `metadata_cache_ttl`   |
 | `CNT_STORE_GC_GRACE`       | `store_gc_grace`       |
 | `CNT_SCHEDULER_PROXY_PERJOB` | `scheduler.proxy_perjob` |
+| `CNT_SCHEDULER_SLURM_MEM` | `scheduler.slurm.mem` |
 | `CNT_HELPER_BIND_ALL`      | `helper.bind_all`      |
 | `CNT_TMPDIR`               | (fast build root; no config key) |
 
@@ -434,6 +436,8 @@ scheduler:
   time: 2h              # time limit for a job with no script directives
   submit_job: true      # submit builds and scripts with directives as scheduler jobs
   proxy_perjob: false   # auto-start a per-job proxy inside submitted jobs
+  slurm:
+    mem: true           # put --mem in generated SLURM scripts; false where the site rejects it
 
 # Helper configuration
 helper:

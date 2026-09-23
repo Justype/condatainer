@@ -149,6 +149,7 @@ var rootCmd = &cobra.Command{
 
 		// Step 7: Apply debug mode and resource defaults from config
 		scheduler.SetDebugMode(config.Global.Debug)
+		scheduler.SetSlurmMem(config.Global.Scheduler.SlurmMem)
 		build.SetBuildDefaults(config.Global.Build.Defaults)
 		scheduler.DefaultCommandTimeout = config.Global.Scheduler.Timeout
 

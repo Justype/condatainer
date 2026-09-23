@@ -1265,54 +1265,10 @@ func TestSlurmMemPerCpuRoundTrip(t *testing.T) {
 	}
 }
 
-func TestParsePartitionLineDefaultMemPerNodeUnlimited(t *testing.T) {
-	slurm := newTestSlurmScheduler()
-
-	tests := []struct {
-		name                           string
-		line                           string
-		wantIsDefault                  bool
-		wantDefaultMemPerNodeUnlimited bool
-	}{
-		{
-			name:                           "default partition with UNLIMITED mem — Trillium-style",
-			line:                           "PartitionName=compute AllowGroups=ALL Default=YES DefMemPerNode=UNLIMITED MaxMemPerNode=UNLIMITED MaxTime=1-00:00:00 State=UP",
-			wantIsDefault:                  true,
-			wantDefaultMemPerNodeUnlimited: true,
-		},
-		{
-			name:                           "non-default partition with fixed mem",
-			line:                           "PartitionName=gpu AllowGroups=ALL Default=NO DefMemPerNode=16384 MaxMemPerNode=UNLIMITED MaxTime=2-00:00:00 State=UP",
-			wantIsDefault:                  false,
-			wantDefaultMemPerNodeUnlimited: false,
-		},
-		{
-			name:                           "partition without DefMemPerNode key — defaults to false",
-			line:                           "PartitionName=debug AllowGroups=ALL Default=NO MaxTime=01:00:00 State=UP",
-			wantIsDefault:                  false,
-			wantDefaultMemPerNodeUnlimited: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			limit := slurm.parsePartitionLine(tt.line)
-			if limit == nil {
-				t.Fatal("parsePartitionLine returned nil")
-			}
-			if limit.IsDefault != tt.wantIsDefault {
-				t.Errorf("IsDefault = %v; want %v", limit.IsDefault, tt.wantIsDefault)
-			}
-			if limit.DefaultMemPerNodeUnlimited != tt.wantDefaultMemPerNodeUnlimited {
-				t.Errorf("DefaultMemPerNodeUnlimited = %v; want %v", limit.DefaultMemPerNodeUnlimited, tt.wantDefaultMemPerNodeUnlimited)
-			}
-		})
-	}
-}
-
-func TestCreateScriptSkipsMemWhenDefaultMemPerNodeUnlimited(t *testing.T) {
+func TestCreateScriptSkipsMemWhenSlurmMemDisabled(t *testing.T) {
 	sched := newTestSlurmScheduler()
-	sched.cachedClusterInfo = &ClusterInfo{DefaultMemPerNodeUnlimited: true}
+	SetSlurmMem(false)
+	t.Cleanup(func() { SetSlurmMem(true) })
 
 	tmpDir := t.TempDir()
 	jobSpec := &JobSpec{
@@ -1337,7 +1293,7 @@ func TestCreateScriptSkipsMemWhenDefaultMemPerNodeUnlimited(t *testing.T) {
 	}
 	script := string(content)
 	if strings.Contains(script, "#SBATCH --mem=") {
-		t.Errorf("script should not contain --mem= when DefaultMemPerNodeUnlimited=true, got:\n%s", script)
+		t.Errorf("script should not contain --mem= when SetSlurmMem(false), got:\n%s", script)
 	}
 	if !strings.Contains(script, "#SBATCH --cpus-per-task=4") {
 		t.Errorf("script should still contain --cpus-per-task=4")

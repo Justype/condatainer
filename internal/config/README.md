@@ -96,7 +96,7 @@ config.Global  // Singleton instance
 - `Notification` - Notification method when a helper job starts (default: `""` = none). Values: `"bell"` (terminal bell), `"email"` (scheduler email directive), ≥5-char string (ntfy.sh topic, fires from compute node), `""` or `"none"` (silent).
 - `ProxyPerJob` - Auto-start a per-job SOCKS5 proxy inside submitted jobs when no active proxy is found (`scheduler.proxy_perjob` config key, default: `false`)
 - `Build BuildConfig` - Build settings (`Defaults scheduler.ResourceSpec`, `CompressArgs`, `BlockSize`, `DataBlockSize`, `SystemApptainer`)
-- `Scheduler SchedulerConfig` - Scheduler binary/submission settings: `Bin`, `Timeout`, `Account`, `Partition`, and `Defaults scheduler.ResourceSpec` (ncpus/mem/time baseline for a job with no script directives — used whether or not the job actually ends up submitted to a scheduler, same as `Build.Defaults`)
+- `Scheduler SchedulerConfig` - Scheduler binary/submission settings: `Bin`, `Timeout`, `Account`, `Partition`, `SlurmMem` (`scheduler.slurm.mem`, default `true`: whether generated SLURM scripts carry `--mem`), and `Defaults scheduler.ResourceSpec` (ncpus/mem/time baseline for a job with no script directives — used whether or not the job actually ends up submitted to a scheduler, same as `Build.Defaults`)
 
 ## Data Directory Search
 
@@ -159,6 +159,7 @@ All multi-value env vars use `|` as separator.
 | `CNT_CHANNELS` | `\|` or `:`  | Conda channels |
 | `CNT_HELPER_NOTIFICATION` | — | Override `helper.notification` for the current session (e.g. `bell`, `email`, ntfy.sh topic) |
 | `CNT_SCHEDULER_PROXY_PERJOB` | — | Override `scheduler.proxy_perjob` for the current invocation (`1` = enable) |
+| `CNT_SCHEDULER_SLURM_MEM` | — | Override `scheduler.slurm.mem` for the current invocation (`0` = omit `--mem`) |
 | `CNT_TMPDIR` | — | Override build temp directory |
 | `SCRATCH` | — | HPC scratch directory (`$SCRATCH/condatainer/`) |
 | `XDG_DATA_HOME` / `XDG_CONFIG_HOME` / `XDG_STATE_HOME` | — | XDG base dirs |

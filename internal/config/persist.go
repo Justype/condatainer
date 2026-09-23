@@ -144,6 +144,7 @@ func setDefaults() {
 	viper.SetDefault("metadata_cache_ttl", DefaultCacheTTLDay) // days
 	viper.SetDefault("store_gc_grace", DefaultGCGraceDay)      // days
 	viper.SetDefault("scheduler.proxy_perjob", false)
+	viper.SetDefault("scheduler.slurm.mem", true)
 	viper.SetDefault("helper.bind_all", false)
 }
 
@@ -1031,6 +1032,10 @@ func LoadFromViper() {
 
 	if grace, ok := layerInt("store_gc_grace"); ok {
 		Global.StoreGCGrace = time.Duration(grace) * 24 * time.Hour
+	}
+
+	if slurmMem, ok := layerBool("scheduler.slurm.mem"); ok {
+		Global.Scheduler.SlurmMem = slurmMem
 	}
 
 	if proxyPerJob, ok := layerBool("scheduler.proxy_perjob"); ok {

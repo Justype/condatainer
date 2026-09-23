@@ -620,9 +620,7 @@ func (s *SlurmScheduler) CreateScriptWithSpec(jobSpec *JobSpec, outputDir string
 			}
 		}
 
-		clusterInfo, _ := s.GetClusterInfo(context.Background())
-		memUnlimited := clusterInfo != nil && clusterInfo.DefaultMemPerNodeUnlimited
-		if !memUnlimited {
+		if slurmMem {
 			if rs.MemPerCpuMB > 0 {
 				fmt.Fprintf(writer, "#SBATCH --mem-per-cpu=%dmb\n", rs.MemPerCpuMB)
 			} else if rs.MemPerNodeMB > 0 {
@@ -772,14 +770,6 @@ func (s *SlurmScheduler) GetClusterInfo(ctx context.Context) (*ClusterInfo, erro
 		limits, err := s.getPartitionLimits(nodeInfo, info.AvailableGpus)
 		if err == nil {
 			info.Limits = limits
-		}
-	}
-
-	// Derive cluster-level mem request flag from the default partition.
-	for _, limit := range info.Limits {
-		if limit.IsDefault && limit.DefaultMemPerNodeUnlimited {
-			info.DefaultMemPerNodeUnlimited = true
-			break
 		}
 	}
 
@@ -968,10 +958,6 @@ func (s *SlurmScheduler) parsePartitionLine(line string) *ResourceLimits {
 			if value != "UNLIMITED" {
 				fmt.Sscanf(value, "%d", &limit.MaxNodes)
 			}
-		case "Default":
-			limit.IsDefault = (value == "YES")
-		case "DefMemPerNode":
-			limit.DefaultMemPerNodeUnlimited = (value == "UNLIMITED")
 		}
 	}
 

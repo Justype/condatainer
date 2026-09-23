@@ -47,6 +47,7 @@ type SchedulerConfig struct {
 	Account   string                 // Default billing/allocation account (empty = scheduler's own default)
 	Partition string                 // Default partition/queue (empty = scheduler's own default)
 	Defaults  scheduler.ResourceSpec // Default resource spec for jobs with no script directives
+	SlurmMem  bool                   // Emit --mem/--mem-per-cpu in generated SLURM scripts (default true)
 }
 
 // Config holds global application settings
@@ -250,8 +251,9 @@ func LoadDefaults(executablePath string) {
 		},
 
 		Scheduler: SchedulerConfig{
-			Bin:     "", // Auto-detect scheduler binary (empty = search PATH)
-			Timeout: 0,  // no timeout by default
+			Bin:      "", // Auto-detect scheduler binary (empty = search PATH)
+			Timeout:  0,  // no timeout by default
+			SlurmMem: true,
 			Defaults: scheduler.ResourceSpec{
 				CpusPerTask:  DefaultSchedulerNcpus,
 				MemPerNodeMB: DefaultSchedulerMemMB,
