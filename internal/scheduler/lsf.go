@@ -86,6 +86,9 @@ func (l *LsfScheduler) TmpDirVar() string { return "LSF_TMPDIR" }
 // GetTmpDir returns the LSF node-local tmp directory for the current job, or "".
 func (l *LsfScheduler) GetTmpDir() string { return os.Getenv(l.TmpDirVar()) }
 
+// JobExecCommand is unsupported: LSF has no command that runs a process in an existing job from outside it.
+func (l *LsfScheduler) JobExecCommand(string) ([]string, error) { return nil, ErrExecUnsupported }
+
 // IsAvailable checks if the LSF binary is present on this system.
 func (l *LsfScheduler) IsAvailable() bool {
 	return l.bsubBin != ""

@@ -189,7 +189,7 @@ scheduler — the same as `build.ncpus`/`.mem`/`.time` apply to a build regardle
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `helper.bind_all` | `false` | Bind helper services to `0.0.0.0` for direct TCP instead of an SSH tunnel |
+| `helper.connect` | `auto` | How the dashboard reaches a helper on a compute node: `auto`, `ssh`, `scheduler`, `direct`. See [Helpers](../helpers/helpers.md#the-dashboard-cannot-reach-a-helper). |
 | `helper.notification` | `web` | Alert when a helper job starts: `web`, `terminal`, `both`, `none` |
 
 ## Managing Configuration
@@ -321,7 +321,7 @@ mapping is consistent for every key handled by the CLI:
 | `CNT_STORE_GC_GRACE`       | `store_gc_grace`       |
 | `CNT_SCHEDULER_PROXY_PERJOB` | `scheduler.proxy_perjob` |
 | `CNT_SCHEDULER_SLURM_MEM` | `scheduler.slurm.mem` |
-| `CNT_HELPER_BIND_ALL`      | `helper.bind_all`      |
+| `CNT_HELPER_CONNECT`       | `helper.connect`       |
 | `CNT_TMPDIR`               | (fast build root; no config key) |
 
 Example:
@@ -441,7 +441,7 @@ scheduler:
 
 # Helper configuration
 helper:
-  bind_all: false       # bind helper services to 0.0.0.0 instead of an SSH tunnel
+  connect: auto         # auto | ssh | scheduler | direct: how the dashboard reaches a helper
   notification: web     # web | terminal | both | none (or empty): alert when a helper job starts
 
 # Default: conda-forge then bioconda

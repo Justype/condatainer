@@ -429,6 +429,12 @@ type Scheduler interface {
 	// or if the scheduler does not expose a tmp directory variable.
 	GetTmpDir() string
 
+	// JobExecCommand returns the command prefix that runs a process on the node
+	// of a running job, with its stdin and stdout attached to the caller. The
+	// caller appends the program and its arguments. Returns ErrExecUnsupported
+	// when the scheduler has no such command.
+	JobExecCommand(jobID string) ([]string, error)
+
 	// CancelJob cancels the job with the given ID. Returns nil on success or if
 	// the job is already gone. Returns an error only if the cancel command fails
 	// for a reason other than the job not existing.

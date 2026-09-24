@@ -62,7 +62,7 @@ wait $PID
 
 Three rules this illustrates:
 
-- Bind to `${CNT_HELPER_BIND_ADDR:-127.0.0.1}`, never a hardcoded address — the fallback keeps the script working when `helper.bind_all` is enabled for clusters without inter-node SSH.
+- Bind to `${CNT_HELPER_BIND_ADDR:-127.0.0.1}`, never a hardcoded address — the fallback keeps the script working when `helper.connect` is `direct`.
 - Bind to `$CNT_HELPER_PORT`, never a fixed port — several users share each compute node.
 - Keep the script in the foreground (`wait $PID`, or `sleep infinity` for services you can't `wait` on).
 
@@ -181,8 +181,8 @@ The Go runner injects these before your script runs:
 | `CNT_HELPER_STATE_DIR` | NFS directory for runtime files (readable from login node) |
 | `CNT_HELPER_SCRIPT_DIR` | Directory containing the helper script |
 | `CNT_HELPER_PORT` | Free TCP port on the compute node — bind your service here |
-| `CNT_HELPER_BIND_ADDR` | `127.0.0.1` normally; `0.0.0.0` when `helper.bind_all` is set |
-| `CNT_HELPER_BIND_ALL` | `1` when `helper.bind_all` is set; unset otherwise |
+| `CNT_HELPER_BIND_ADDR` | `127.0.0.1` normally; `0.0.0.0` when `helper.connect` is `direct` |
+| `CNT_HELPER_BIND_ALL` | `1` when `helper.connect` is `direct`; unset otherwise |
 | `CNT_HELPER_CWD` | Working directory chosen by the user |
 | `CNT_HELPER_WALLTIME_SECS` | Walltime in seconds |
 | `CNT_JOB_TMPDIR` | Node-local scratch dir (for Unix sockets, etc.); cleaned up on exit |
@@ -281,7 +281,7 @@ wait $PID
 
 **Add auth when the app supports it.** The service is reachable by anyone on the compute node, so a token is worth having — but this is app-specific.
 
-**`${CNT_HELPER_BIND_ALL:+...}`** adds `--ServerApp.allow_remote_access=True` *only* when `helper.bind_all` is on. Jupyter refuses non-local connections.
+**`${CNT_HELPER_BIND_ALL:+...}`** adds `--ServerApp.allow_remote_access=True` *only* when `helper.connect` is `direct`. Jupyter refuses non-local connections.
 
 ### The workflow it enables
 

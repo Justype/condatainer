@@ -83,6 +83,7 @@ ref-modules
 recipes
 cnt-test
 cnt-project-test
+cnt
 
 # Former submodule, kept locally while its work is migrated to the recipe collection
 cnt-scripts/

@@ -32,6 +32,9 @@ var (
 	// ErrInvalidTimeFormat indicates time format is invalid
 	ErrInvalidTimeFormat = errors.New("invalid time format")
 
+	// ErrExecUnsupported indicates the scheduler has no way to run a command inside an existing job from outside it
+	ErrExecUnsupported = errors.New("scheduler cannot run a command inside a job")
+
 	// ErrInvalidMemoryFormat indicates memory format is invalid
 	ErrInvalidMemoryFormat = errors.New("invalid memory format")
 )

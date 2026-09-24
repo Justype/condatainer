@@ -39,8 +39,15 @@ type Scheduler interface {
     GetJobStatus(jobID string) (JobStatus, error)
     GetCurrentJobID() string
     GetTmpDir() string
+    JobExecCommand(jobID string) ([]string, error) // command prefix that runs a process on a running job's node
 }
 ```
+
+`JobExecCommand` returns the prefix of a command that runs a process on the node of a running job with its
+stdin and stdout attached to the caller; the caller appends the program. SLURM returns
+`srun --jobid J --overlap --nodes=1 --ntasks=1`. PBS, LSF and HTCondor return `ErrExecUnsupported`: none has
+a command verified to work from outside the job (`blaunch` works only inside an LSF job). The dashboard uses
+it for `helper.connect=scheduler` (see `internal/runtime/proxy/README.md`, *Exec Transport*).
 
 ## Key Types
 
@@ -168,6 +175,7 @@ HTCondor does not set standard resource environment variables.
 - `ClusterError` — cluster info query failed; includes scheduler name and operation
 - `ScriptCreationError` — batch script creation failed
 - `TimeoutError` — scheduler command timed out
+- `ErrExecUnsupported` (sentinel) — the scheduler cannot run a command inside an existing job
 
 ## Schedulers
 

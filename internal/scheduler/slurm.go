@@ -32,6 +32,7 @@ type SlurmScheduler struct {
 	sbatchBin         string
 	sinfoCommand      string
 	scontrolCommand   string
+	srunCommand       string
 	directiveRe       *regexp.Regexp
 	jobIDRe           *regexp.Regexp
 	cachedClusterInfo *ClusterInfo
@@ -75,6 +76,7 @@ func newSlurmSchedulerWithBinary(sbatchBin string) (*SlurmScheduler, error) {
 		sbatchBin:       binPath,
 		sinfoCommand:    sinfoCmd,
 		scontrolCommand: scontrolCmd,
+		srunCommand:     siblingBin(binPath, "srun"),
 		directiveRe:     regexp.MustCompile(`^\s*#SBATCH\s+(.+)$`),
 		jobIDRe:         regexp.MustCompile(`Submitted batch job (\d+)`),
 	}, nil
@@ -92,6 +94,14 @@ func (s *SlurmScheduler) TmpDirVar() string { return "SLURM_TMPDIR" }
 
 // GetTmpDir returns the SLURM node-local tmp directory for the current job, or "".
 func (s *SlurmScheduler) GetTmpDir() string { return os.Getenv(s.TmpDirVar()) }
+
+// JobExecCommand returns the srun prefix that starts a step inside a running job.
+func (s *SlurmScheduler) JobExecCommand(jobID string) ([]string, error) {
+	if s.srunCommand == "" {
+		return nil, fmt.Errorf("%w: srun not found", ErrExecUnsupported)
+	}
+	return []string{s.srunCommand, "--jobid", jobID, "--overlap", "--nodes=1", "--ntasks=1"}, nil
+}
 
 // IsAvailable checks if the SLURM binary is present on this system.
 func (s *SlurmScheduler) IsAvailable() bool {

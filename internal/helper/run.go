@@ -531,7 +531,7 @@ func buildHelperCommandBody(id, name, cwd, scriptDir, stateDir string, walltime 
 	// Free port (resolved on the compute node, not the login node)
 	fmt.Fprintln(&sb, `export CNT_HELPER_PORT=$(condatainer _pick_port)`)
 
-	// Bind address: 0.0.0.0 when helper.bind_all is set (direct TCP proxy, no SSH tunnel).
+	// Bind address: 0.0.0.0 only for helper.connect=direct.
 	if bindAll {
 		fmt.Fprintln(&sb, `export CNT_HELPER_BIND_ADDR=0.0.0.0`)
 		fmt.Fprintln(&sb, `export CNT_HELPER_BIND_ALL=1`)
@@ -704,7 +704,7 @@ func generateWrapper(id, name, cwd, scriptDir, stateDir, account, partition stri
 	params map[string]string, spec *scheduler.ResourceSpec, sched scheduler.Scheduler,
 	containerCmd string) (string, error) {
 
-	body := buildHelperCommandBody(id, name, cwd, scriptDir, stateDir, walltime, params, sched, containerCmd, config.Global.HelperBindAll)
+	body := buildHelperCommandBody(id, name, cwd, scriptDir, stateDir, walltime, params, sched, containerCmd, config.Global.HelperConnect == config.ConnectDirect)
 
 	if err := utils.MkdirAllShared(stateDir); err != nil {
 		return "", fmt.Errorf("creating state dir: %w", err)
@@ -817,7 +817,7 @@ func newHelperRun(id, name, jobID, cwd string, walltime time.Duration,
 		Params:     params,
 		StartedAt:  time.Now(),
 		Status:     status,
-		BindAll:    config.Global.HelperBindAll,
+		Connect:    config.Global.HelperConnect,
 	}
 	if spec != nil {
 		run.CPUs = spec.CpusPerTask

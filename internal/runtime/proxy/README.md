@@ -40,6 +40,29 @@ connections over one authenticated SSH connection.
 | 2 | `ssh -D /path/to.sock` | system `ssh` binary in PATH |
 | 3 | `ssh -D 127.0.0.1:PORT` | fallback for OpenSSH < 6.7 (no Unix socket `-D`) |
 
+## Exec Transport (`exec_dial.go`, `exec_relay.go`)
+
+`DialViaExec` is the dashboard's way to a helper when SSH is refused and the compute node's ports are
+filtered. It runs the scheduler's exec-into-job command (`Scheduler.JobExecCommand`, SLURM's
+`srun --jobid J --overlap`) followed by this same binary's hidden `_exec_relay`, which runs `RunExecRelay`
+on the node, and returns the same `DialFunc` the SSH methods do. The relay is the dashboard's own
+executable, not an interpreter: a cluster cannot be assumed to provide Python, while the binary must be
+readable on the node for helpers to run at all, and the two ends share one protocol by construction. One
+relay carries every connection to that helper, so a step is started once, not per connection.
+
+- **Framing.** Control frames are text lines (`O id port`, `A id`, `C id`, `R`). A data frame is the line
+  `D id len`, then `len` raw bytes, then a newline. Payloads are not encoded: `srun` passes arbitrary bytes
+  unchanged in both directions. The newline after each frame is the flush marker, because `srun` holds
+  input back until a newline or EOF; without it HTTP requests passed but WebSocket frames, which carry
+  no newline, stalled the handshake.
+- **Dial semantics.** A dial returns after the node acknowledges the connect, so a closed port fails the
+  dial instead of the first request. Only loopback targets are allowed.
+- **Head-of-line limit.** Each connection buffers a bounded queue of node data; a caller that stops reading
+  without closing fills it and stalls the other connections on that relay. No flow-control frame exists.
+- **Failure.** The relay must print `R` within 30 s; otherwise the error carries the tail of the command's
+  stderr (a missing binary, an `srun:` error). When the relay exits, `done` closes and every
+  connection fails.
+
 ## Go SSH Auth Methods (`ssh_dial.go`)
 
 `buildAuthMethods` assembles all available non-interactive auth methods — never prompts:

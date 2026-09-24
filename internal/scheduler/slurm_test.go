@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -1297,5 +1298,18 @@ func TestCreateScriptSkipsMemWhenSlurmMemDisabled(t *testing.T) {
 	}
 	if !strings.Contains(script, "#SBATCH --cpus-per-task=4") {
 		t.Errorf("script should still contain --cpus-per-task=4")
+	}
+}
+
+func TestSlurmJobExecCommand(t *testing.T) {
+	s := newTestSlurmScheduler()
+	if _, err := s.JobExecCommand("7"); !errors.Is(err, ErrExecUnsupported) {
+		t.Fatalf("without srun: err = %v, want ErrExecUnsupported", err)
+	}
+	s.srunCommand = "/usr/bin/srun"
+	got, err := s.JobExecCommand("7")
+	want := "/usr/bin/srun --jobid 7 --overlap --nodes=1 --ntasks=1"
+	if err != nil || strings.Join(got, " ") != want {
+		t.Fatalf("JobExecCommand = %v, %v; want %q", got, err, want)
 	}
 }

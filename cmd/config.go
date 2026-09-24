@@ -38,7 +38,7 @@ var configKeyDefs = map[string]bool{
 	"store_gc_grace":           false,
 	"scheduler.proxy_perjob":   false,
 	"scheduler.slurm.mem":      false,
-	"helper.bind_all":          false,
+	"helper.connect":           false,
 	"build.system_apptainer":   false,
 	"build.ncpus":              false,
 	"build.mem":                false,
@@ -61,7 +61,7 @@ func isArrayKey(key string) bool { return configKeyDefs[key] }
 
 func isBoolKey(key string) bool {
 	switch key {
-	case "scheduler.submit_job", "scheduler.proxy_perjob", "scheduler.slurm.mem", "helper.bind_all", "autoload_gpu",
+	case "scheduler.submit_job", "scheduler.proxy_perjob", "scheduler.slurm.mem", "autoload_gpu",
 		"build.always_submit_data":
 		return true
 	}
@@ -211,8 +211,10 @@ func recipeExists(ctx context.Context, name string) bool {
 // configValueCompletion returns suggested values for a config key
 func configValueCompletion(key string) []string {
 	switch key {
-	case "scheduler.submit_job", "scheduler.proxy_perjob", "scheduler.slurm.mem", "helper.bind_all":
+	case "scheduler.submit_job", "scheduler.proxy_perjob", "scheduler.slurm.mem":
 		return []string{"true", "false"}
+	case "helper.connect":
+		return config.ConnectValues
 	case "autoload_gpu":
 		return []string{"true", "false"}
 	case "nested_run":
@@ -472,8 +474,8 @@ var configShowCmd = &cobra.Command{
 
 		// Helper settings (longest key: notification = 13 chars)
 		fmt.Printf("%s %s\n", utils.StyleTitle("Helper Configuration:"), "helper.*")
-		fmt.Printf("  %-14s %v%s\n", "bind_all:", config.Global.HelperBindAll, srcTag("helper.bind_all"))
-		printOverridden("                 ", "helper.bind_all")
+		fmt.Printf("  %-14s %s%s\n", "connect:", config.Global.HelperConnect, srcTag("helper.connect"))
+		printOverridden("                 ", "helper.connect")
 		notif := config.Global.Notification
 		if notif == "" {
 			notif = "none"
@@ -710,6 +712,15 @@ Time duration format (for build.time):
 			normalized, valid := config.ParseNestedRun(value)
 			if !valid {
 				utils.PrintError("Invalid value for nested_run: %q (valid values: auto, true, false)", value)
+				os.Exit(ExitCodeError)
+			}
+			value = normalized
+		}
+
+		if key == "helper.connect" {
+			normalized, valid := config.ParseConnect(value)
+			if !valid {
+				utils.PrintError("Invalid value for helper.connect: %q (valid values: auto, ssh, scheduler, direct)", value)
 				os.Exit(ExitCodeError)
 			}
 			value = normalized

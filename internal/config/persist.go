@@ -145,7 +145,7 @@ func setDefaults() {
 	viper.SetDefault("store_gc_grace", DefaultGCGraceDay)      // days
 	viper.SetDefault("scheduler.proxy_perjob", false)
 	viper.SetDefault("scheduler.slurm.mem", true)
-	viper.SetDefault("helper.bind_all", false)
+	viper.SetDefault("helper.connect", DefaultHelperConnect)
 }
 
 // GetUserConfigPath returns the path to the user config file
@@ -1042,8 +1042,13 @@ func LoadFromViper() {
 		Global.ProxyPerJob = proxyPerJob
 	}
 
-	if helperBindAll, ok := layerBool("helper.bind_all"); ok {
-		Global.HelperBindAll = helperBindAll
+	if v, ok := layerStringSet("helper.connect"); ok {
+		if normalized, valid := ParseConnect(v); valid {
+			Global.HelperConnect = normalized
+		} else {
+			fmt.Fprintf(os.Stderr, "[WARN] Unknown helper.connect value %q. Valid values: auto, ssh, scheduler, direct. Using auto.\n", v)
+			Global.HelperConnect = DefaultHelperConnect
+		}
 	}
 
 }

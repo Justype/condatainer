@@ -33,7 +33,7 @@ type HelperRun struct {
 	Params      map[string]string `json:"params,omitempty"`      // resolved #PARAM: values
 	URLPath     string            `json:"url_path"`              // appended to proxy URL (e.g. "?token=abc123")
 	ExternalURL string            `json:"external_url"`          // shown as-is, no proxy (e.g. vscode-tunnel URL)
-	BindAll     bool              `json:"bind_all,omitempty"`    // true = direct TCP proxy (no SSH tunnel)
+	Connect     string            `json:"connect,omitempty"`     // helper.connect at submission: "auto"|"ssh"|"scheduler"|"direct"
 	StartedAt   time.Time         `json:"started_at"`
 	EndedAt     *time.Time        `json:"ended_at,omitempty"`
 	Status      string            `json:"status"` // "running"|"done"|"failed"

@@ -15,7 +15,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Justype/condatainer/internal/config"
 	internalproxy "github.com/Justype/condatainer/internal/runtime/proxy"
+	"github.com/Justype/condatainer/internal/scheduler"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -73,7 +75,7 @@ type proxyEntry struct {
 	name string // helper script name (e.g. "code-server")
 	node string
 	port int
-	stop func() // closes the SSH tunnel; nil for a direct TCP entry
+	stop func() // closes the tunnel or exec relay; nil for a direct TCP entry
 }
 
 // proxyRegistry caches one reverse-proxy per helper ID.
@@ -108,14 +110,12 @@ func isLocalHost(node string) bool {
 	return false
 }
 
-// Open creates (or returns existing) a reverse-proxy for the given helper using
-// a two-level fallback: direct TCP (same host or bindAll) → SSH tunnel (Go SSH, else `ssh -D`).
-// When bindAll is true the service binds to 0.0.0.0 and is reachable via direct TCP
-// from the login node — SSH tunnel is skipped entirely.
-// The SSH dial happens outside the registry lock so HTTP Get() calls are never
-// blocked by a slow or failing dial. Concurrent Open() calls for the same ID
-// are deduplicated via the pending set.
-func (r *proxyRegistry) Open(id, name, node string, port int, bindAll bool) {
+// Open creates (or returns existing) a reverse-proxy for the given helper.
+// Same-host and helper.connect=direct connect over TCP; otherwise the helper is
+// reached through an SSH tunnel and/or the scheduler's exec into job jobID, as
+// connect allows. Dialing happens outside the registry lock, and concurrent
+// Open() calls for the same ID are deduplicated via the pending set.
+func (r *proxyRegistry) Open(id, name, node string, port int, connect, jobID string) {
 	r.mu.Lock()
 	if _, ok := r.entries[id]; ok {
 		r.mu.Unlock()
@@ -128,11 +128,10 @@ func (r *proxyRegistry) Open(id, name, node string, port int, bindAll bool) {
 	r.pending[id] = struct{}{}
 	r.mu.Unlock()
 
-	// Level 1: same-host or bind_all — direct TCP, no SSH needed.
-	// bind_all: service binds to 0.0.0.0 so the login node can reach it via TCP.
-	if bindAll || isLocalHost(node) {
+	direct := connect == config.ConnectDirect
+	if direct || isLocalHost(node) {
 		addr := "127.0.0.1"
-		if bindAll && !isLocalHost(node) {
+		if direct && !isLocalHost(node) {
 			addr = node
 		}
 		target, _ := url.Parse(fmt.Sprintf("http://%s:%d", addr, port))
@@ -152,11 +151,10 @@ func (r *proxyRegistry) Open(id, name, node string, port int, bindAll bool) {
 		return
 	}
 
-	// SSH dial happens outside the lock — may take up to 25 s on unreachable nodes.
-	// Level 2: EstablishTunnel — Go SSH, else one multiplexing `ssh -D` per node.
-	r.log.Debug("server: opening tunnel", "node", node, "id", id)
+	// Dialing happens outside the lock — an SSH attempt may take up to 25 s on unreachable nodes.
+	r.log.Debug("server: opening tunnel", "node", node, "id", id, "connect", connect)
 	started := time.Now()
-	dial, stop, done, err := r.establishTunnel(node)
+	dial, stop, done, err := r.establish(node, connect, jobID)
 	took := time.Since(started).Round(time.Millisecond)
 
 	r.mu.Lock()
@@ -165,7 +163,7 @@ func (r *proxyRegistry) Open(id, name, node string, port int, bindAll bool) {
 
 	if err != nil {
 		r.log.Warn("server: cannot open tunnel", "node", node, "id", id, "took", took, "err", err)
-		r.lastErrors[id] = fmt.Sprintf("SSH to %s failed: %v", node, err)
+		r.lastErrors[id] = fmt.Sprintf("cannot reach %s: %v", node, err)
 		r.failures[id]++
 		return
 	}
@@ -190,6 +188,50 @@ func (r *proxyRegistry) Open(id, name, node string, port int, bindAll bool) {
 	delete(r.lastErrors, id)
 	delete(r.failures, id)
 	r.log.Debug("server: proxy tunnel opened", "id", id, "node", node, "port", port, "took", took)
+}
+
+// establish reaches the helper's node by the transports connect allows, in order:
+// SSH, then the scheduler's exec into the job. connect "ssh" and "scheduler" try one.
+func (r *proxyRegistry) establish(node, connect, jobID string) (internalproxy.DialFunc, func(), <-chan struct{}, error) {
+	var errs []string
+	if connect != config.ConnectScheduler {
+		dial, stop, done, err := r.establishTunnel(node)
+		if err == nil {
+			return dial, stop, done, nil
+		}
+		errs = append(errs, "ssh: "+err.Error())
+		if connect == config.ConnectSSH {
+			return nil, nil, nil, errors.New(errs[0])
+		}
+	}
+	dial, stop, done, err := r.establishExec(jobID)
+	if err == nil {
+		return dial, stop, done, nil
+	}
+	errs = append(errs, "scheduler: "+err.Error())
+	return nil, nil, nil, errors.New(strings.Join(errs, "; "))
+}
+
+// establishExec runs this binary's relay inside running job jobID through the
+// active scheduler; the binary must be readable at the same path on the node.
+func (r *proxyRegistry) establishExec(jobID string) (internalproxy.DialFunc, func(), <-chan struct{}, error) {
+	sched := scheduler.ActiveScheduler()
+	if sched == nil || jobID == "" {
+		return nil, nil, nil, scheduler.ErrExecUnsupported
+	}
+	prefix, err := sched.JobExecCommand(jobID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	dial, stop, done, err := internalproxy.DialViaExec(append(prefix, exe, "_exec_relay"))
+	if err == nil {
+		r.log.Debug("server: exec relay started", "job", jobID)
+	}
+	return dial, stop, done, err
 }
 
 // establishTunnel opens an SSH tunnel to node with a socket path of its own, so

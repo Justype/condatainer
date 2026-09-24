@@ -323,15 +323,22 @@ Config files use `KEY="VALUE"` format and can be edited directly. The next run p
 
 ## Potential Issues
 
-### Clusters Without Inter-Node SSH
+### The dashboard cannot reach a helper
 
-If your cluster does not allow SSH between nodes, enable `helper.bind_all`:
+The helper is running but its page does not open, and the dashboard reports `cannot reach <node>: ...`. Set `helper.connect` to choose how the dashboard reaches the compute node:
 
 ```bash
-condatainer config set helper.bind_all true
+condatainer config set helper.connect scheduler
 ```
 
-Helper services will then bind to all interfaces on the compute node. The compute node must be reachable from the login node for this to work.
+| Value | Behavior |
+|-------|----------|
+| `auto` (default) | Tries SSH, then the scheduler. |
+| `ssh` | SSH only. Needs key-based login from the login node to the compute node. |
+| `scheduler` | Runs a small relay inside the helper's job with the scheduler's own command, so it needs neither SSH nor an open port. SLURM only. The compute node must be able to run the same `condatainer` binary as the dashboard, at the same path. |
+| `direct` | The service binds to all interfaces on the compute node and the dashboard connects to `node:port`. The login node must be able to reach compute-node ports, and anyone who can reach that port can use the helper. |
+
+The value is read when a helper starts. `CNT_HELPER_CONNECT` overrides it for one invocation.
 
 ### Server has scheduler but not functional
 

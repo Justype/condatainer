@@ -138,6 +138,9 @@ func (p *PbsScheduler) TmpDirVar() string { return "PBS_TMPDIR" }
 // GetTmpDir returns the PBS node-local tmp directory for the current job, or "".
 func (p *PbsScheduler) GetTmpDir() string { return os.Getenv(p.TmpDirVar()) }
 
+// JobExecCommand is unsupported: PBS has no command that runs a process in an existing job from outside it.
+func (p *PbsScheduler) JobExecCommand(string) ([]string, error) { return nil, ErrExecUnsupported }
+
 // IsAvailable checks if the PBS binary is present on this system.
 func (p *PbsScheduler) IsAvailable() bool {
 	return p.qsubBin != ""

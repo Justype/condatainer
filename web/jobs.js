@@ -240,7 +240,7 @@ function openDetail(id) {
   meta += '<span class="d-key">Started</span><span class="d-val">' + (job.started_at ? fmtDate(job.started_at) : '—') + '</span>';
   if (job.node) meta += '<span class="d-key">Node</span><span class="d-val">' + escHtml(job.node) + '</span>';
   if (job.port > 0) {
-    const bindAddr = (job.bind_all ? '0.0.0.0' : '127.0.0.1') + ':' + job.port;
+    const bindAddr = (job.connect === 'direct' ? '0.0.0.0' : '127.0.0.1') + ':' + job.port;
     meta += '<span class="d-key">Bind</span><span class="d-val">' + escHtml(bindAddr) + '</span>';
   }
   // Access

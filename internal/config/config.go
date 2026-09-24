@@ -99,9 +99,9 @@ type Config struct {
 	// top of every generated scheduler script so the compute node starts a per-job proxy.
 	ProxyPerJob bool
 
-	// HelperBindAll: if true, helper services bind to 0.0.0.0 and the server connects
-	// via direct TCP instead of SSH tunnel (for clusters where inter-node SSH is blocked).
-	HelperBindAll bool
+	// HelperConnect: how the dashboard reaches a helper service on a compute node
+	// (helper.connect). Only ConnectDirect makes the service bind to all interfaces.
+	HelperConnect string
 
 	// Build configuration
 	Build BuildConfig
@@ -220,11 +220,12 @@ func LoadDefaults(executablePath string) {
 	}
 
 	Global = Config{
-		Debug:       false,
-		SubmitJob:   true,
-		AutoloadGPU: true,
-		NestedRun:   DefaultNestedRun,
-		Version:     VERSION,
+		Debug:         false,
+		SubmitJob:     true,
+		AutoloadGPU:   true,
+		NestedRun:     DefaultNestedRun,
+		HelperConnect: DefaultHelperConnect,
+		Version:       VERSION,
 
 		ProgramDir: programDir,
 		LogsDir:    DefaultLogsDir(),
@@ -354,6 +355,31 @@ func GetWritableTmpDir() string {
 	// No writable data dir at all: fall back to the fast root rather than a
 	// relative path, which would put the workspace wherever the caller stood.
 	return utils.GetTmpDir()
+}
+
+// HelperConnect values.
+const (
+	ConnectAuto      = "auto"      // SSH, then the scheduler's own way into the job
+	ConnectSSH       = "ssh"       // SSH tunnel only
+	ConnectScheduler = "scheduler" // the scheduler's own way into the job only
+	ConnectDirect    = "direct"    // service binds all interfaces; connect to node:port
+)
+
+// DefaultHelperConnect is the helper.connect value when the key is unset.
+const DefaultHelperConnect = ConnectAuto
+
+// ConnectValues lists the accepted values of the helper.connect key.
+var ConnectValues = []string{ConnectAuto, ConnectSSH, ConnectScheduler, ConnectDirect}
+
+// ParseConnect normalizes a helper.connect value and reports whether it is valid.
+func ParseConnect(v string) (string, bool) {
+	v = strings.ToLower(strings.TrimSpace(v))
+	for _, ok := range ConnectValues {
+		if v == ok {
+			return v, true
+		}
+	}
+	return "", false
 }
 
 // NestedRun values.

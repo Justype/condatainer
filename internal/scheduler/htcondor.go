@@ -83,6 +83,9 @@ func (h *HTCondorScheduler) TmpDirVar() string { return "_CONDOR_SCRATCH_DIR" }
 // GetTmpDir returns the HTCondor node-local tmp directory for the current job, or "".
 func (h *HTCondorScheduler) GetTmpDir() string { return os.Getenv(h.TmpDirVar()) }
 
+// JobExecCommand is unsupported: HTCondor has no command that runs a process in an existing job from outside it.
+func (h *HTCondorScheduler) JobExecCommand(string) ([]string, error) { return nil, ErrExecUnsupported }
+
 // IsAvailable checks if the HTCondor binary is present on this system.
 func (h *HTCondorScheduler) IsAvailable() bool {
 	return h.condorSubmitBin != ""

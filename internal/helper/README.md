@@ -8,6 +8,8 @@ Every `HelperRun` records `Runner` — `"local"` for headless, or the scheduler 
 
 `RunOptions.Account`/`.Partition` resolve the same way on every entry point — CLI flag (`-A`/`--account`, `-p`/`--partition` on `cmd/helper.go`; the terminal `PromptSettings` table also lets either be edited interactively before launch) or the dashboard's `cfg-account`/`cfg-partition` fields, falling back to `config.Global.Scheduler.Account`/`.Partition` when left unset — applied once, in `buildHelperScriptSpecs` (`run.go`), never earlier. There is no script-header tier (no `#ACCOUNT:`/`#PARTITION:`): unlike `#NCPUS:`/`#MEM:`/`#TIME:`/`#GPU:`, which describe what the workload needs, account/partition describe the user's own cluster access, which a script has no way to know.
 
+Every `HelperRun` also records `Connect`, the `helper.connect` value at submission. The service's bind address is fixed when the job is submitted — only `direct` binds all interfaces — and the dashboard that later connects to it may be a different process or a restart, so it reads the mode from the run, not from current config.
+
 ## Files
 
 | File | Purpose |
@@ -279,8 +281,8 @@ The Go runner injects these into every job before the helper script body runs:
 | `CNT_HELPER_NAME` | Helper script name (e.g. `jupyterlab`) |
 | `CNT_HELPER_ID` | Unique run ID: `{name}-{job_id}` or `{name}-{pid}` |
 | `CNT_HELPER_PORT` | Free TCP port on the compute node (helper must bind here) |
-| `CNT_HELPER_BIND_ADDR` | `127.0.0.1` normally; `0.0.0.0` when `helper.bind_all` is set |
-| `CNT_HELPER_BIND_ALL` | Set to `1` when `helper.bind_all` is enabled; absent otherwise |
+| `CNT_HELPER_BIND_ADDR` | `127.0.0.1` normally; `0.0.0.0` when `helper.connect` is `direct` |
+| `CNT_HELPER_BIND_ALL` | Set to `1` when `helper.connect` is `direct`; absent otherwise |
 | `CNT_HELPER_CWD` | Working directory |
 | `CNT_HELPER_STATE_DIR` | NFS state directory for this run — write runtime files here |
 | `CNT_HELPER_WALLTIME_SECS` | Walltime in seconds |
@@ -289,7 +291,7 @@ The Go runner injects these into every job before the helper script body runs:
 | `CNT_JOB_TMPDIR` | Node-local scratch dir (Unix sockets, etc.); cleaned up on exit |
 | `$KEY` | One var per resolved `#PARAM:` key |
 
-When writing helper scripts, use `${CNT_HELPER_BIND_ADDR:-127.0.0.1}` as the bind address so the script works correctly in both normal and `helper.bind_all` modes.
+When writing helper scripts, use `${CNT_HELPER_BIND_ADDR:-127.0.0.1}` as the bind address so the script works correctly in both normal and `helper.connect=direct` modes.
 
 ---
 

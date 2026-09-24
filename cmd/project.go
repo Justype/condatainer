@@ -898,6 +898,17 @@ func missingBaseProblem(l *lock.Lock) string {
 	return "no root is pinned; run `condatainer project lock`"
 }
 
+// pushLabel is step's `path:` pin key when it has one, else its name — every
+// frozen environment shares the manifest name "env", so the name alone can't
+// tell two pinned copies apart, but the key each was declared under always
+// can.
+func pushLabel(step publish.Step) string {
+	if step.Destination == "" {
+		return utils.StyleName(step.Name)
+	}
+	return utils.StyleName(lock.PathPrefix + step.Destination)
+}
+
 func reportPushPlan(plan *publish.Plan, jsonOutput bool) error {
 	if jsonOutput {
 		return printJSON(plan)
@@ -909,13 +920,13 @@ func reportPushPlan(plan *publish.Plan, jsonOutput bool) error {
 	for _, step := range plan.Steps {
 		switch step.Disposition {
 		case publish.Upload:
-			utils.PrintMessage("  upload   %s  %s", utils.StyleName(step.Name), strings.Join(step.Tags, " "))
+			utils.PrintMessage("  upload   %s", pushLabel(step))
 		case publish.Present:
-			utils.PrintMessage("  present  %s  already published", utils.StyleName(step.Name))
+			utils.PrintMessage("  present  %s  already published", pushLabel(step))
 		case publish.Served:
-			utils.PrintMessage("  upstream %s  %s", utils.StyleName(step.Name), step.Remote.Repository)
+			utils.PrintMessage("  upstream %s  %s", pushLabel(step), step.Remote.Repository)
 		case publish.Refused:
-			utils.PrintWarning("  refused  %s  %s", utils.StyleName(step.Name), step.Reason)
+			utils.PrintWarning("  refused  %s  %s", pushLabel(step), step.Reason)
 		}
 		// Reported, never judged: no allowlist of channels could be maintained
 		// honestly, and interpreting a few hundred licence strings is what
@@ -942,7 +953,7 @@ func reportPush(report *publish.Report, jsonOutput bool) error {
 		return printJSON(report)
 	}
 	for _, step := range report.Published {
-		utils.PrintMessage("  %-8s %s", step.Disposition, utils.StyleName(step.Name))
+		utils.PrintMessage("  %-8s %s", step.Disposition, pushLabel(step))
 	}
 	for _, name := range report.AmbiguousNames {
 		utils.PrintWarning("  two pins are named %s, so neither takes the plain tag", utils.StyleName(name))
