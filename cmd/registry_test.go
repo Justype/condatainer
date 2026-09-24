@@ -191,36 +191,27 @@ func TestAddressPlacementName(t *testing.T) {
 	}
 }
 
-func TestRegistryPullDestinationPrecedenceAndValidation(t *testing.T) {
-	// GetWritableImagesDir walks extra-root → root → scratch → user and picks
-	// the first writable one, so pointing XDG_DATA_HOME at a temp directory
-	// only selects it when none of the earlier tiers exists. Clearing them is
-	// what makes this test say the same thing on a login node as it does here.
-	t.Setenv("CNT_EXTRA_ROOT", "")
-	t.Setenv("CNT_ROOT", "")
-	t.Setenv("SCRATCH", "")
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
-	images := filepath.Join(config.GetUserDataDir(), "images")
-
-	dest, err := registryPullDestination("renamed/2.0", "", "hello", "1.0", "hello/1.0")
-	if err != nil || dest != filepath.Join(images, "renamed--2.0.sqf") {
-		t.Fatalf("--name destination = (%q, %v)", dest, err)
+func TestRegistryPullDestination(t *testing.T) {
+	// The root dir is cached per process, so which tier is writable cannot be
+	// pinned from here; the destination is asserted against whichever one is.
+	images, err := config.GetWritableImagesDir()
+	if err != nil {
+		t.Skipf("no writable images directory: %v", err)
 	}
-	dest, err = registryPullDestination("", filepath.Join(t.TempDir(), "custom"), "hello", "1.0", "hello/1.0")
+
+	dest, err := registryPullDestination("", "hello", "1.0", "hello/1.0")
+	if err != nil || dest != filepath.Join(images, "hello--1.0.sqf") {
+		t.Fatalf("published-name destination = (%q, %v)", dest, err)
+	}
+	dest, err = registryPullDestination(filepath.Join(t.TempDir(), "custom"), "hello", "1.0", "hello/1.0")
 	if err != nil || filepath.Base(dest) != "custom.sqf" {
 		t.Fatalf("--prefix destination = (%q, %v)", dest, err)
 	}
-	if _, err := registryPullDestination("", "bad--name", "hello", "1.0", "hello/1.0"); err == nil {
-		t.Error("--prefix accepted the reserved name separator")
-	}
-	dest, err = registryPullDestination("", filepath.Join(t.TempDir(), "custom.v1"), "hello", "1.0", "hello/1.0")
+	dest, err = registryPullDestination(filepath.Join(t.TempDir(), "custom.v1"), "hello", "1.0", "hello/1.0")
 	if err != nil || filepath.Base(dest) != "custom.v1.sqf" {
 		t.Errorf("extensionless dotted prefix = (%q, %v)", dest, err)
 	}
-	if _, err := registryPullDestination("bad--name", "", "hello", "1.0", "hello/1.0"); err == nil {
-		t.Error("--name accepted the reserved name separator")
-	}
-	if _, err := registryPullDestination("", "", "hello", "sha256:"+strings.Repeat("b", 64), ""); err == nil {
+	if _, err := registryPullDestination("", "hello", "sha256:"+strings.Repeat("b", 64), ""); err == nil {
 		t.Error("versioned digest without a title guessed an install name")
 	}
 }

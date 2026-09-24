@@ -289,6 +289,9 @@ external script that declares a dep without one.
 
 The name and the file path are separate namespaces: `#TARGET:` fixes
 `/cnt/<name>` and the role classification, `-p` fixes where the `.sqf` lands.
+`create --name` beside `-p` sets the name the same way and wins over `#TARGET:`;
+with either, `-p` directly in an images directory must spell the name's own
+filename. With neither, the `-p` basename is the name and is normalized first.
 That is why a path-addressed artifact's filename carries no naming claim —
 `project.LookupAt` matches it by manifest name alone — while a flat or store scan
 still requires the filename to encode the name, because there the filename *is*

@@ -39,6 +39,7 @@ func freezeImage(t *testing.T, img string) Result {
 // The manifest cannot describe the archive it sits inside, so it is packed in a
 // second pass once the payload has been identified.
 func TestFreezeEmbedsMetadata(t *testing.T) {
+	requireSquashfs(t)
 	t.Parallel()
 	img := newImage(t, `cd upper
 mkdir cnt_env
@@ -72,6 +73,7 @@ mkdir opt`)
 // The identity is hashed from the payload and embedded, so the artifact answers
 // for itself without anyone re-deriving it.
 func TestFreezeEmbedsTheIdentity(t *testing.T) {
+	requireSquashfs(t)
 	t.Parallel()
 	img := newImage(t, "cd upper\nmkdir cnt_env")
 	writeInto(t, img, "/upper/cnt_env", "f", "payload\n")
@@ -102,6 +104,7 @@ func TestFreezeEmbedsTheIdentity(t *testing.T) {
 // yields a different file and the same identity. That is the whole reason it is
 // hashed from the tree rather than from the bytes.
 func TestFreezeIdentitySurvivesARepack(t *testing.T) {
+	requireSquashfs(t)
 	t.Parallel()
 	img := newImage(t, "cd upper\nmkdir cnt_env")
 	writeInto(t, img, "/upper/cnt_env", "f", "payload\n")
@@ -116,6 +119,7 @@ func TestFreezeIdentitySurvivesARepack(t *testing.T) {
 // The recorded convention is what the overlay used before translation, and the
 // count is what the artifact carries after it.
 func TestFreezeRecordsTheConvention(t *testing.T) {
+	requireSquashfs(t)
 	t.Parallel()
 	img := newImage(t, `cd upper
 mkdir cnt_env
@@ -139,6 +143,7 @@ mkdir bin`)
 // it did for the .img — and nothing when it does not, rather than claiming a path
 // it cannot provide.
 func TestFreezeRecordsPrefixOnlyWhenPresent(t *testing.T) {
+	requireSquashfs(t)
 	t.Parallel()
 	with := newImage(t, "cd upper\nmkdir cnt_env")
 	writeInto(t, with, "/upper/cnt_env", "f", "x\n")
@@ -181,6 +186,7 @@ func TestFreezeRefusesAnEmptyOverlay(t *testing.T) {
 // it were built for another machine, and the contribution — roots included —
 // would be dropped at mount with only a warning.
 func TestFreezeRecordsTheNativeArch(t *testing.T) {
+	requireSquashfs(t)
 	t.Parallel()
 	img := newImage(t, "cd upper\nmkdir cnt_env")
 	writeInto(t, img, "/upper/cnt_env", "f", "x\n")
@@ -202,6 +208,7 @@ func TestFreezeRecordsTheNativeArch(t *testing.T) {
 // because the mount path ignores a sidecar beside a .sqf. The variables have to
 // move inside the artifact or they are lost at the freeze.
 func TestFreezeCarriesTheSidecar(t *testing.T) {
+	requireSquashfs(t)
 	t.Parallel()
 	img := newImage(t, "cd upper\nmkdir cnt_env")
 	writeInto(t, img, "/upper/cnt_env", "f", "x\n")

@@ -166,7 +166,7 @@ another machine, and no key could be regenerated from it.
 This is the one `#DEP:` rule that does **not** apply to a script you *run*. A running script mounts
 what it names and records nothing, so `#DEP:./overlays/tool.sqf` and `#DEP:env.img` are
 perfectly valid there. Both rules above are enforced only when something is being built — including
-an external build (`condatainer create -p <path> -f <script>.sh`), which answers to them exactly as a
+an external build (`condatainer create -p <path> -f <script>.sh` or `<file>.def`), which answers to them exactly as a
 catalog recipe does.
 
 **Basic (exact version):**
@@ -353,7 +353,7 @@ Every `#PH:` name must appear as a `{name}` token in `#TARGET:`, and every token
 
 #### `#TARGET:` in an external build
 
-`#TARGET:` also works **without** `#PH:`, and there it is not a template — it simply names the artifact. This matters for an external build (`condatainer create -p <path> -f <script>.sh`), where the two are otherwise decided by different things:
+`#TARGET:` also works **without** `#PH:`, and there it is not a template — it simply names the artifact. This matters for an external build (`condatainer create -p <path> -f <script>.sh` or `<file>.def`), where the two are otherwise decided by different things:
 
 | | comes from | governs |
 |---|---|---|

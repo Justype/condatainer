@@ -845,11 +845,43 @@ func newBuildObject(ctx context.Context, nameVersion string, external bool, imag
 	return createConcreteType(ctx, base, tmpDir)
 }
 
+// Option adjusts a BuildObject made from a source the user supplied.
+type Option func(*sourceOptions)
+
+type sourceOptions struct{ name string }
+
+// WithName names the artifact, whatever the target path is called. It also
+// overrides a script's #TARGET:.
+func WithName(name string) Option {
+	return func(o *sourceOptions) { o.name = catalog.Normalize(name) }
+}
+
+func applyOptions(opts []Option) sourceOptions {
+	var o sourceOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
+	return o
+}
+
+// nameFor is the artifact name: the option's when one was given, else fallback.
+func nameFor(fallback string, opts []Option) string {
+	if o := applyOptions(opts); o.name != "" {
+		return o.name
+	}
+	return fallback
+}
+
 // NewCondaObjectWithSource creates a Conda BuildObject packing one image from a
 // custom buildSource: a YAML or spec file path, or a comma-separated package
-// list. This is the -n flag.
-func NewCondaObjectWithSource(nameVersion, buildSource, imagesDir string, update bool) (*BuildObject, error) {
+// list, into imagesDir/<nameVersion>.sqf. With WithName, nameVersion only
+// spells the file, verbatim, and the option is the artifact's name.
+func NewCondaObjectWithSource(nameVersion, buildSource, imagesDir string, update bool, opts ...Option) (*BuildObject, error) {
 	normalized := catalog.Normalize(nameVersion)
+	name, fileStem := normalized, strings.ReplaceAll(normalized, "/", "--")
+	if o := applyOptions(opts); o.name != "" {
+		name, fileStem = o.name, nameVersion
+	}
 
 	// A conda environment is an app, so it always gets fast local scratch.
 	tmpDir := tmpRootForType(catalog.TypeApp)
@@ -859,19 +891,19 @@ func NewCondaObjectWithSource(nameVersion, buildSource, imagesDir string, update
 		tmpDir = absDir
 	}
 
-	targetOverlay := filepath.Join(imagesDir, strings.ReplaceAll(normalized, "/", "--")+".sqf")
+	targetOverlay := filepath.Join(imagesDir, fileStem+".sqf")
 	if abs, err := filepath.Abs(targetOverlay); err == nil {
 		targetOverlay = abs
 	}
 
-	ws := workspaceFor(normalized, tmpDir, false)
+	ws := workspaceFor(name, tmpDir, false)
 
 	slog.Default().Debug("creating conda build object",
 		"nameVersion", nameVersion, "buildSource", buildSource,
 		"targetOverlay", targetOverlay, "cntDir", ws.CntDir)
 
 	base := &BuildObject{
-		spec:        Spec{Image: ImageSpec{Name: normalized, Type: catalog.TypeApp}},
+		spec:        Spec{Image: ImageSpec{Name: name, Type: catalog.TypeApp}},
 		ws:          ws,
 		tgt:         targetFor(targetOverlay),
 		buildSource: buildSource,
@@ -929,13 +961,13 @@ func (b *BuildObject) captureLocalSourceSpec(isDef bool) {
 // file — the `-f <script>.sh` / `.def` path, which is the only way an external
 // source is built. All overlays are stored in imagesDir regardless of type.
 //
-// The artifact name comes from the script's #TARGET: when it declares one, and
-// only from the `-p` basename otherwise. The two say different things: `-p` is
-// where the file goes, #TARGET: is what the payload is called, which fixes its
-// /cnt/<name> prefix and, through key.Role, which dependencies count toward its
-// equivalence. They are deliberately unrelated — a path artifact is addressed by
-// its path, so its filename carries no naming claim.
-func FromExternalSource(ctx context.Context, targetPrefix, source string, isApptainer bool, imagesDir string, update bool) (*BuildObject, error) {
+// The artifact name comes from WithName, else the script's or definition's
+// #TARGET: when it declares one, and only from the `-p` basename otherwise. The two say different
+// things: `-p` is where the file goes, the name is what the payload is called,
+// which fixes its /cnt/<name> prefix and, through key.Role, which dependencies
+// count toward its equivalence. They are deliberately unrelated — a path
+// artifact is addressed by its path, so its filename carries no naming claim.
+func FromExternalSource(ctx context.Context, targetPrefix, source string, isApptainer bool, imagesDir string, update bool, opts ...Option) (*BuildObject, error) {
 	nameVersion := filepath.Base(targetPrefix)
 	nameVersion = catalog.Normalize(nameVersion)
 
@@ -952,16 +984,21 @@ func FromExternalSource(ctx context.Context, targetPrefix, source string, isAppt
 		}
 		externalType = parsedType
 
-		if target, err = utils.GetTargetFromScript(source); err != nil {
-			return nil, fmt.Errorf("failed to parse external build target: %w", err)
-		}
 		if deps, err = utils.GetDependenciesFromScript(source); err != nil {
 			return nil, fmt.Errorf("failed to parse external build dependencies: %w", err)
+		}
+	}
+	// A definition declares its name the same way; a remote URI has no file to read.
+	if isShell || strings.HasSuffix(source, ".def") {
+		var err error
+		if target, err = utils.GetTargetFromScript(source); err != nil {
+			return nil, fmt.Errorf("failed to parse external build target: %w", err)
 		}
 	}
 	if target != "" {
 		nameVersion = target
 	}
+	nameVersion = nameFor(nameVersion, opts)
 
 	// A definition is a container root — base when it is named <>/base, os
 	// otherwise; a shell build follows the declared or derived type.

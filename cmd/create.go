@@ -120,20 +120,21 @@ Submitted build jobs exit with code 3 (useful for scripts).`,
 		if len(args) == 0 && createFile == "" && createFrom == "" {
 			ExitWithError("At least one of [packages], --file, or --from must be provided.")
 		}
-		if createPrefix != "" && createName != "" {
-			ExitWithError("Cannot use both --prefix and --name at the same time.")
-		}
-		if createPrefix != "" {
-			baseName := strings.TrimSuffix(filepath.Base(createPrefix), ".sqf")
-			if strings.Contains(baseName, "--") {
-				ExitWithError("--prefix name cannot contain '--' (reserved name/version separator)")
-			}
-		}
 		if createFrom != "" && createName == "" && createPrefix == "" {
 			ExitWithError("When using --from, either --name or --prefix must be provided.")
 		}
 		if derived := derivePrefixFromFile(createFile, createPrefix, createName); derived != "" {
 			createPrefix = derived
+		}
+		if createPrefix != "" {
+			resolved, note, err := resolvePrefix(createPrefix, createName, createFile)
+			if err != nil {
+				ExitWithError("%v", err)
+			}
+			createPrefix = resolved
+			if note != "" {
+				utils.PrintNote("%s", note)
+			}
 		}
 		// Checked after the derivation above, which turns a bare `-f env.yml` into
 		// a prefix: it is the prefix that conflicts, however it arrived. A prefix
@@ -243,7 +244,7 @@ func init() {
 
 	// Register Flags
 	f := createCmd.Flags()
-	f.StringVarP(&createName, "name", "n", "", "Custom name for the overlay")
+	f.StringVarP(&createName, "name", "n", "", "Custom name for the overlay (with --prefix: the name recorded in it)")
 	f.StringVarP(&createPrefix, "prefix", "p", "", "Custom prefix path for the overlay")
 	f.StringVarP(&createFile, "file", "f", "", "Path to definition file (.yaml, .txt, .sh, .def, .sif, or a sandbox dir)")
 	f.StringVar(&createFrom, "from", "", "Build from an external image URI (e.g., docker://ubuntu:22.04)")
@@ -660,6 +661,79 @@ func derivePrefixFromFile(file, prefix, name string) string {
 	return file[:len(file)-len(filepath.Ext(file))]
 }
 
+// scriptTarget is the name a shell script or definition declares with #TARGET:,
+// or "".
+func scriptTarget(file string) string {
+	if !isExternalBuildFile(file) {
+		return ""
+	}
+	target, _ := utils.GetTargetFromScript(file)
+	return target
+}
+
+// resolvePrefix settles --prefix against what names the artifact: --name, else
+// the script's or definition's #TARGET:, else the basename itself. The first two leave the
+// prefix a plain path, except directly in an images directory, where the
+// filename is the address and has to be the name's. The basename is spelled as
+// the name it reads as (my--env, my=1 and my@1 are name/version spellings), and
+// note says so when that differs from what was typed.
+func resolvePrefix(prefix, name, file string) (resolved, note string, err error) {
+	if name == "" {
+		name = scriptTarget(file)
+	}
+	if name != "" {
+		return prefix, "", checkImageDirPrefix(prefix, catalog.Normalize(name))
+	}
+	base := filepath.Base(prefix)
+	named := catalog.Normalize(base)
+	if named == base {
+		return prefix, "", nil
+	}
+	spelled := image.EncodeArtifactName(named)
+	note = fmt.Sprintf("--prefix '%s' names the overlay '%s'", base, named)
+	if spelled != base {
+		note += fmt.Sprintf("; the file is %s.sqf", spelled)
+	}
+	return filepath.Join(filepath.Dir(prefix), spelled), note, nil
+}
+
+// checkImageDirPrefix refuses a prefix directly in an images directory whose
+// filename is not the one name encodes to.
+func checkImageDirPrefix(prefix, name string) error {
+	abs, err := filepath.Abs(prefix)
+	if err != nil {
+		return nil
+	}
+	dir := filepath.Dir(abs)
+	base := strings.TrimSuffix(filepath.Base(abs), ".sqf")
+	want := image.EncodeArtifactName(name)
+	for _, d := range config.GetImageSearchPaths() {
+		if filepath.Clean(d) == dir && base != want {
+			return fmt.Errorf("--prefix %s is in an images directory, where the filename is the address: it must be %s.sqf to hold %s",
+				utils.StylePath(prefix), want, name)
+		}
+	}
+	return nil
+}
+
+// prefixBuildOptions names the artifact --name when --prefix places it. Without
+// --prefix the file is named for the artifact already.
+func prefixBuildOptions() []build.Option {
+	if createName == "" || createPrefix == "" {
+		return nil
+	}
+	return []build.Option{build.WithName(createName)}
+}
+
+// prefixJobArgs are the create arguments that rebuild a --prefix script.
+func prefixJobArgs(absPrefix, absFile string) []string {
+	args := []string{"--prefix", absPrefix, "--file", absFile}
+	if createName != "" {
+		args = append(args, "--name", createName)
+	}
+	return args
+}
+
 // normalizedTargetName returns --name in catalog form.
 //
 // Any depth is allowed. Restoring a project from a lockfile has to recreate the
@@ -689,7 +763,7 @@ func isForeignRoot(path string) bool {
 // buildForeignSource imports a .sif or sandbox directory into targetPrefix,
 // exiting on failure. outputDir holds the image and its scratch space.
 func buildForeignSource(ctx context.Context, targetPrefix, source, outputDir string) {
-	bo, err := build.FromForeignRoot(ctx, targetPrefix, source, outputDir, createUpdate)
+	bo, err := build.FromForeignRoot(ctx, targetPrefix, source, outputDir, createUpdate, prefixBuildOptions()...)
 	if err != nil {
 		ExitWithError("Failed to import %s: %v", source, err)
 	}
@@ -719,7 +793,7 @@ func applyStoreOverflow(bo *build.BuildObject) {
 // on failure. outputDir holds the image and its scratch space. jobArgs are the
 // create arguments that rebuild it, for a script that a scheduler job is to run.
 func buildExternalSource(ctx context.Context, targetPrefix, source string, isApptainer bool, outputDir string, jobArgs []string) {
-	bo, err := build.FromExternalSource(ctx, targetPrefix, source, isApptainer, outputDir, createUpdate)
+	bo, err := build.FromExternalSource(ctx, targetPrefix, source, isApptainer, outputDir, createUpdate, prefixBuildOptions()...)
 	if err != nil {
 		ExitWithError("Failed to create build object from %s: %v", source, err)
 	}
@@ -825,7 +899,7 @@ func runCreateWithPrefix(ctx context.Context) {
 	if utils.IsCondaFile(createFile) {
 		// Conda env/spec file - use NewCondaObjectWithSource
 		absFile, _ := filepath.Abs(createFile)
-		bo, err := build.NewCondaObjectWithSource(filepath.Base(absPrefix), absFile, outputDir, createUpdate)
+		bo, err := build.NewCondaObjectWithSource(filepath.Base(absPrefix), absFile, outputDir, createUpdate, prefixBuildOptions()...)
 		if err != nil {
 			ExitWithError("Failed to create build object: %v", err)
 		}
@@ -840,7 +914,7 @@ func runCreateWithPrefix(ctx context.Context) {
 		// Shell script or apptainer def file
 		absFile, _ := filepath.Abs(createFile)
 		buildExternalSource(ctx, absPrefix, absFile, strings.HasSuffix(createFile, ".def"), outputDir,
-			[]string{"--prefix", absPrefix, "--file", absFile})
+			prefixJobArgs(absPrefix, absFile))
 	} else {
 		ExitWithError("File must be .yml, .yaml, .txt, .sh, .bash, .def, .sif, or a sandbox directory")
 	}
@@ -854,7 +928,7 @@ func runCreateWithPrefixAndPackages(ctx context.Context, packages []string) {
 	baseName := filepath.Base(absPrefix)
 	buildSource := strings.Join(packages, ",")
 
-	bo, err := build.NewCondaObjectWithSource(baseName, buildSource, outputDir, createUpdate)
+	bo, err := build.NewCondaObjectWithSource(baseName, buildSource, outputDir, createUpdate, prefixBuildOptions()...)
 	if err != nil {
 		ExitWithError("Failed to create build object: %v", err)
 	}

@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Justype/condatainer/internal/toolpath"
 )
 
 // requireTools skips when the ext3 toolchain is absent, which is the case on a
@@ -18,6 +20,18 @@ func requireTools(t *testing.T) {
 		if _, err := exec.LookPath(bin); err != nil {
 			t.Skipf("%s not available", bin)
 		}
+	}
+}
+
+// requireSquashfs skips when a pack could not run: mksquashfs as the freeze
+// resolves it, and unsquashfs off PATH for the tests that read the archive back.
+func requireSquashfs(t *testing.T) {
+	t.Helper()
+	if _, err := toolpath.Resolve("mksquashfs"); err != nil {
+		t.Skipf("mksquashfs not available: %v", err)
+	}
+	if _, err := exec.LookPath("unsquashfs"); err != nil {
+		t.Skip("unsquashfs not available")
 	}
 }
 

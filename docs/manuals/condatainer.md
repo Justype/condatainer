@@ -88,7 +88,7 @@ Like text editors, IDEs, build-essential tools, etc.
 Used when creating a custom environment with a user-defined name (`create -p`, or `overlay`).
 
 * **Format:** `custom_name`
-* **Constraints:** Must **not** contain the double-dash sequence (`--`).
+* **Constraints:** `--`, `=` and `@` are version delimiters, they are not recommended in the file name.
 * **Example:** `my_analysis_env`, `project_x_utils`
 
 ### Application Overlays (Module)
@@ -518,8 +518,8 @@ Check the layer if it matters who can see the result — `(app-root)` or `(extra
 
 **Flags:**
 
-* `-n`, `--name [NAME]`: Custom name for the resulting overlay file. If used, all specified packages are bundled into one overlay.
-* `-p`, `--prefix [PATH]`: Custom prefix path for the overlay file. When `-f` is used, this can be omitted — the prefix is inferred from the file name.
+* `-n`, `--name [NAME]`: Custom name for the resulting overlay file. If used, all specified packages are bundled into one overlay. Together with `-p`, it is the name recorded in the overlay while `-p` only says where the file goes.
+* `-p`, `--prefix [PATH]`: Custom prefix path for the overlay file. When `-f` is used, this can be omitted — the prefix is inferred from the file name. Without `-n` the file name is also the overlay's name, unless the script declares `#TARGET:`, so `--`, `=` and `@` in it read as `/`. With `-n` or a `#TARGET:` it is only a path, except directly in an images directory, where it must be the name's own file name.
 * `-f`, `--file [FILE]`: Path to definition file (.yaml, .sh, .def), an already-built `.sif`, or an Apptainer sandbox directory.
 * `--from [URI]`: Build from an external image URI (e.g., `docker://ubuntu:22.04`).
 * `-c`, `--channel [CHANNEL]`: Conda channel to use, overriding config channels. Repeatable: `-c conda-forge -c bioconda`.
@@ -565,6 +565,7 @@ authentication, compatibility, and integrity failures are reported.
 * **`--prefix` + packages:** Create a conda env `.sqf` at a custom path, like `conda create -p`.
 * **`--file` only:** Create `.sqf` from external source file; prefix inferred from file name (e.g. `condatainer create -f r-collect.sh` → `r-collect.sqf`). The name is inferred only when neither `--name` nor `--prefix` is given.
 * **`--prefix` + `--file`:** Create `.sqf` from external source file at a custom path.
+* **`--name` + `--prefix`:** Create the overlay at the path and record the name in it (with packages or `--file`). The name wins over a script's `#TARGET:`.
 * **`--from`:** Create `.sqf` from an external container image URI.
 * **`--file` with a `.sif` or sandbox directory:** Import an already-built Apptainer/Singularity
   root into a real `.sqf` — no rebuild. Only a root originally built from `docker://`, `oras://`, or
@@ -1993,17 +1994,17 @@ condatainer registry pull grch38/genome:gencode49 \
 condatainer registry pull ubuntu24/base@sha256:<digest> \
   --registry ghcr.io/my-lab/condatainer
 
-# Override the managed name, or write to an exact external path
-condatainer registry pull grch38/genome:gencode49 --name grch38/genome/gencode49 \
-  --registry ghcr.io/my-lab/condatainer
+# Write to an exact external path
 condatainer registry pull grch38/genome:gencode49 --prefix /project/images/gencode49 \
   --registry ghcr.io/my-lab/condatainer
 ```
 
 `pull` requires an exact address. A bare name belongs to `create`, which owns
 version selection and may build when no published artifact exists. Pull never
-falls back to a build. Placement precedence is `--prefix`, `--name`, the exact
-address when it contains a complete name, then the published OCI title.
+falls back to a build. It installs under the name in the address when that is a
+complete name, otherwise under the published OCI title; `--prefix` writes to an
+exact path instead. An address that is a bare digest with no published title needs
+`--prefix`.
 
 `registry push` shows the artifact, its size, its layers and where it will go, then asks
 `Push? [y/N]` before uploading. `-y` answers yes, and `--force` adds a warning that

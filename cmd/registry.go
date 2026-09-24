@@ -25,7 +25,6 @@ type registryOptions struct {
 	base          string
 	audience      string
 	force         bool
-	name          string
 	prefix        string
 	username      string
 	password      string
@@ -104,7 +103,7 @@ question.`,
 exact, and the copy matching this machine's platform is the one taken.
 
 It lands in the images directory under the name it was published as, unless
---name or --prefix says otherwise.
+--prefix says otherwise.
 
 To pick a version rather than name one, use 'condatainer create'.`,
 		Example: `  condatainer registry pull star/2.7.11b --registry ghcr.io/my-lab/cnt
@@ -116,7 +115,6 @@ To pick a version rather than name one, use 'condatainer create'.`,
 		},
 	}
 	pull.Flags().StringVar(&opts.base, "registry", "", "Registry base, including owner/prefix (required)")
-	pull.Flags().StringVarP(&opts.name, "name", "n", "", "Install under this name in the managed images directory")
 	pull.Flags().StringVarP(&opts.prefix, "prefix", "p", "", "Install at this path (the image extension is optional)")
 
 	resolve := &cobra.Command{
@@ -457,9 +455,6 @@ func resolveRegistryArtifact(cmd *cobra.Command, base, spec string) (resolvedReg
 }
 
 func runRegistryPull(cmd *cobra.Command, opts *registryOptions, spec string) error {
-	if opts.name != "" && opts.prefix != "" {
-		return fmt.Errorf("cannot use both --name and --prefix")
-	}
 	base, err := requireRegistryBase(opts.base)
 	if err != nil {
 		return err
@@ -476,7 +471,7 @@ func runRegistryPull(cmd *cobra.Command, opts *registryOptions, spec string) err
 		return err
 	}
 	name, selector, _ := registry.SplitPullSpec(spec)
-	dest, err := registryPullDestination(opts.name, opts.prefix, name, selector, resolved.annotations[registry.AnnTitle])
+	dest, err := registryPullDestination(opts.prefix, name, selector, resolved.annotations[registry.AnnTitle])
 	if err != nil {
 		return err
 	}
@@ -506,33 +501,19 @@ func kindForArtifactType(artifactType string) (registry.Kind, error) {
 const pullExt = ".sqf"
 
 // registryPullDestination picks where a pull installs. --prefix names the path
-// and gains the extension when it has none; otherwise the name goes into the
-// writable images directory.
-func registryPullDestination(flagName, prefix, addressName, selector, title string) (string, error) {
+// and gains the extension when it has none; otherwise the name the artifact was
+// published under goes into the writable images directory.
+func registryPullDestination(prefix, addressName, selector, title string) (string, error) {
 	if prefix != "" {
-		base := filepath.Base(prefix)
-		knownExt := filepath.Ext(base)
-		if !utils.IsSqf(base) {
-			knownExt = ""
-		}
-		stem := strings.TrimSuffix(base, knownExt)
-		if strings.Contains(stem, "--") {
-			return "", fmt.Errorf("--prefix name cannot contain '--' (reserved name/version separator)")
-		}
-		if knownExt == "" {
+		if !utils.IsSqf(filepath.Base(prefix)) {
 			prefix += pullExt
 		}
 		return prefix, nil
 	}
 
-	name := catalog.Normalize(flagName)
+	name := addressPlacementName(addressName, selector, title)
 	if name == "" {
-		name = addressPlacementName(addressName, selector, title)
-	} else if strings.Contains(flagName, "--") {
-		return "", fmt.Errorf("--name cannot contain '--' (reserved name/version separator)")
-	}
-	if name == "" {
-		return "", fmt.Errorf("cannot choose an install name from this address; use --name or --prefix")
+		return "", fmt.Errorf("cannot choose an install name from this address; use --prefix")
 	}
 	dir, err := config.GetWritableImagesDir()
 	if err != nil {

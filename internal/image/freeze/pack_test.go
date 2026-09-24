@@ -98,6 +98,7 @@ func listArchive(t *testing.T, sqf string) []string {
 // base content — the regression being a pack from the merged view rather than
 // from the image's own upper layer.
 func TestPackStripsUpperNotTheMergedView(t *testing.T) {
+	requireSquashfs(t)
 	t.Parallel()
 	img := newImage(t, `cd upper
 mkdir cnt_env
@@ -123,6 +124,7 @@ mkdir opt`)
 // A .wh. marker becomes a char 0:0 node in the archive and the marker itself is
 // not packed — whiteout translation, end to end.
 func TestPackTranslatesWhiteouts(t *testing.T) {
+	requireSquashfs(t)
 	t.Parallel()
 	img := newImage(t, `cd upper
 mkdir usr
@@ -154,6 +156,7 @@ mkdir bin`)
 
 // The source is byte-identical afterwards, and its permissions are restored.
 func TestPackLeavesTheSourceUntouched(t *testing.T) {
+	requireSquashfs(t)
 	t.Parallel()
 	img := newImage(t, "cd upper\nmkdir cnt_env")
 	writeInto(t, img, "/upper/cnt_env", "f", "x\n")
@@ -188,6 +191,7 @@ func TestPackLeavesTheSourceUntouched(t *testing.T) {
 // pinned: clearing that bit is how an artifact is protected, and freeze must not
 // quietly unpin one.
 func TestPackKeepsAProtectedImageProtected(t *testing.T) {
+	requireSquashfs(t)
 	t.Parallel()
 	img := newImage(t, "cd upper\nmkdir cnt_env")
 	writeInto(t, img, "/upper/cnt_env", "f", "x\n")
@@ -208,6 +212,7 @@ func TestPackKeepsAProtectedImageProtected(t *testing.T) {
 // An overlay nobody has written to has nothing to freeze, and says so rather
 // than producing an empty artifact.
 func TestPackRefusesAnEmptyOverlay(t *testing.T) {
+	requireSquashfs(t)
 	t.Parallel()
 	img := newImage(t, "")
 	ctx := context.Background()

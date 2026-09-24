@@ -61,6 +61,7 @@ func freezeVia(t *testing.T, img string, useTmp bool) Result {
 // — and rdump cannot create a device node, so without ForCopy the copy route
 // drops every char 0:0 whiteout silently. This is the test that catches that.
 func TestBothRoutesProduceTheSameArchive(t *testing.T) {
+	requireSquashfs(t)
 	t.Setenv("CNT_TMPDIR", t.TempDir())
 	img := newImage(t, `cd upper
 mkdir cnt_env

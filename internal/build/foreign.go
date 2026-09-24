@@ -39,7 +39,7 @@ type foreignRoot struct {
 // left absent. See this package's README, Importing a foreign root, for why
 // this is a separate constructor from FromExternalSource rather than a third
 // case of it.
-func FromForeignRoot(ctx context.Context, targetPrefix, source, imagesDir string, update bool) (*BuildObject, error) {
+func FromForeignRoot(ctx context.Context, targetPrefix, source, imagesDir string, update bool, opts ...Option) (*BuildObject, error) {
 	sandbox := utils.IsSandboxDir(source)
 	if !sandbox && !utils.IsSif(source) {
 		return nil, fmt.Errorf("%s is neither a .sif nor an Apptainer sandbox directory", source)
@@ -60,7 +60,7 @@ func FromForeignRoot(ctx context.Context, targetPrefix, source, imagesDir string
 		}
 	}
 
-	nameVersion := catalog.Normalize(filepath.Base(targetPrefix))
+	nameVersion := nameFor(catalog.Normalize(filepath.Base(targetPrefix)), opts)
 	externalTyp := catalog.DeriveType(nameVersion, "", true, "")
 
 	targetDir := tmpRootForExternal(filepath.Dir(targetPrefix), externalTyp, true)

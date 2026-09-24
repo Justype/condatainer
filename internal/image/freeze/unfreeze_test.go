@@ -59,6 +59,7 @@ func dbgLs(t *testing.T, img, dir string) string {
 // beside it and the metadata directory gone — a writable overlay carries no
 // embedded metadata by design.
 func TestUnfreezeRoundTrip(t *testing.T) {
+	requireSquashfs(t)
 	t.Parallel()
 	img := newImage(t, `cd upper
 mkdir cnt_env
@@ -89,6 +90,7 @@ mkdir bin`)
 // cannot — unsquashfs drops every one and says so only in its summary — which is
 // why the payload is never extracted.
 func TestUnfreezeKeepsWhiteouts(t *testing.T) {
+	requireSquashfs(t)
 	t.Parallel()
 	img := newImage(t, `cd upper
 mkdir cnt_env
@@ -113,6 +115,7 @@ mkdir bin`)
 // user or the overlay mounts and then denies every write into it. squashfuse is
 // told the uid and gid, which is why no walk of the image is needed afterwards.
 func TestUnfreezeOwnsThePayload(t *testing.T) {
+	requireSquashfs(t)
 	t.Parallel()
 	img := newImage(t, "cd upper\nmkdir cnt_env")
 	writeInto(t, img, "/upper/cnt_env", "f", "x\n")
@@ -136,6 +139,7 @@ func TestUnfreezeOwnsThePayload(t *testing.T) {
 // A size the payload does not fit in is refused before mke2fs runs, because
 // mke2fs -d accepts one and only discovers the problem while writing.
 func TestUnfreezeRefusesAnUndersizedImage(t *testing.T) {
+	requireSquashfs(t)
 	t.Parallel()
 	img := newImage(t, "cd upper\nmkdir cnt_env")
 	writeInto(t, img, "/upper/cnt_env", "f", "x\n")
@@ -183,6 +187,7 @@ func repoAppArtifact(t *testing.T) string {
 // The sidecar says what this overlay came from, as a comment: the parser skips
 // those, so provenance cannot be mistaken for an environment variable.
 func TestUnfreezeWritesTheSidecar(t *testing.T) {
+	requireSquashfs(t)
 	t.Parallel()
 	img := newImage(t, "cd upper\nmkdir cnt_env")
 	writeInto(t, img, "/upper/cnt_env", "f", "x\n")

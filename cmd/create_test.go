@@ -210,3 +210,56 @@ func TestNormalizedTargetNameKeepsDepth(t *testing.T) {
 		}
 	}
 }
+
+func TestResolvePrefix(t *testing.T) {
+	images := filepath.Join(t.TempDir(), "images")
+	prev := config.GlobalDataPaths
+	config.GlobalDataPaths.ImagesDirs = []string{images}
+	t.Cleanup(func() { config.GlobalDataPaths = prev })
+	elsewhere := t.TempDir()
+	targeted := filepath.Join(elsewhere, "build.sh")
+	if err := os.WriteFile(targeted, []byte("#!/usr/bin/env bash\n#TARGET: star/2.7\necho hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	targetedDef := filepath.Join(elsewhere, "tool.def")
+	if err := os.WriteFile(targetedDef, []byte("#TARGET: ubuntu24/tool\nBootstrap: docker\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		desc        string
+		prefix, own string // own is --name
+		file        string
+		want        string // resolved prefix, "" meaning unchanged
+		note, err   bool
+	}{
+		{"plain basename", filepath.Join(elsewhere, "custom"), "", "", "", false, false},
+		{"-- is read as /", filepath.Join(elsewhere, "a--b"), "", "", "", true, false},
+		{"@ is spelled as the file it names", filepath.Join(elsewhere, "foo@1"), "", "", filepath.Join(elsewhere, "foo--1"), true, false},
+		{"= is spelled as the file it names", filepath.Join(elsewhere, "foo=1"), "", "", filepath.Join(elsewhere, "foo--1"), true, false},
+		{"a name leaves the path alone", filepath.Join(elsewhere, "foo@1"), "star/2.7", "", "", false, false},
+		{"a #TARGET: leaves the path alone", filepath.Join(elsewhere, "foo@1"), "", targeted, "", false, false},
+		{"a definition's #TARGET: leaves the path alone", filepath.Join(elsewhere, "foo@1"), "", targetedDef, "", false, false},
+		{"images dir needs the encoded name", filepath.Join(images, "other"), "star/2.7", "", "", false, true},
+		{"images dir with the encoded name", filepath.Join(images, "star--2.7"), "star/2.7", "", "", false, false},
+		{"images dir needs the #TARGET: name", filepath.Join(images, "other"), "", targeted, "", false, true},
+	} {
+		t.Run(tc.desc, func(t *testing.T) {
+			got, note, err := resolvePrefix(tc.prefix, tc.own, tc.file)
+			if (err != nil) != tc.err {
+				t.Fatalf("err = %v, want error %v", err, tc.err)
+			}
+			want := tc.want
+			if want == "" {
+				want = tc.prefix
+			}
+			if got != want {
+				t.Errorf("prefix = %q, want %q", got, want)
+			}
+			if (note != "") != tc.note {
+				t.Errorf("note = %q, want a note: %v", note, tc.note)
+			}
+		})
+	}
+}

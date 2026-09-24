@@ -439,6 +439,11 @@ func TestIsRootEligibleAcceptsAForeignSif(t *testing.T) {
 // libexec/ is bound for nested running with no conda environment mounted, and
 // only when asked.
 func TestSetupBindsLibexecOnlyForNestedRunning(t *testing.T) {
+	// A bound temp dir would cover a libexec made under t.TempDir() and the
+	// bind would be deduplicated away.
+	for _, env := range append(tmpDirEnvVars, "SLURM_TMPDIR", "PBS_TMPDIR", "LSF_TMPDIR") {
+		t.Setenv(env, "")
+	}
 	dir := filepath.Join(t.TempDir(), "libexec")
 	if err := os.MkdirAll(filepath.Join(dir, "bin"), 0o755); err != nil {
 		t.Fatal(err)

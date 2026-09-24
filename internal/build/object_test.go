@@ -247,6 +247,57 @@ func TestExternalSourceTakesItsNameFromTarget(t *testing.T) {
 	}
 }
 
+// A definition names itself with #TARGET: the way a shell script does.
+func TestExternalDefinitionTakesItsNameFromTarget(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "tool.def")
+	if err := os.WriteFile(src, []byte(
+		"#TARGET: ubuntu24/tool\nBootstrap: docker\nFrom: ubuntu:24.04\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	b, err := FromExternalSource(t.Context(), filepath.Join(dir, "idx"), src, true, dir, false)
+	if err != nil {
+		t.Fatalf("FromExternalSource: %v", err)
+	}
+	if got := b.spec.Image.Name; got != "ubuntu24/tool" {
+		t.Errorf("name = %q, want the declared #TARGET:", got)
+	}
+}
+
+// WithName decides the name and leaves the file where the path put it, over both
+// a #TARGET: and the basename.
+func TestWithNameOverridesTheNameNotTheFile(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "build.sh")
+	if err := os.WriteFile(src, []byte(
+		"#!/usr/bin/env bash\n#TARGET: declared/1.0\necho hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	b, err := FromExternalSource(t.Context(), filepath.Join(dir, "a--b"), src, false, dir, false, WithName("star=2.7"))
+	if err != nil {
+		t.Fatalf("FromExternalSource: %v", err)
+	}
+	if got := b.spec.Image.Name; got != "star/2.7" {
+		t.Errorf("external name = %q, want the WithName value normalized", got)
+	}
+	if want := filepath.Join(dir, "a--b.sqf"); b.tgt.Path != want {
+		t.Errorf("external target = %q, want %q", b.tgt.Path, want)
+	}
+
+	c, err := NewCondaObjectWithSource("plain@1", "", dir, false, WithName("star/2.7"))
+	if err != nil {
+		t.Fatalf("NewCondaObjectWithSource: %v", err)
+	}
+	if got := c.spec.Image.Name; got != "star/2.7" {
+		t.Errorf("conda name = %q, want star/2.7", got)
+	}
+	if want := filepath.Join(dir, "plain@1.sqf"); c.tgt.Path != want {
+		t.Errorf("conda target = %q, want %q", c.tgt.Path, want)
+	}
+}
+
 // Without #TARGET: the name is the -p basename, which is the historical
 // behaviour and stays.
 func TestExternalSourceFallsBackToThePrefixBasename(t *testing.T) {
