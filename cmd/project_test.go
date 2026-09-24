@@ -288,11 +288,11 @@ func TestProjectLockDropsAStaleSelection(t *testing.T) {
 	}
 	writeScript(t, root, "run.sh", "echo no declarations\n")
 
-	// No default_distro is configured, so the run still fails deriving the
-	// base pin — but that failure is reported alongside whatever Reconcile
-	// already published, not instead of it.
+	// No base image is installed, so the run still fails deriving the base
+	// pin — but that failure is reported alongside whatever Reconcile already
+	// published, not instead of it.
 	if _, err := run(t, "project", "lock"); err == nil {
-		t.Fatal("project lock succeeded with no default_distro configured")
+		t.Fatal("project lock succeeded with no base image installed")
 	}
 	loaded, err := lock.Load(root)
 	if err != nil {

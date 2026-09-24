@@ -10,7 +10,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/artifact/meta"
+	"github.com/Justype/condatainer/internal/toolpath"
 )
 
 // unfreezeInto rebuilds a writable overlay from an artifact.
@@ -160,9 +162,10 @@ func TestUnfreezeRefusesAnUndersizedImage(t *testing.T) {
 
 // Unfreeze is the inverse of freeze and takes what freeze produced.
 func TestUnfreezeRefusesANonSnapshot(t *testing.T) {
+	requireSquashfs(t)
 	t.Parallel()
 	_, err := Unfreeze(context.Background(), UnfreezeOptions{
-		Artifact: repoAppArtifact(t), Target: filepath.Join(artifactDir(t), "env.img"),
+		Artifact: appArtifact(t), Target: filepath.Join(artifactDir(t), "env.img"),
 		UID: os.Getuid(), GID: os.Getgid(), Sparse: true,
 	})
 	if !errors.Is(err, ErrNotFrozen) {
@@ -170,18 +173,34 @@ func TestUnfreezeRefusesANonSnapshot(t *testing.T) {
 	}
 }
 
-// repoAppArtifact is a recipe-built artifact the repository ships.
-func repoAppArtifact(t *testing.T) string {
+// appArtifact packs a minimal Conda-built app artifact: a manifest and nothing
+// else, which is all Unfreeze reads before it decides the artifact is not one
+// freeze produced.
+func appArtifact(t *testing.T) string {
 	t.Helper()
-	wd, err := os.Getwd()
+	src := filepath.Join(t.TempDir(), "src")
+	metaDir := filepath.Join(src, meta.DirName)
+	if err := os.MkdirAll(metaDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := meta.StageManifest(metaDir, meta.Manifest{
+		SchemaVersion: meta.SchemaVersion,
+		Name:          "samtools/1.23.1",
+		Type:          catalog.TypeApp,
+		BuildType:     meta.BuildTypeConda,
+		Platform:      meta.NativePlatform(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	mksquashfs, err := toolpath.Resolve("mksquashfs")
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := filepath.Join(wd, "..", "..", "..", "images", "samtools--1.23.1.sqf")
-	if _, err := os.Stat(p); err != nil {
-		t.Skipf("no recipe-built artifact to test against: %v", err)
+	sqf := filepath.Join(artifactDir(t), "samtools--1.23.1.sqf")
+	if out, err := exec.Command(mksquashfs, src, sqf, "-no-progress", "-all-root").CombinedOutput(); err != nil {
+		t.Fatalf("mksquashfs: %v\n%s", err, out)
 	}
-	return p
+	return sqf
 }
 
 // The sidecar says what this overlay came from, as a comment: the parser skips

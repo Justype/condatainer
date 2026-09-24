@@ -9,6 +9,7 @@ import (
 
 	"github.com/Justype/condatainer/catalog"
 	"github.com/Justype/condatainer/internal/config"
+	"github.com/Justype/condatainer/internal/testenv"
 	"github.com/Justype/condatainer/internal/utils"
 )
 
@@ -18,6 +19,7 @@ import (
 // which fall back to the real host tmp when nothing overrides them — without
 // this, every such test leaves an orphaned build_<name> dir in /tmp/cnt-$USER.
 func TestMain(m *testing.M) {
+	cleanup := testenv.Isolate()
 	dir, err := os.MkdirTemp("", "condatainer-build-test-")
 	if err != nil {
 		panic(err)
@@ -25,6 +27,7 @@ func TestMain(m *testing.M) {
 	os.Setenv("CNT_TMPDIR", dir)
 	code := m.Run()
 	os.RemoveAll(dir)
+	cleanup()
 	os.Exit(code)
 }
 
