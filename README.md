@@ -4,169 +4,34 @@
 <a href="#condatainer"><img src="docs/_static/logo_cnt.svg" height="70" alt="CondaTainer Logo"></a>
 </div>
 
-[![Read the Docs](https://readthedocs.org/projects/condatainer/badge/?version=latest)](https://condatainer.readthedocs.io/en/latest/) [![Go Reference](https://pkg.go.dev/badge/github.com/Justype/condatainer.svg)](https://pkg.go.dev/github.com/Justype/condatainer) [![GitHub Release](https://img.shields.io/github/v/release/Justype/condatainer)](https://github.com/Justype/condatainer/releases)
-
-> [!WARNING]
-> This tool will be archived and ported to [condatainer/condatainer](https://github.com/condatainer/condatainer) with new OCI registry and project feature with **no backward compatibility**.
-
-**CondaTainer** is a rootless CLI for managing *tools* / *data* / *project environments* and launching apps on HPC — designed for individuals and small teams using institutional or regional compute resources.
-
-* **Web-App Ready:** Launch *RStudio*, *VS Code*, *noVNC* and more with one command.
-* **Unified Management:** Centralize group resources and easily isolate project environments.
-* **Inode Saver:** Packing 30k+ Conda files into a single portable image.
-* **LustreFS Friendly:** Stages conda creation on node-local SSD to reduce network filesystem load.
-* **Scheduler Native:** Out-of-the-box integration with HPC scheduler, like *Slurm*.
-
-> [!NOTE]
-> *Slurm* is the primary, tested scheduler. *PBS*, *LSF*, *HTCondor* are experimental, bug reports are welcome!
+> [!IMPORTANT]
+> **This repository is archived. CondaTainer has moved to [condatainer/condatainer](https://github.com/condatainer/condatainer).**
 >
-> For `qsub`, only **PBS Pro** (OpenPBS) is supported. Torque and SGE are not supported.
+> The new version is not backward compatible. Images, `cnt-scripts` and config from this version do not carry over.
 
-## 🛠️ Installation
+**CondaTainer** is a rootless CLI that packages *tools*, *data*, and *Conda environments* into portable images that run seamlessly on HPC.
 
-```bash
-curl -fsSL https://get-condatainer.justype.net | bash
-```
+## Use the New Version
 
-You will be prompted to confirm the installation path (defaults to `$SCRATCH/condatainer/` or `$HOME/condatainer/`). The script will also update shell config and run `condatainer config init` for you.
+- [Repository](https://github.com/condatainer/condatainer)
+- [Documentation](https://docs.condatainer.org)
+- [Recipes (cnt)](https://github.com/condatainer/cnt)
+- [Releases](https://github.com/condatainer/condatainer/releases)
 
-## 🧰 Tools/Data Management
-
-```bash
-condatainer avail # List available recipes
-condatainer list  # List installed tools/data
-
-# Create and run a specific tool
-condatainer create samtools/1.16
-condatainer exec -o samtools/1.16 samtools --version
-
-# Print helpful info when running with overlays
-condatainer exec -o grch38/cellranger/2024-A bash
-# [CNT] Overlay envs:
-#   CELLRANGER_REF_DIR: cellranger reference dir
-```
-
-**CondaTainer** will set `$PATH` and other environment variables for you.
-
-## 📦 Project Environment Management
-
-**CondaTainer** supports both read-only (`.sqf`) and writable (`.img`) overlays, ensuring production stability alongside development flexibility.
-
-### Read-Only Environments (Production)
-
-Create an immutable bundle overlay directly from a Conda YAML file:
+Install it in a fresh directory:
 
 ```bash
-condatainer create -f environment.yml -p my_analysis
-condatainer exec -o my_analysis.sqf bash
+curl -fsSL https://install.condatainer.org | bash
 ```
 
-### Writable Environments (Development)
+See [Installation](https://docs.condatainer.org/get_started/installation/) and [Quick Start](https://docs.condatainer.org/get_started/quick_start/).
 
-Manage a writable environment (env) overlay for development and testing:
+## Still on This Version
 
-```bash
-condatainer overlay create -s 5G env.img   # Create a 5G overlay
-condatainer overlay resize -s 10g env.img  # Resize an overlay to 10G
-condatainer overlay chown --root env.img   # Make it compatible with --fakeroot
+This version receives no further updates or fixes. Its resources stay available:
 
-condatainer exec -w -o env.img bash  # Launch a shell in writable mode
-condatainer e                        # Quick shortcut for the above command
-```
-
-Inside a writable mode, use `mm-*` Micromamba wrappers to manage packages
-
-```bash
-mm-install r-base=4.4 r-tidyverse  # Install packages
-mm-pin r-base         # Pin a package version
-mm-pin -r r-base      # Unpin a package
-mm-remove r-tidyverse # Remove a package
-mm-update             # Update packages
-mm-export             # Export environment to YAML
-```
-
-## 🐕‍🦺 Web Apps & GUI Helpers
-
-**CondaTainer** includes built-in helpers to launch apps (like RStudio, XFCE4 VNC) directly on compute nodes.
-****
-```bash
-condatainer helper --update       # Fetch the latest helper scripts
-condatainer helper --list         # View all available apps
-
-condatainer helper vscode-tunnel  # Start a VS Code tunnel
-condatainer helper igv            # Start IGV via VNC
-```
-
-Please check out [ReadTheDocs - Helpers HPC](https://condatainer.readthedocs.io/en/latest/helpers/helpers.html) for more details and examples.
-
-## 🚀 Automation
-
-**CondaTainer** can parse scripts to resolve dependencies (`#DEP:`) and scheduler directives (`#SBATCH`, `#PBS`, or `#BSUB`).
-
-Example Script (`salmon_quant.sh`):
-
-```bash
-#!/bin/bash
-#SBATCH --time=4:00:00
-#SBATCH --cpus-per-task=8
-#SBATCH --mem=30G
-#DEP:salmon/1.10.2
-#DEP:grch38/salmon/1.10.2/gencode47
-
-salmon quant \
-  -i $SALMON_INDEX_DIR \
-  -p $NCPUS \
-  -l A -r reads.fq -o quants/
-```
-
-Install missing dependencies first:
-
-```bash
-condatainer check -a salmon_quant.sh
-```
-
-After all dependencies are installed, submit as a job:
-
-```bash
-condatainer run salmon_quant.sh
-```
-
-Useful ENVs are automatically set in the container (single task job):
-
-| Variable Name | Description | Slurm | PBS | LSF | HTCondor |
-| --- | --- | --- | --- | --- | --- |
-| `$NCPUS` | CPUs per task | `--cpus-per-task` | `ncpus` | `-n` with `span[host=1]` | `request_cpus` |
-| `$MEM`/`$MEM_GB` | Mem per task MB/GB | `--mem` | `mem` | `rusage[mem]`*cpu | `request_memory` |
-
-For MPI jobs (ntasks > 1), CondaTainer will detect `mpiexec` and wrap the command accordingly.
-
-### Job Array and Dependency
-
-All `[CNT]` messages go to stderr. Only job ID is printed to stdout, so you can capture it for downstream. 
-
-> HTCondor uses its own DAGMan for job dependencies, so `--afterok` is not supported.
-
-```bash
-TRIM=$(condatainer run --array samples.txt --array-limit 10 trim.sh)
-ALGN=$(condatainer run --array samples.txt --array-limit 10 --afterok "$TRIM" align.sh)
-QUANT=$(condatainer run --array samples.txt --array-limit 10 --afterok "$ALGN" quant.sh)
-condatainer run --afterok "$QUANT" collect_results.sh samples.txt
-```
-
-Please see [cnt-tutorials - Airway Salmon Quant](https://github.com/Justype/cnt-tutorials/tree/main/airway-salmon) for a real-world example.
-
-## 🔗 Links & Resources
-
-- [CondaTainer ReadTheDocs](https://condatainer.readthedocs.io/en/latest/)
-- [cnt-scripts Repository](https://github.com/Justype/cnt-scripts)
-- [cnt-tutorials Repository](https://github.com/Justype/cnt-tutorials)
-
-Related tools and resources:
-
-- [Compression Method Benchmarks](https://github.com/inikep/lzbench)
-- Used tools: [Apptainer](https://github.com/apptainer/apptainer), [Micromamba](https://github.com/mamba-org/micromamba-releases), [squashfs-tools](https://github.com/plougher/squashfs-tools), [e2fsprogs](https://github.com/tytso/e2fsprogs)
-- Container related: [Using Containers](https://services.rt.nyu.edu/docs/hpc/containers/containers/), [Singularity with Conda](https://services.rt.nyu.edu/docs/hpc/containers/singularity_with_conda/) and [Singularity with SquashFS](https://services.rt.nyu.edu/docs/hpc/containers/squash_file_system_and_singularity/)
-- Allocation related: [Multi-Instance GPU](https://docs.alliancecan.ca/wiki/Multi-Instance_GPU), [RAM GPU ratio](https://docs.alliancecan.ca/wiki/Allocations_and_compute_scheduling#Ratios_in_bundles)
+- [cnt-scripts](https://github.com/Justype/cnt-scripts)
+- [cnt-tutorials](https://github.com/Justype/cnt-tutorials)
 
 ## Acknowledgements
 
